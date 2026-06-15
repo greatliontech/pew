@@ -225,6 +225,24 @@ func TestReadRejectsUnitMetadata(t *testing.T) {
 	}
 }
 
+// TestParseFromContent: Parse (the entry point for git-blob baselines, §10) reads
+// in-memory benchmark-format content equivalently to Read, and surfaces malformed
+// or empty content rather than silently dropping it.
+func TestParseFromContent(t *testing.T) {
+	got, err := Parse(strings.NewReader(sample), "HEAD:bench.txt")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	sameResults(t, parse(t, sample), got)
+
+	if _, err := Parse(strings.NewReader("goos: linux\n"), "blob"); err == nil {
+		t.Error("Parse of result-less content: want error")
+	}
+	if _, err := Parse(strings.NewReader("BenchmarkRun notAnInt ns/op\n"), "blob"); err == nil {
+		t.Error("Parse of corrupt content: want error")
+	}
+}
+
 func TestReadNotRecorded(t *testing.T) {
 	s := New(t.TempDir())
 	if _, err := s.Read("internal/foo", "BenchmarkMissing", ""); err != ErrNotRecorded {

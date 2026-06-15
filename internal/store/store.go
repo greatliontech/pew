@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -140,29 +141,38 @@ func (s *Store) Read(pkgRel, bench, label string) ([]*benchfmt.Result, error) {
 		return nil, err
 	}
 	defer f.Close()
+	return Parse(f, path)
+}
 
-	r := benchfmt.NewReader(f, path)
+// Parse reads canonical benchmark-format content into results, cloned and owned
+// by the caller. name is purely diagnostic (used in error messages and the
+// benchfmt position). It is used both for on-disk recordings (Read) and for blob
+// content materialized from git at a ref (pew stat baselines, §6.1, §10). It
+// rejects malformed input and unexpected record kinds rather than silently
+// dropping data (INV-3), and rejects an empty recording.
+func Parse(r io.Reader, name string) ([]*benchfmt.Result, error) {
+	rd := benchfmt.NewReader(r, name)
 	var out []*benchfmt.Result
-	for r.Scan() {
-		switch rec := r.Result().(type) {
+	for rd.Scan() {
+		switch rec := rd.Result().(type) {
 		case *benchfmt.Result:
 			out = append(out, rec.Clone())
 		case *benchfmt.SyntaxError:
-			return nil, fmt.Errorf("store: corrupt recording %s: %w", path, rec)
+			return nil, fmt.Errorf("store: corrupt recording %s: %w", name, rec)
 		default:
 			// No silent drops: a record kind we don't round-trip is surfaced, not
 			// discarded. The only such kind is Unit metadata, which `go test` does
 			// not emit (even b.ReportMetric writes inline values, not Unit lines),
 			// so pew-written files never contain it and this path is unreachable
 			// for them — it stays as a guard against externally-edited files.
-			return nil, fmt.Errorf("store: unexpected record %T in %s", rec, path)
+			return nil, fmt.Errorf("store: unexpected record %T in %s", rec, name)
 		}
 	}
-	if err := r.Err(); err != nil {
-		return nil, fmt.Errorf("store: read %s: %w", path, err)
+	if err := rd.Err(); err != nil {
+		return nil, fmt.Errorf("store: read %s: %w", name, err)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("store: empty recording %s", path)
+		return nil, fmt.Errorf("store: empty recording %s", name)
 	}
 	return out, nil
 }

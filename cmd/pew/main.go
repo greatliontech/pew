@@ -27,7 +27,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(
 		newRunCmd(),
 		newStatusCmd(),
-		stub("stat", "Compare result sets and flag regressions"),
+		newStatCmd(),
 		stub("gc", "Remove stored results for benchmarks no longer in the code"),
 	)
 	return root
