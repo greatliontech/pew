@@ -121,14 +121,6 @@ func TestGatherFacts(t *testing.T) {
 	}
 }
 
-func TestGoCmdError(t *testing.T) {
-	if _, err := goCmd("this-is-not-a-go-subcommand"); err == nil {
-		t.Fatal("expected error from invalid go subcommand")
-	} else if !strings.Contains(err.Error(), "provenance: go") {
-		t.Errorf("error not wrapped with context: %v", err)
-	}
-}
-
 func TestBuildConfigStable(t *testing.T) {
 	a, err := buildConfig()
 	if err != nil {

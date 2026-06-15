@@ -17,10 +17,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/thegrumpylion/pew/internal/gotool"
 )
 
 // Hasher computes closure hashes. New resolves GOMODCACHE once for the
@@ -30,7 +31,7 @@ type Hasher struct {
 }
 
 func New() (*Hasher, error) {
-	out, err := goOutput("env", "GOMODCACHE")
+	out, err := gotool.Run("env", "GOMODCACHE")
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +165,7 @@ func hashFiles(dir string, files []string) (string, error) {
 }
 
 func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
-	out, err := goOutput("list", "-json", "-deps", "-test", pkgPath)
+	out, err := gotool.Run("list", "-json", "-deps", "-test", pkgPath)
 	if err != nil {
 		return nil, err
 	}
@@ -188,16 +189,4 @@ func parseList(r io.Reader) ([]listPkg, error) {
 		pkgs = append(pkgs, p)
 	}
 	return pkgs, nil
-}
-
-func goOutput(args ...string) ([]byte, error) {
-	out, err := exec.Command("go", args...).Output()
-	if err != nil {
-		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
-			return nil, fmt.Errorf("closure: go %s: %w: %s",
-				strings.Join(args, " "), err, strings.TrimSpace(string(ee.Stderr)))
-		}
-		return nil, fmt.Errorf("closure: go %s: %w", strings.Join(args, " "), err)
-	}
-	return out, nil
 }

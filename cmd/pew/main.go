@@ -26,7 +26,7 @@ func newRootCmd() *cobra.Command {
 	}
 	root.AddCommand(
 		stub("run", "Run benchmarks with hygiene and store results"),
-		stub("status", "Report each benchmark as valid / stale / unverifiable / unrecorded"),
+		newStatusCmd(),
 		stub("stat", "Compare result sets and flag regressions"),
 		stub("gc", "Remove stored results for benchmarks no longer in the code"),
 	)

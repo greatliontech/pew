@@ -8,14 +8,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
 
 	gogit "github.com/go-git/go-git/v5"
+	"github.com/thegrumpylion/pew/internal/gotool"
 	"golang.org/x/perf/benchfmt"
 )
 
@@ -94,7 +93,7 @@ func gitState(dir string) (commit string, dirty bool, err error) {
 // e.g. "go1.26.4 linux/amd64" (incl. any custom/experiment suffix, which affects
 // codegen and so must be part of the guard).
 func toolchain() (string, error) {
-	out, err := goCmd("version")
+	out, err := gotool.Run("version")
 	if err != nil {
 		return "", err
 	}
@@ -104,7 +103,7 @@ func toolchain() (string, error) {
 // buildConfig digests the build-determining settings (codegen feature level, cgo,
 // build flags). Run-flag-derived parts (-tags, -gcflags, PGO) integrate in chunk 5.
 func buildConfig() (string, error) {
-	out, err := goCmd("env", "-json")
+	out, err := gotool.Run("env", "-json")
 	if err != nil {
 		return "", err
 	}
@@ -126,17 +125,4 @@ func buildConfig() (string, error) {
 func digest(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])[:16]
-}
-
-// goCmd runs the go tool and, on failure, includes go's stderr in the error.
-func goCmd(args ...string) ([]byte, error) {
-	out, err := exec.Command("go", args...).Output()
-	if err != nil {
-		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
-			return nil, fmt.Errorf("provenance: go %s: %w: %s",
-				strings.Join(args, " "), err, strings.TrimSpace(string(ee.Stderr)))
-		}
-		return nil, fmt.Errorf("provenance: go %s: %w", strings.Join(args, " "), err)
-	}
-	return out, nil
 }

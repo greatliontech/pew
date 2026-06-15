@@ -166,3 +166,16 @@ func TestHashReal(t *testing.T) {
 		t.Errorf("hash not deterministic: %q vs %q", a, b)
 	}
 }
+
+func BenchmarkHashFiles(b *testing.B) {
+	dir := b.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "x.go"), []byte("package p\nvar X = 1\n"), 0o644); err != nil {
+		b.Fatal(err)
+	}
+	files := []string{"x.go"}
+	for b.Loop() {
+		if _, err := hashFiles(dir, files); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
