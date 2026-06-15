@@ -9,8 +9,10 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/thegrumpylion/pew/internal/closure"
 	"github.com/thegrumpylion/pew/internal/compare"
 	"github.com/thegrumpylion/pew/internal/gitblob"
+	"github.com/thegrumpylion/pew/internal/provenance"
 	"github.com/thegrumpylion/pew/internal/stale"
 	"github.com/thegrumpylion/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
@@ -128,6 +130,18 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 	repos := map[string]*gitblob.Repo{} // cached per module dir
 	var baseAll, newAll []*benchfmt.Result
 
+	// When the new side is the working-tree recording (auto/pinned), a recording
+	// that is stale for HEAD does not reflect current code, so its "new" numbers
+	// are misleading — warn (don't block), pointing at `pew run`. The closure
+	// hasher is only needed for that check, so it is built only then. In A/B mode
+	// both sides are historical recordings and no staleness check applies.
+	var hasher *closure.Hasher
+	if bl.newRef == "" {
+		if hasher, err = closure.New(); err != nil {
+			return err
+		}
+	}
+
 	for _, p := range pkgs {
 		if p.Module.Dir == "" {
 			continue // not in a module (e.g. a stdlib pattern) — nothing recorded
@@ -159,6 +173,24 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 			fmt.Fprintf(errw, "pew: warning: %s: %v\n", p.ImportPath, err)
 			continue
 		}
+		if len(benches) == 0 {
+			continue
+		}
+
+		// Per-package staleness context for the working-tree side, computed once
+		// (the Tier-1 closure is per package). Best-effort: a failure to compute it
+		// warns but never blocks the comparison.
+		var prov provenance.Provenance
+		var curClosure string
+		checkStale := false
+		if bl.newRef == "" {
+			if prov, curClosure, err = staleContext(hasher, p.Module.Dir, p.ImportPath); err != nil {
+				fmt.Fprintf(errw, "pew: warning: %s: cannot check working-tree staleness: %v\n", p.ImportPath, err)
+			} else {
+				checkStale = true
+			}
+		}
+
 		for _, b := range benches {
 			baseRecs, baseOK, err := readSide(st, repo, bl.baseRef, pkgRel, b, sc.label)
 			if err != nil {
@@ -185,6 +217,15 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 				fmt.Fprintf(errw, "pew: warning: baseline %s:%s is a dirty recording; skipping (spec §10)\n", bl.newRef, b)
 				continue
 			}
+			if checkStale && newOK {
+				if v, reason := stale.Check(prov, curClosure, newRecs[0].Config); v != stale.Valid {
+					msg := string(v)
+					if reason != "" {
+						msg += " (" + reason + ")"
+					}
+					fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is %s; comparison may not reflect HEAD — re-run `pew run`\n", p.ImportPath, b, msg)
+				}
+			}
 			baseAll = append(baseAll, baseRecs...)
 			newAll = append(newAll, newRecs...)
 		}
@@ -202,6 +243,22 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 		return errors.New("regression detected")
 	}
 	return nil
+}
+
+// staleContext gathers the current provenance and HEAD package closure used to
+// judge whether a working-tree recording is still valid for HEAD (§7). It mirrors
+// what `pew status` computes; a stale verdict here means the recording predates a
+// code/toolchain/machine/build change and its numbers no longer describe HEAD.
+func staleContext(h *closure.Hasher, moduleDir, importPath string) (provenance.Provenance, string, error) {
+	prov, err := provenance.Capture(moduleDir)
+	if err != nil {
+		return provenance.Provenance{}, "", err
+	}
+	cc, err := h.Hash(importPath)
+	if err != nil {
+		return provenance.Provenance{}, "", err
+	}
+	return prov, cc, nil
 }
 
 // isDirty reports whether a recording was made on a dirty working tree (§5). The
