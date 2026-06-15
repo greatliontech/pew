@@ -6,6 +6,7 @@ require (
 	github.com/go-git/go-git/v5 v5.19.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/perf v0.0.0-20260610192853-712aea8b4705
+	golang.org/x/tools v0.46.0
 )
 
 require (
@@ -29,7 +30,9 @@ require (
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
+	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )

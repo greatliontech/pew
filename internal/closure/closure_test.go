@@ -146,25 +146,66 @@ func TestParseListError(t *testing.T) {
 	}
 }
 
-// TestHashReal exercises the full pipeline against a real package (store, which
-// pulls in the benchfmt cache dep), validating determinism and cross-module
-// classification (a src: contribution for the main module, cache: for benchfmt).
-func TestHashReal(t *testing.T) {
+// TestMaximalHashReal exercises the Tier-1 maximal pipeline against a real
+// package (store, which pulls in the benchfmt cache dep), validating determinism
+// and cross-module classification (a src: contribution for the main module,
+// cache: for benchfmt). maximalHash is the A′ widening target (§7.3).
+func TestMaximalHashReal(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/thegrumpylion/pew/internal/store"
-	a, err := h.Hash(pkg)
+	a, err := h.maximalHash(pkg)
 	if err != nil {
-		t.Fatalf("Hash: %v", err)
+		t.Fatalf("maximalHash: %v", err)
 	}
 	if len(a) != 16 {
 		t.Errorf("hash len: got %d (%q)", len(a), a)
 	}
-	if b, _ := h.Hash(pkg); b != a {
+	if b, _ := h.maximalHash(pkg); b != a {
 		t.Errorf("hash not deterministic: %q vs %q", a, b)
 	}
+}
+
+// TestComputeIncludesInitRegisteredSideEffectPackage pins INV-1 for registry
+// patterns: a side-effect import's init can register an implementation that the
+// benchmark later observes through package-level state and interface dispatch.
+// Until declaration-level analysis proves that startup/global flow, Compute must
+// use the maximal closure so that package source is hashed.
+func TestComputeIncludesInitRegisteredSideEffectPackage(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const benchPkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/initregistry/bench"
+	const codecPkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/initregistry/codec"
+
+	cl, err := h.Compute(benchPkg, "BenchmarkDecode")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if len(cl.Hash) != 16 {
+		t.Fatalf("hash len: got %d (%q)", len(cl.Hash), cl.Hash)
+	}
+	maxHash, err := h.maximalHash(benchPkg)
+	if err != nil {
+		t.Fatalf("maximalHash: %v", err)
+	}
+	if cl.Hash != maxHash {
+		t.Fatalf("Compute hash %q does not use maximal closure %q", cl.Hash, maxHash)
+	}
+
+	contribs, err := h.maximalContributions(benchPkg)
+	if err != nil {
+		t.Fatalf("maximalContributions: %v", err)
+	}
+	for _, c := range contribs {
+		if strings.HasPrefix(c, "src:"+codecPkg+"=") {
+			return
+		}
+	}
+	t.Fatalf("init-registered side-effect package %s missing from closure contributions: %v", codecPkg, contribs)
 }
 
 func BenchmarkHashFiles(b *testing.B) {

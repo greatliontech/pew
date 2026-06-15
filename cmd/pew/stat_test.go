@@ -3,7 +3,10 @@ package main
 import (
 	"testing"
 
+	"github.com/thegrumpylion/pew/internal/closure"
 	"github.com/thegrumpylion/pew/internal/compare"
+	"github.com/thegrumpylion/pew/internal/provenance"
+	"github.com/thegrumpylion/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
 )
 
@@ -106,5 +109,52 @@ func TestIsDirty(t *testing.T) {
 	}
 	if isDirty(nil) {
 		t.Error("isDirty(nil)=true")
+	}
+}
+
+func TestNonValidUsesLabel(t *testing.T) {
+	h, err := closure.New()
+	if err != nil {
+		t.Fatalf("New closure hasher: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/initregistry/bench"
+	const bench = "BenchmarkDecode"
+	cl, err := h.Compute(pkg, bench)
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	p := provenance.Provenance{Commit: "c1", Toolchain: "go1.26.4", Machine: "m1", BuildConfig: "b1"}
+	st := store.New(t.TempDir())
+	write := func(label, hash string) {
+		t.Helper()
+		cfg := []benchfmt.Config{
+			{Key: "commit", Value: []byte(p.Commit), File: true},
+			{Key: "toolchain", Value: []byte(p.Toolchain), File: true},
+			{Key: "machine", Value: []byte(p.Machine), File: true},
+			{Key: "buildconfig", Value: []byte(p.BuildConfig), File: true},
+			{Key: "pew-closure", Value: []byte(hash), File: true},
+			{Key: "dirty", Value: []byte("false"), File: true},
+		}
+		recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
+		if err := st.Write("", bench, label, recs); err != nil {
+			t.Fatalf("Write(%q): %v", label, err)
+		}
+	}
+	write("", cl.Hash)
+	write("x", cl.Hash+"-stale")
+
+	need, err := nonValid(st, h, pkg, "", "x", []string{bench}, p)
+	if err != nil {
+		t.Fatalf("nonValid labeled: %v", err)
+	}
+	if len(need) != 1 || need[0] != bench {
+		t.Fatalf("labeled nonValid = %v, want [%s]", need, bench)
+	}
+	need, err = nonValid(st, h, pkg, "", "", []string{bench}, p)
+	if err != nil {
+		t.Fatalf("nonValid unlabeled: %v", err)
+	}
+	if len(need) != 0 {
+		t.Fatalf("unlabeled nonValid = %v, want none", need)
 	}
 }

@@ -111,10 +111,6 @@ func runPackage(w io.Writer, h *closure.Hasher, rc runConfig, p pkgMeta) error {
 	if err != nil {
 		return err
 	}
-	curClosure, err := h.Hash(p.ImportPath)
-	if err != nil {
-		return err
-	}
 	dir := rc.benchDir
 	if dir == "" {
 		dir = filepath.Join(p.Module.Dir, "benchmarks")
@@ -124,7 +120,7 @@ func runPackage(w io.Writer, h *closure.Hasher, rc runConfig, p pkgMeta) error {
 
 	opts := rc.opts
 	if rc.staleOnly {
-		need, err := nonValid(st, pkgRel, benches, prov, curClosure)
+		need, err := nonValid(st, h, p.ImportPath, pkgRel, rc.label, benches, prov)
 		if err != nil {
 			return err
 		}
@@ -146,11 +142,16 @@ func runPackage(w io.Writer, h *closure.Hasher, rc runConfig, p pkgMeta) error {
 	if err != nil {
 		return err
 	}
-	// Config() returns a fresh slice each call, so appending here is loop-safe.
-	extra := append(prov.Config(), run.ClosureConfig(curClosure))
 
 	written := []string{}
-	for name, recs := range run.Demux(results, extra) {
+	// Provenance is uniform per package; the closure hash is per benchmark (Tier-2,
+	// §7.1), so it is computed and appended per benchmark below.
+	for name, recs := range run.Demux(results, prov.Config()) {
+		cl, err := h.Compute(p.ImportPath, name)
+		if err != nil {
+			return err
+		}
+		recs = withConfig(recs, run.ClosureConfig(cl.Hash))
 		// Purity flags are per-benchmark (spec §7.5): apply only to the named ones.
 		if rc.pure[name] {
 			recs = withConfig(recs, run.PureConfig("true"))
@@ -176,10 +177,10 @@ func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {
 	return recs
 }
 
-func nonValid(st *store.Store, pkgRel string, benches []string, prov provenance.Provenance, curClosure string) ([]string, error) {
+func nonValid(st *store.Store, h *closure.Hasher, pkgPath, pkgRel, label string, benches []string, prov provenance.Provenance) ([]string, error) {
 	var need []string
 	for _, b := range benches {
-		v, _, err := checkOne(st, pkgRel, b, prov, curClosure)
+		v, _, err := checkOne(st, h, pkgPath, pkgRel, b, label, prov)
 		if err != nil {
 			return nil, err
 		}

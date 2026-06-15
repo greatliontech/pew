@@ -78,10 +78,6 @@ func statusPackage(w io.Writer, h *closure.Hasher, benchDir string, staleOnly bo
 	if err != nil {
 		return err
 	}
-	curClosure, err := h.Hash(p.ImportPath)
-	if err != nil {
-		return err
-	}
 	dir := benchDir
 	if dir == "" {
 		dir = filepath.Join(p.Module.Dir, "benchmarks")
@@ -89,7 +85,7 @@ func statusPackage(w io.Writer, h *closure.Hasher, benchDir string, staleOnly bo
 	st := store.New(dir)
 	pkgRel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, p.Module.Path), "/")
 	for _, b := range benches {
-		verdict, reason, err := checkOne(st, pkgRel, b, prov, curClosure)
+		verdict, reason, err := checkOne(st, h, p.ImportPath, pkgRel, b, "", prov)
 		if err != nil {
 			return err
 		}
@@ -105,15 +101,24 @@ func statusPackage(w io.Writer, h *closure.Hasher, benchDir string, staleOnly bo
 	return nil
 }
 
-func checkOne(st *store.Store, pkgRel, bench string, prov provenance.Provenance, curClosure string) (stale.Verdict, string, error) {
-	recs, err := st.Read(pkgRel, bench, "")
+// checkOne is the per-benchmark validity verdict shared by status, run --stale,
+// and stat's working-tree staleness warning. The HEAD closure is computed only
+// when a recording exists (the SSA load is the dominant cost, §7.4; an unrecorded
+// benchmark needs no analysis). The Tier-2 closure is per benchmark, so it is
+// computed here in the per-benchmark loop, not once per package.
+func checkOne(st *store.Store, h *closure.Hasher, pkgPath, pkgRel, bench, label string, prov provenance.Provenance) (stale.Verdict, string, error) {
+	recs, err := st.Read(pkgRel, bench, label)
 	switch {
 	case errors.Is(err, store.ErrNotRecorded):
 		return stale.Unrecorded, "", nil
 	case err != nil:
 		return "", "", err
 	default:
-		v, reason := stale.Check(prov, curClosure, recs[0].Config)
+		cl, err := h.Compute(pkgPath, bench)
+		if err != nil {
+			return "", "", err
+		}
+		v, reason := stale.Check(prov, cl, recs[0].Config)
 		return v, reason, nil
 	}
 }

@@ -177,17 +177,16 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 			continue
 		}
 
-		// Per-package staleness context for the working-tree side, computed once
-		// (the Tier-1 closure is per package). Best-effort: a failure to compute it
-		// warns but never blocks the comparison.
+		// Provenance for the working-tree staleness check (the closure is per
+		// benchmark, computed in the loop). Best-effort: a failure warns but never
+		// blocks the comparison.
 		var prov provenance.Provenance
-		var curClosure string
 		checkStale := false
 		if bl.newRef == "" {
-			if prov, curClosure, err = staleContext(hasher, p.Module.Dir, p.ImportPath); err != nil {
-				fmt.Fprintf(errw, "pew: warning: %s: cannot check working-tree staleness: %v\n", p.ImportPath, err)
+			if pv, e := provenance.Capture(p.Module.Dir); e != nil {
+				fmt.Fprintf(errw, "pew: warning: %s: cannot check working-tree staleness: %v\n", p.ImportPath, e)
 			} else {
-				checkStale = true
+				prov, checkStale = pv, true
 			}
 		}
 
@@ -218,7 +217,9 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 				continue
 			}
 			if checkStale && newOK {
-				if v, reason := stale.Check(prov, curClosure, newRecs[0].Config); v != stale.Valid {
+				if cl, e := hasher.Compute(p.ImportPath, b); e != nil {
+					fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", p.ImportPath, b, e)
+				} else if v, reason := stale.Check(prov, cl, newRecs[0].Config); v != stale.Valid {
 					msg := string(v)
 					if reason != "" {
 						msg += " (" + reason + ")"
@@ -243,22 +244,6 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 		return errors.New("regression detected")
 	}
 	return nil
-}
-
-// staleContext gathers the current provenance and HEAD package closure used to
-// judge whether a working-tree recording is still valid for HEAD (§7). It mirrors
-// what `pew status` computes; a stale verdict here means the recording predates a
-// code/toolchain/machine/build change and its numbers no longer describe HEAD.
-func staleContext(h *closure.Hasher, moduleDir, importPath string) (provenance.Provenance, string, error) {
-	prov, err := provenance.Capture(moduleDir)
-	if err != nil {
-		return provenance.Provenance{}, "", err
-	}
-	cc, err := h.Hash(importPath)
-	if err != nil {
-		return provenance.Provenance{}, "", err
-	}
-	return prov, cc, nil
 }
 
 // isDirty reports whether a recording was made on a dirty working tree (§5). The

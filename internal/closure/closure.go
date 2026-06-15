@@ -1,11 +1,14 @@
 // Package closure computes the pew-closure hash (spec §7): a sound fingerprint
-// of the source a benchmark's package transitively depends on.
+// of the source a benchmark exercises, used to decide whether a stored result is
+// still valid for HEAD.
 //
-// This is the Tier-1 (package-granularity) implementation — over-approximate but
-// never false-valid (§7.2). Chunk 7 swaps in Tier-2 RTA precision behind the same
-// Hash API. Classification per §7.1/§7.7: stdlib is cut (toolchain guard);
-// module-cache deps are pinned by their immutable modpath@version; mutable-local
-// packages (main module, local replace, workspace, vendor) are hashed by content.
+// Compute is the Tier-2 entry point. Until declaration-granularity shrinking can
+// prove startup/global side-effect coverage (§7.1, §7.3-A′), it returns the
+// Tier-1 maximal closure: every linked non-std package, with stdlib cut by the
+// toolchain guard. Classification per §7.7: module-cache deps are pinned by their
+// immutable modpath@version; mutable-local packages (main module, local replace,
+// workspace, vendor) are hashed by content. Soundness (INV-1): the hashed set is
+// always a superset of the source able to affect the benchmark — never false-valid.
 package closure
 
 import (
@@ -24,10 +27,23 @@ import (
 	"github.com/thegrumpylion/pew/internal/gotool"
 )
 
+// Closure is the result of analyzing one benchmark (spec §7): the hash of its
+// closure, and whether that closure reaches an unhashable external dependence
+// (Class B, §7.3) which makes validity unprovable — `unverifiable` rather than
+// `valid`/`stale`. Unverifiable is a check-time verdict; the hash is always
+// computed (and recorded at run time, §7.6) regardless.
+type Closure struct {
+	Hash         string
+	Unverifiable bool
+	Reason       string // why unverifiable (e.g. "reaches os.Open (file I/O)")
+}
+
 // Hasher computes closure hashes. New resolves GOMODCACHE once for the
-// cache-vs-mutable classification.
+// cache-vs-mutable classification; loaded whole-program SSA is cached per package
+// (the dominant cost, §7.4) so repeated per-benchmark Compute calls amortize it.
 type Hasher struct {
 	modCache string
+	progs    map[string]*program // by package import path
 }
 
 func New() (*Hasher, error) {
@@ -39,7 +55,7 @@ func New() (*Hasher, error) {
 	if mc == "" {
 		return nil, errors.New("closure: empty GOMODCACHE")
 	}
-	return &Hasher{modCache: filepath.Clean(mc)}, nil
+	return &Hasher{modCache: filepath.Clean(mc), progs: map[string]*program{}}, nil
 }
 
 type listPkg struct {
@@ -87,30 +103,41 @@ func (p listPkg) sourceFiles() []string {
 	return f
 }
 
-// Hash returns the Tier-1 closure hash for the test binary of pkgPath.
-func (h *Hasher) Hash(pkgPath string) (string, error) {
-	pkgs, err := h.list(pkgPath)
+// maximalHash returns the Tier-1 closure hash for the test binary of pkgPath:
+// every non-std reachable package hashed whole. This is the maximal sound closure
+// (§7.2) and the target every blind spot widens to (§7.3-A′). It needs no SSA, so
+// it also serves as the analysis-failure-free floor.
+func (h *Hasher) maximalHash(pkgPath string) (string, error) {
+	contribs, err := h.maximalContributions(pkgPath)
 	if err != nil {
 		return "", err
+	}
+	if len(contribs) == 0 {
+		return "", fmt.Errorf("closure: %s reaches no non-stdlib source", pkgPath)
+	}
+	sum := sha256.Sum256([]byte(strings.Join(contribs, "\n")))
+	return hex.EncodeToString(sum[:])[:16], nil
+}
+
+func (h *Hasher) maximalContributions(pkgPath string) ([]string, error) {
+	pkgs, err := h.list(pkgPath)
+	if err != nil {
+		return nil, err
 	}
 	seen := map[string]bool{}
 	var contribs []string
 	for _, p := range pkgs {
 		c, err := h.contribution(p)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		if c != "" && !seen[c] {
 			seen[c] = true
 			contribs = append(contribs, c)
 		}
 	}
-	if len(contribs) == 0 {
-		return "", fmt.Errorf("closure: %s reaches no non-stdlib source", pkgPath)
-	}
 	sort.Strings(contribs)
-	sum := sha256.Sum256([]byte(strings.Join(contribs, "\n")))
-	return hex.EncodeToString(sum[:])[:16], nil
+	return contribs, nil
 }
 
 // contribution returns this package's contribution to the closure, or "" if it

@@ -199,16 +199,24 @@ one; the rest of this section defines `closure-hash` and its soundness.
 ### 7.1 What the closure covers
 
 The closure of `B` is the set of **source declarations** whose change could alter `B`'s runtime
-behavior, reachable from `B`'s body via two relations, unioned:
+behavior. Tier 2 starts from every source execution root whose effects can reach `B`, then walks two
+relations, unioned:
 
-- **Call graph** — functions/methods `B` transitively invokes (`go/ssa` + CHA, §7.4).
+- **Roots** — `B`'s body, plus linked package `init` functions and package-level var initializers
+  whose startup side effects can affect state `B` observes. The sound default is all linked package
+  startup roots; a tighter subset is allowed only when the analysis proves the omitted startup state
+  cannot flow to `B`.
+- **Call graph** — functions/methods those roots transitively invoke (`go/ssa` + RTA/VTA, §7.4).
 - **Reference graph** — the `const`s, types, and package-level vars those functions name. A body can
   be byte-identical while a referenced `const BufSize = 4096` flips to `8192`; hashing call edges
   alone misses it, so referenced declarations are in the closure too (transitively for types/consts).
 
-Plus, for every package contributing a reachable declaration: its **`init` functions and
-package-level var initializers** (they set up state `B` reads) and any **`go:embed`-ed files**
-(benchmark input that changes behavior with no source change).
+Plus, for every package contributing a reached declaration or startup root: any **`go:embed`-ed
+files** read through that declaration/root (benchmark input that changes behavior with no source
+change). Startup side effects are part of the source closure even when `B` never names their package:
+registry patterns (`database/sql` drivers, image decoders, codecs) can allocate and register a
+concrete type in `init`, then `B` observes it later through package-level state and interface
+dispatch.
 
 **Scope cut — the standard library is excluded from the hash.** stdlib + runtime change *iff* the
 toolchain changes, which is Guard 2's job; hashing thousands of constant-per-toolchain std files is
@@ -223,9 +231,10 @@ everything else → hashed.
 - **Tier 1 (package closure):** hash the resolved file sets (`GoFiles`/`CgoFiles`/`SFiles`/
   `EmbedFiles`) of `B`'s package and all transitive **non-std** dependency packages from
   `go list -json`. Over-approximates; never false-`valid`; no SSA.
-- **Tier 2 (declaration closure):** §7.1 narrows the hash from whole-package to the reachable
-  declaration set. Only ever **shrinks** the hashed set relative to Tier 1; never makes a stale
-  result look valid.
+- **Tier 2 (declaration closure):** §7.1 narrows the hash from whole-package to the declaration set
+  reached from the sound root set, including startup/global side effects. It may **shrink** the
+  hashed set relative to Tier 1 only where shrinking is proven safe; otherwise it widens to Tier 1 and
+  never makes a stale result look valid.
 
 **Tier 1 over the whole non-std build is the maximal sound closure** — and the single fallback every
 blind spot escalates to (§7.3). Tier 2 + the resolution rules are pure precision: they shrink the
@@ -255,6 +264,7 @@ reach code we cannot enumerate, but the target is somewhere in the analyzed sour
 | `unsafe` function-pointer conversions / computed calls | escapes the type/call model |
 | asm with a computed `CALL` (no parseable symbol) | opaque control flow |
 | a non-std type converted to an interface (incl. `any`) reachable from `B` | un-analyzable code (e.g. reflection inside an opaque callee) may dispatch *any* of its methods → all its methods are added |
+| startup/global side-effect flow not proven complete | linked `init`/var-init code may mutate package-level state that `B` later reads or dispatches through without naming the registering package |
 
 These escalate to hashing the **entire non-std build closure** (Tier 1 maximal). Tighter bounds
 (widen-to-package/module) are taken *only* when provably sound; the default is maximal. Because
@@ -292,18 +302,18 @@ re-runs — folds into the CLI surface (§12).
   validated:* bodies absent → the user callback is missed (unsound); bodies present → captured. This
   whole-program load is the dominant cost, amortized by the closure cache (§7.6) and by recomputing
   only HEAD per check.
-- **Call graph: RTA rooted at `B`** (`callgraph/rta`), **not CHA.** *Spike-validated:* CHA's
-  program-wide dynamic-dispatch over-approximation exploded a trivial benchmark to **6564** reachable
-  functions and pulled in *sibling* benchmarks through a single `error`/`func()`/runtime bridge — so
-  Tier 2 over CHA collapses to ≈ Tier 1 (no precision gained). RTA rooted at the benchmark discovers
-  only the types allocated on paths reachable from `B`, recovering the exact closure (**31** reachable
-  / 5 own-module on the same benchmark) while staying sound — it still includes *both* arms of a real
-  interface dispatch. VTA is an admissible, equally-precise alternative that is whole-program (so it
-  amortizes across a package's benchmarks). **Decided: RTA rooted per-benchmark** is the default —
-  demand-driven, so it stays cheap even with stdlib bodies loaded, and closure precision directly
-  saves the expensive thing (each false-stale is a benchmark rerun). VTA is the upgrade path, taken
-  only if a real benchmark shows RTA over-including (smallest-correct-change, not speculation). Both
-  are sound supersets — soundness never depends on the choice.
+- **Call graph: RTA over the sound root set** (`callgraph/rta`), **not CHA.** *Spike-validated:*
+  CHA's program-wide dynamic-dispatch over-approximation exploded a trivial benchmark to **6564**
+  reachable functions and pulled in *sibling* benchmarks through a single `error`/`func()`/runtime
+  bridge — so Tier 2 over CHA collapses to ≈ Tier 1 (no precision gained). RTA rooted at the
+  benchmark is precise for direct benchmark-local flows, but it is **not** by itself sound for linked
+  startup side effects: a package can register a concrete implementation in `init`, and `B` can later
+  observe it through global state and interface dispatch without naming that package. Therefore RTA
+  must be rooted at `B` plus startup roots, or a proven tighter startup/global-flow set; if that proof
+  is unavailable, §7.3-A′ widens to Tier 1. VTA is an admissible precision alternative if it proves
+  the same startup/global-flow coverage and is whole-program (so it amortizes across a package's
+  benchmarks). Both RTA and VTA are implementation choices behind the same soundness rule: the hashed
+  set is a source-effect superset, never a narrower `B`-reachable-only graph.
 - Traverse edges through std for reachability, but hash only non-std declarations (§7.1 cut). The
   std-callback soundness above can *alternatively* be bought **without** loading stdlib bodies via
   the §7.3-A′ escape rule (non-std type converted to an interface ⇒ all its methods reachable),
@@ -342,7 +352,7 @@ dividing line is **immutable-pinned vs mutable-local**, decided per reachable pa
 | package class | identified by | closure contribution |
 |---|---|---|
 | **stdlib** | `Standard: true` | none — toolchain guard (§7.1) |
-| **module-cache dep** | `Dir` under `GOMODCACHE` | the cache-relative module id (`modpath@version`, straight from `Module.Dir`). Immutable + version-locked ⇒ content ⟺ version, so this captures every possible change via the one event that causes it — a `go.mod`/`go.sum` bump. Replace-to-version is automatic (`Module.Dir` points at the *replacement's* `@version`). Dep source is **traversed** for further reachability (like std) but **not** hashed per-declaration. |
+| **module-cache dep** | `Dir` under `GOMODCACHE` | the cache-relative module id (`modpath@version`, straight from `Module.Dir`) for every linked cache module. Immutable + version-locked ⇒ content ⟺ version, so this captures every possible change via the one event that causes it — a `go.mod`/`go.sum` bump, including init-registered drivers/codecs not reached from `B`'s declarations. Replace-to-version is automatic (`Module.Dir` points at the *replacement's* `@version`). Dep source is **traversed** for further reachability (like std) but **not** hashed per-declaration. |
 | **mutable-local** — main module, local `replace => ./path`, `go.work use`, `vendor/` | `Dir` *not* under `GOMODCACHE` (and not std) | hash the reachable-declaration **source** (§7.1 first-party treatment). These resolve to working directories with **no version/go.sum signal** — content can change silently, so they must be hashed by content, never pinned by version. |
 
 Two consequences:
@@ -352,9 +362,10 @@ Two consequences:
   dependency-declared replaces are ignored by Go) are already baked into where `go list` resolves
   each package, so no graph reasoning is needed.
 - **Cache deps are pinned at module-version granularity** (coarser than per-declaration): bumping a
-  reached cache dep marks `B` stale even if the bump didn't touch the reached function. Deliberate
-  and sound — version bumps are coarse, infrequent events you'd re-benchmark on anyway. Per-
-  declaration hashing *into* cache deps is an available precision upgrade (like VTA), not a default.
+  linked cache dep marks `B` stale even if the bump didn't touch the reached function. Deliberate and
+  sound — version bumps are coarse, infrequent events you'd re-benchmark on anyway, and linked init
+  side effects can affect `B` without a declaration edge. Per-declaration hashing *into* cache deps is
+  an available precision upgrade (like VTA), not a default.
 
 ## 8. Machine fingerprint
 

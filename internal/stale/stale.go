@@ -5,6 +5,7 @@ package stale
 import (
 	"strings"
 
+	"github.com/thegrumpylion/pew/internal/closure"
 	"github.com/thegrumpylion/pew/internal/gotool"
 	"github.com/thegrumpylion/pew/internal/provenance"
 	"golang.org/x/perf/benchfmt"
@@ -21,13 +22,21 @@ const (
 )
 
 // Check returns the validity verdict for a recording (its config lines) against
-// current state — the conjunction of the four guards (§7, INV-2): closure,
-// toolchain, machine, buildconfig. commit/dirty are deliberately NOT guards
-// (INV-6: validity is commit-sha-independent). A recording with no config is
-// Unrecorded; a missing guard key cannot be validated, so it is Stale. For a
-// Stale verdict, reason names the first failing guard.
-func Check(cur provenance.Provenance, curClosure string, recorded []benchfmt.Config) (Verdict, string) {
-	// The guards rely on current values being non-empty (curClosure is a hash;
+// current state (§7, INV-2):
+//
+//   - Unrecorded if there is no config.
+//   - Stale if any guard fails: closure, toolchain, machine, buildconfig.
+//     commit/dirty are deliberately NOT guards (INV-6: validity is
+//     commit-sha-independent). A missing guard key cannot be validated, so Stale.
+//   - Unverifiable if the guards pass and the benchmark is marked --impure
+//     (pure:false), or its HEAD closure reaches an unhashable external dependence
+//     (head.Unverifiable) and it is not marked --assume-pure (pure:true). Absence
+//     of proof never collapses to valid (INV-1).
+//
+// For a Stale verdict, reason names the first failing guard; for Unverifiable, it
+// is the external-dependence reason (or "impure").
+func Check(cur provenance.Provenance, head closure.Closure, recorded []benchfmt.Config) (Verdict, string) {
+	// The guards rely on current values being non-empty (head.Hash is a hash;
 	// toolchain/machine/buildconfig come from capture, which hard-errors on an
 	// empty machine identity). An empty current value matching an empty recorded
 	// value would false-valid — upstream capture guarantees non-empty.
@@ -36,13 +45,31 @@ func Check(cur provenance.Provenance, curClosure string, recorded []benchfmt.Con
 	}
 	cfg := configMap(recorded)
 	for _, g := range []struct{ key, want string }{
-		{"pew-closure", curClosure},
+		{"pew-closure", head.Hash},
 		{"toolchain", cur.Toolchain},
 		{"machine", cur.Machine},
 		{"buildconfig", cur.BuildConfig},
 	} {
 		if got, ok := cfg[g.key]; !ok || got != g.want {
 			return Stale, g.key
+		}
+	}
+	switch cfg["pure"] {
+	case "false":
+		// --impure: the author declares external state, so it always re-runs (§7.3).
+		return Unverifiable, "impure"
+	case "true":
+		// --assume-pure: Class-B detection is suppressed (§7.5); fall through to the
+		// guards as if verifiable.
+	default:
+		// No purity directive: an unhashable external dependence in HEAD's closure
+		// makes validity unprovable (§7.3 Class B).
+		if head.Unverifiable {
+			reason := head.Reason
+			if reason == "" {
+				reason = "external dependence"
+			}
+			return Unverifiable, reason
 		}
 	}
 	return Valid, ""

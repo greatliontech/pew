@@ -79,11 +79,13 @@ x/tools are Go-team / stdlib-tier.
 - **Invariants:** never compare across `machine` silently (§10); regression criterion as specified.
 - **Depends on:** 1, 2
 
-### 7 — Tier-2 closure (precision swap): RTA + reference graph + blind spots
-- **Delivers:** swap `internal/closure` to **RTA per-benchmark** (`go/packages` LoadAllSyntax +
-  `ssa.InstantiateGenerics`, per `spikes/closurecmp`): call graph ∪ reference graph (consts/types/
-  vars), std-cut traversal, blind-spot dispositions (resolve linkname/leaf-asm/generics, A′ maximal
-  widening, Class-B → `unverifiable`). Same interface — chunks 4-6 unchanged.
+### 7 — Tier-2 closure (precision swap): sound roots + RTA/reference graph + blind spots
+- **Delivers:** swap `internal/closure` to a declaration closure over the sound root set
+  (`go/packages` LoadAllSyntax + `ssa.InstantiateGenerics`, per `spikes/closurecmp`): benchmark root
+  plus linked startup roots unless a tighter startup/global-flow proof exists, call graph ∪ reference
+  graph (consts/types/vars), std-cut traversal, blind-spot dispositions (resolve
+  linkname/leaf-asm/generics, unresolved startup/global side-effect flow ⇒ A′ maximal widening,
+  Class-B → `unverifiable`). Same interface — chunks 4-6 unchanged.
 - **Invariants:** INV-1 preserved at full precision (resolve/widen/downgrade, never drop), INV-7
   (closure includes non-call deps — anchors: const-flip, struct-field change, embed-file edit ⇒
   each ⇒ stale). Differential test: Tier-2 hash-set ⊆ Tier-1 set on a fixture corpus.
