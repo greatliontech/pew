@@ -150,9 +150,11 @@ func (s *Store) Read(pkgRel, bench, label string) ([]*benchfmt.Result, error) {
 		case *benchfmt.SyntaxError:
 			return nil, fmt.Errorf("store: corrupt recording %s: %w", path, rec)
 		default:
-			// No silent drops: a record kind we don't round-trip (e.g. Unit
-			// metadata) is surfaced, never discarded.
-			// See docs/issues/unit-metadata-roundtrip.md.
+			// No silent drops: a record kind we don't round-trip is surfaced, not
+			// discarded. The only such kind is Unit metadata, which `go test` does
+			// not emit (even b.ReportMetric writes inline values, not Unit lines),
+			// so pew-written files never contain it and this path is unreachable
+			// for them — it stays as a guard against externally-edited files.
 			return nil, fmt.Errorf("store: unexpected record %T in %s", rec, path)
 		}
 	}

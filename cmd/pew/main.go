@@ -25,7 +25,7 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.AddCommand(
-		stub("run", "Run benchmarks with hygiene and store results"),
+		newRunCmd(),
 		newStatusCmd(),
 		stub("stat", "Compare result sets and flag regressions"),
 		stub("gc", "Remove stored results for benchmarks no longer in the code"),

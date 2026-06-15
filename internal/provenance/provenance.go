@@ -30,14 +30,16 @@ type Provenance struct {
 	BuildConfig string // build-settings digest (guard 4)
 }
 
-// Config returns the in-band provenance lines in spec §5 order.
+// Config returns the in-band provenance lines in spec §5 order. File is set so
+// benchfmt.Writer emits them as `key: value` lines (it omits File==false config
+// as internal).
 func (p Provenance) Config() []benchfmt.Config {
 	return []benchfmt.Config{
-		{Key: "commit", Value: []byte(p.Commit)},
-		{Key: "toolchain", Value: []byte(p.Toolchain)},
-		{Key: "machine", Value: []byte(p.Machine)},
-		{Key: "buildconfig", Value: []byte(p.BuildConfig)},
-		{Key: "dirty", Value: []byte(strconv.FormatBool(p.Dirty))},
+		{Key: "commit", Value: []byte(p.Commit), File: true},
+		{Key: "toolchain", Value: []byte(p.Toolchain), File: true},
+		{Key: "machine", Value: []byte(p.Machine), File: true},
+		{Key: "buildconfig", Value: []byte(p.BuildConfig), File: true},
+		{Key: "dirty", Value: []byte(strconv.FormatBool(p.Dirty)), File: true},
 	}
 }
 
@@ -48,11 +50,14 @@ func Capture(moduleDir string) (Provenance, error) {
 	if err != nil {
 		return Provenance{}, err
 	}
-	tc, err := toolchain()
+	// Resolve toolchain/buildconfig in moduleDir — the same dir `go test` runs in
+	// (run.Execute) — so they describe the toolchain that actually builds the
+	// benchmark, even under a go.mod toolchain directive.
+	tc, err := toolchain(moduleDir)
 	if err != nil {
 		return Provenance{}, err
 	}
-	bc, err := buildConfig()
+	bc, err := buildConfig(moduleDir)
 	if err != nil {
 		return Provenance{}, err
 	}
@@ -92,8 +97,8 @@ func gitState(dir string) (commit string, dirty bool, err error) {
 // toolchain is the `go version` identity, minus the redundant leading prefix —
 // e.g. "go1.26.4 linux/amd64" (incl. any custom/experiment suffix, which affects
 // codegen and so must be part of the guard).
-func toolchain() (string, error) {
-	out, err := gotool.Run("version")
+func toolchain(dir string) (string, error) {
+	out, err := gotool.RunIn(dir, "version")
 	if err != nil {
 		return "", err
 	}
@@ -102,8 +107,8 @@ func toolchain() (string, error) {
 
 // buildConfig digests the build-determining settings (codegen feature level, cgo,
 // build flags). Run-flag-derived parts (-tags, -gcflags, PGO) integrate in chunk 5.
-func buildConfig() (string, error) {
-	out, err := gotool.Run("env", "-json")
+func buildConfig(dir string) (string, error) {
+	out, err := gotool.RunIn(dir, "env", "-json")
 	if err != nil {
 		return "", err
 	}

@@ -121,12 +121,22 @@ func TestGatherFacts(t *testing.T) {
 	}
 }
 
+// TestConfigSerializable: provenance config must have File==true, or
+// benchfmt.Writer silently omits it (it treats File==false as internal config).
+func TestConfigSerializable(t *testing.T) {
+	for _, c := range (Provenance{Commit: "x"}).Config() {
+		if !c.File {
+			t.Errorf("config %q has File=false; benchfmt.Writer would omit it", c.Key)
+		}
+	}
+}
+
 func TestBuildConfigStable(t *testing.T) {
-	a, err := buildConfig()
+	a, err := buildConfig("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := buildConfig()
+	b, err := buildConfig("")
 	if err != nil {
 		t.Fatal(err)
 	}

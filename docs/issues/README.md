@@ -7,8 +7,6 @@ close-out convention.
 | slug | summary | Lands |
 |------|---------|-------|
 | [purity-directives](purity-directives.md) | durable `//pew:pure` / `//pew:external` code directives vs CLI flags | when CLI purity flags prove insufficient |
-| [unit-metadata-roundtrip](unit-metadata-roundtrip.md) | preserve `Unit` metadata records through store round-trip if go test emits them | 5 |
-| [toolchain-resolution](toolchain-resolution.md) | capture & run must share one resolved go toolchain | 5 |
 
 ## In-spec upgrade paths (tracked inline, not here)
 
