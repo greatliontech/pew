@@ -77,18 +77,17 @@ global config lines):
 | key            | meaning                                                        | source-of-truth? |
 |----------------|---------------------------------------------------------------|------------------|
 | `commit`       | full SHA of HEAD at run time                                   | yes              |
-| `commit-time`  | committer timestamp (RFC3339) — for ordering baselines        | yes              |
-| `branch`       | branch name at run time (advisory)                            | yes              |
 | `toolchain`    | `go version` output (compiler/runtime identity)               | yes              |
 | `machine`      | machine fingerprint id (§8)                                    | yes              |
 | `buildconfig`  | digest of build tags + relevant GOFLAGS/gcflags + cgo + PGO   | yes              |
 | `dirty`        | `true` if the working tree had uncommitted changes at run     | yes              |
 
-**Closure hashes are *derived*, not provenance** (recomputable from commit + toolchain +
-build-config), so they are never the source of truth and recomputing them never changes a verdict
-(INV-5). Whether they live in a sidecar cache index (§6) or as a namespaced in-band config line is
-reopened by the overwrite decision (§6) — see §12.1; the original in-band objection (projection
-fragmentation) only applied to multi-block files.
+**The closure hash rides in-band** as a namespaced `pew-closure` config line (no sidecar index). It
+is *derived*, not provenance (recomputable from commit + toolchain + build-config), so it is never
+the source of truth and recomputing it never changes a verdict (INV-5). In-band is sound because
+overwrite makes each file single-block, so the key cannot fragment a benchstat projection; pew
+additionally strips `pew-*` keys from its own comparison projections (§10). The `.txt` is therefore
+fully self-describing — everything needed to evaluate its own validity lives in one file.
 
 A `dirty` run is recorded but flagged: its `commit` does not faithfully describe its source, so
 its closure is computed from the *working tree*, and it is never usable as a pinned baseline.
@@ -128,7 +127,6 @@ Swapping one for the other is the entire reason closure analysis exists (see INV
 <bench-dir>/                      # default: ./benchmarks, configurable
   <pkg-path>/                     # mirrors the package import path under module root
     <BenchmarkName>[.<label>].txt # one file per top-level benchmark (+ optional variant label)
-  index.json                      # derived cache + bookkeeping (see below)
 ```
 
 - **File key = `(package import path, top-level benchmark function)`.** So the file count is simply
@@ -143,23 +141,20 @@ Swapping one for the other is the entire reason closure analysis exists (see INV
   job** (§6.1). Keeps files small, makes commit-to-commit diffs show the actual perf delta, and — per
   the single-source-of-truth discipline — avoids storing history twice (git *and* an in-file log)
   where they could diverge under rebase or hand-edit. To add samples, raise `-count` (an explicit
-  same-identity sample *merge* is a §12 open question).
+  same-identity sample *merge* is a deferred option, tracked in `docs/issues/`).
 - **History axis vs parallel-variant axes.** The path encodes only the history-invariant identity
   `(pkg, benchmark)`; the rest of the identity tuple (§5.1) rides in-band. *Commit* is a **history**
   axis → git holds prior values, the file keeps the latest. *Toolchain / machine / buildconfig* are
   **parallel-variant** axes: if you deliberately benchmark more than one (cgo on/off, a feature build
-  tag, two Go versions) and want them retained side by side, `--label <name>` (§12.8) adds the
+  tag, two Go versions) and want them retained side by side, `--label <name>` (§12, CLI surface) adds the
   filename discriminator (`BenchmarkFoo.cgo.txt`); without it the newer variant overwrites the older.
   Guards 2–4 (§7) still prevent any silent *cross-variant comparison* either way — so omitting a
   label is a retention choice, never a correctness one.
-- `index.json` is a **memoization cache + listing index**, never a second source of truth for
-  provenance. It maps `(pkg, benchmark, commit, toolchain, buildconfig)` → recorded closure hash
-  (the value computed at run time when the tree was present). `toolchain` is in the key because
-  version build-constraints (`//go:build go1.27`) change the selected file set, so the closure file
-  set is a function of the toolchain too. Because its key is immutable, a cached entry can never
-  silently go stale; it can be deleted and recomputed without changing correctness. Under overwrite
-  (above) only the current recording's hash per benchmark is retained — the cache tracks HEAD-state
-  validity, not history.
+- **No sidecar index.** The only derived datum — the closure hash — rides in-band as `pew-closure`
+  (§5), so each benchmark's `.txt` is self-describing and there is no second artifact to keep in
+  sync. The recorded side of the validity check is thus in-band; `pew status` recomputes only the
+  HEAD closure. If repeated `status` on an unchanged tree ever proves slow, a *gitignored* memo can
+  be added then — not now.
 
 ### 6.1 History lives in git
 
@@ -175,9 +170,6 @@ So the two axes are distinct and both needed: git history gives the *sequence of
 in-band `commit` field gives *which code each recording measured*. Baselines (§9) therefore resolve
 a recording by **git ref**, then read its measured commit from the file's `commit` line. No in-file
 log is required, and provenance-in-band is mandatory regardless of append-vs-overwrite.
-
-*(Exact directory naming / whether `index.json` is committed vs `.gitignore`d is an open
-question — see §12.)*
 
 ## 7. Staleness contract
 
@@ -251,7 +243,7 @@ target read directly:
 | construct | how it's resolved |
 |-----------|-------------------|
 | `//go:linkname a b` | target `b` is named in the directive → add edge to `b` (std target → Guard-2-covered, ignore; non-std → include normally) |
-| Go-asm symbol refs (`·name(SB)`, `pkg·name(SB)`) | scan the `.s` for symbol references → add those edges; always also hash the `.s` itself |
+| Go-asm functions | always hash the `.s` (it is in the file set). Almost all asm is a **leaf** (no Go call-outs) ⇒ no missing callees ⇒ no widening — hashing the `.s` already catches any change. A cheap scan for Go-symbol call-refs (`·name(SB)`, `pkg·name(SB)`) resolves the rare call-out; only a *computed* call falls to A′. |
 | generics | built with `ssa.InstantiateGenerics` (§7.4) → every instantiation in the build is materialized and dispatched concretely; not a blind spot |
 
 **(A′) Bounded-but-unresolved — widen to the maximal sound closure (§7.2).** The construct could
@@ -283,14 +275,43 @@ state that is not source at all, so no source widening can bound it:
 Any of these reachable in `B`'s closure → `unverifiable`. (Ambient nondeterminism — `time.Now`,
 unseeded `rand` — is a benchmark-*quality* issue, out of scope per §3, not a Class-B trigger.)
 
+Class-B detection is **best-effort coverage**, not a hard guarantee — perfect external-dependence
+detection is impossible (§3 non-goal), so unlike INV-1's source-soundness it can miss exotic cases.
+The set above is deliberately **small and high-confidence**: under-flagging is the documented
+boundary, while *over*-flagging is the real cost (a benchmark reading a fixed fixture in setup would
+be marked `unverifiable` → forced rerun), recovered by `--assume-pure` (§7.5). The complement for
+benchmarks the author *knows* read external state — a user-declarable `--impure` marker that always
+re-runs — folds into the CLI surface (§12).
+
 ### 7.4 Analysis requirements
 
-- Build SSA over the **whole program** (`go/packages` `LoadAllSyntax` + `ssautil.AllPackages`) with
-  **`ssa.InstantiateGenerics`** set — required for the generics disposition in §7.3.
-- Use the **CHA** call graph rooted at `B` (cheapest sound over-approximation of dynamic dispatch).
-  RTA/VTA are admissible later *only* as precision improvements that preserve the superset property;
-  they never relax soundness.
-- Traverse edges through std for reachability, but hash only non-std declarations (§7.1 cut).
+- Build SSA over the **whole program** (`go/packages` with all-dependency syntax +
+  `ssautil.AllPackages`) with **`ssa.InstantiateGenerics`** set. Both the generics disposition
+  (§7.3) and the std-callback case (a user method dispatched *inside* a stdlib function — e.g.
+  `byLen.Less` invoked by `sort.Sort`) require stdlib **bodies**, not just export data. *Spike-
+  validated:* bodies absent → the user callback is missed (unsound); bodies present → captured. This
+  whole-program load is the dominant cost, amortized by the closure cache (§7.6) and by recomputing
+  only HEAD per check.
+- **Call graph: RTA rooted at `B`** (`callgraph/rta`), **not CHA.** *Spike-validated:* CHA's
+  program-wide dynamic-dispatch over-approximation exploded a trivial benchmark to **6564** reachable
+  functions and pulled in *sibling* benchmarks through a single `error`/`func()`/runtime bridge — so
+  Tier 2 over CHA collapses to ≈ Tier 1 (no precision gained). RTA rooted at the benchmark discovers
+  only the types allocated on paths reachable from `B`, recovering the exact closure (**31** reachable
+  / 5 own-module on the same benchmark) while staying sound — it still includes *both* arms of a real
+  interface dispatch. VTA is an admissible, equally-precise alternative that is whole-program (so it
+  amortizes across a package's benchmarks). **Decided: RTA rooted per-benchmark** is the default —
+  demand-driven, so it stays cheap even with stdlib bodies loaded, and closure precision directly
+  saves the expensive thing (each false-stale is a benchmark rerun). VTA is the upgrade path, taken
+  only if a real benchmark shows RTA over-including (smallest-correct-change, not speculation). Both
+  are sound supersets — soundness never depends on the choice.
+- Traverse edges through std for reachability, but hash only non-std declarations (§7.1 cut). The
+  std-callback soundness above can *alternatively* be bought **without** loading stdlib bodies via
+  the §7.3-A′ escape rule (non-std type converted to an interface ⇒ all its methods reachable),
+  trading stdlib-load cost for coarser-but-sound inclusion. **Decided: load stdlib bodies** —
+  soundness then rides on mature go/ssa+RTA traversal of real edges, not on our own escape
+  enumeration being exhaustive (an incomplete escape set is a false-`valid`, the one failure INV-1
+  forbids). The escape rule stays a documented optimization, used only if analysis time becomes a
+  *measured* bottleneck and escape-completeness can be shown.
 
 ### 7.5 Escape hatch
 
@@ -302,38 +323,91 @@ the **user taking responsibility**, explicit and recorded — pew never silently
 ### 7.6 What changes vs what is recomputed
 
 - `closure-hash(B, R.commit)` is **recorded at run time** (working tree present, cheap, reliable)
-  and cached in `index.json`. It is *not* recomputed from history — avoiding fragile historical
-  checkouts.
+  in-band as the `pew-closure` config line (§5). It is *not* recomputed from history — avoiding
+  fragile historical checkouts.
 - `closure-hash(B, HEAD)` is **recomputed on demand** from the working tree during a staleness
   check.
 - Validity = compare the two. No historical build is ever required.
 
+### 7.7 Cross-module closures
+
+Dependencies are in the closure (§7.1) — a dep change can move `B`'s performance and, unlike
+stdlib, is *not* covered by the toolchain guard. But *where a dependency's source lives* and
+*whether a change to it leaves a signal* differ, and getting this wrong is a false-`valid` hole. The
+dividing line is **immutable-pinned vs mutable-local**, decided per reachable package by one test:
+**is its resolved `Dir` under `GOMODCACHE`?** (`go list -json` exposes `Standard`, `Dir`, and
+`Module`{`Path`,`Version`,`Main`,`Dir`} — spike-confirmed: std → `Module=null`; main → `Main:true`
++ repo dir; cache deps → `Version` set + dir under `GOMODCACHE`; 126/1/33/0 on the spike's own build.)
+
+| package class | identified by | closure contribution |
+|---|---|---|
+| **stdlib** | `Standard: true` | none — toolchain guard (§7.1) |
+| **module-cache dep** | `Dir` under `GOMODCACHE` | the cache-relative module id (`modpath@version`, straight from `Module.Dir`). Immutable + version-locked ⇒ content ⟺ version, so this captures every possible change via the one event that causes it — a `go.mod`/`go.sum` bump. Replace-to-version is automatic (`Module.Dir` points at the *replacement's* `@version`). Dep source is **traversed** for further reachability (like std) but **not** hashed per-declaration. |
+| **mutable-local** — main module, local `replace => ./path`, `go.work use`, `vendor/` | `Dir` *not* under `GOMODCACHE` (and not std) | hash the reachable-declaration **source** (§7.1 first-party treatment). These resolve to working directories with **no version/go.sum signal** — content can change silently, so they must be hashed by content, never pinned by version. |
+
+Two consequences:
+
+- **Classification is per-package, not transitive.** A package is mutable-local iff its *own*
+  resolved `Dir` is outside the cache. The build's replaces/workspace/vendor (all main-module level —
+  dependency-declared replaces are ignored by Go) are already baked into where `go list` resolves
+  each package, so no graph reasoning is needed.
+- **Cache deps are pinned at module-version granularity** (coarser than per-declaration): bumping a
+  reached cache dep marks `B` stale even if the bump didn't touch the reached function. Deliberate
+  and sound — version bumps are coarse, infrequent events you'd re-benchmark on anyway. Per-
+  declaration hashing *into* cache deps is an available precision upgrade (like VTA), not a default.
+
 ## 8. Machine fingerprint
 
-A stable digest over the facts that affect benchmark timing on this box:
+Guard 3 is a **drift guard**, compared by **exact equality**: "same machine config as when this was
+recorded?" — not cross-machine normalization (§3). So the fingerprint hashes **stable identity facts
+whose change plausibly shifts timing**, and *nothing transient* (or it fires spuriously):
 
-- CPU model / microarchitecture, physical + logical core count, cache sizes
-- GOARCH and arch feature level (e.g. GOAMD64) the toolchain targets
-- total RAM
-- OS / kernel version
-- **timing-stability facts**: frequency-scaling governor / driver, turbo-boost state
+- **CPU model / microarchitecture** (implies cache sizes, base clock, SIMD width)
+- **physical + logical core counts** (SMT falls out of the ratio; matters for `b.RunParallel`)
+- **total RAM**
+- **OS + kernel version** — in deliberately: a kernel bump can move scheduler/syscall/mitigation
+  costs, so reusing pre-bump numbers would be a quiet guard hole. The cost (rerun after a kernel
+  update) is the price of soundness, like the toolchain guard.
+- **GOARCH + arch feature level** (GOAMD64/GOARM64 — affects codegen)
 
-Fingerprint mismatch ⇒ all results from the old fingerprint are stale (drift guard). Single-machine
-users see a match until they change hardware or a timing-relevant setting. An optional calibration
-micro-probe (detect silent thermal/throttle drift the static facts miss) is a §12 open question.
+The hash of these is the `machine` config line; a mismatch makes every result from the old
+fingerprint stale.
+
+**Transient run conditions are excluded** (governor/scaling-driver, turbo/boost, CPU pinning,
+thermal/load). They are not machine *identity*: you set `performance` governor *for benchmarking*
+while the box idles in `powersave`, so a fingerprint containing the governor would read `powersave`
+at `pew status` time, mismatch the recording, and mark everything stale — spuriously, since a rerun
+reproduces the numbers. The governor at *check* time is irrelevant; only the governor at *run* time
+matters, and pew **owns the run** (§9). Run conditions are therefore enforced/recorded by run
+hygiene (§9), never baked into identity.
+
+**No calibration probe.** A reference micro-benchmark would turn the fingerprint from exact-equality
+identity into a fuzzy measurement-with-threshold, conflating "same machine" with "same performance
+right now" — which is exactly what running the benchmark already tells you. Drift (thermal,
+noisy-neighbor VM) is caught by quiesce checks and the statistics (high variance surfaces it), not
+by identity.
 
 ## 9. Run hygiene (own the run)
 
 pew drives `go test` rather than ingesting arbitrary output, so results are statistics-grade and
 provenance is captured atomically with the run:
 
-- `-run=^$ -bench=<pattern>` (benchmarks only), `-count=N` (default tuned so benchmath has enough
-  samples — exact N in §12), fixed `-benchtime`.
-- Optional **CPU pinning** (Linux `taskset`/cpuset) for run-to-run stability.
-- **Quiesce pre-checks** (advisory, can warn or hard-gate): on-battery, non-`performance`
-  governor, high load average, turbo enabled, thermal headroom. The goal is to refuse to silently
-  record noisy data.
-- Records provenance (§5) and computes + caches the run-commit closure hash (§7) at run time.
+- `-run=^$ -bench=<pattern>` (benchmarks only), **`-count=10`** (enough for a real benchmath CI;
+  n=3 gives a degenerate interval), **`-benchtime=1s`** time-based (works with Go 1.24+ `b.Loop()`;
+  per-op comparison makes the auto-scaled iteration count fine). Both configurable.
+- **CPU pinning is opt-in** (`--pin`, Linux `taskset`/cpuset), **off by default** — it cuts
+  scheduler-migration variance but is platform-specific and footgun-prone (core choice, SMT
+  siblings, containers/VMs), so forcing it on would be the surprising default. The first knob to
+  enable for serious runs.
+- **Quiesce pre-checks WARN by default; `--strict` promotes them to hard-gates.** Checks:
+  on-battery, non-`performance` governor, high load average, turbo, thermal throttling. Warn-not-gate
+  because hard-gating blocks legitimate quick runs and pew often can't fix the condition anyway
+  (setting the governor needs root); the warning fires at the right moment — about to record a bad
+  run. **Run conditions are not recorded as provenance:** on a single machine you control conditions
+  deliberately and the run-time warn catches a bad run at its source (a `runconditions` line +
+  comparison-mismatch check can be added later if mixing ever bites).
+- Records provenance (§5) and computes the run-commit closure hash (§7), recorded in-band as
+  `pew-closure` (§5), at run time.
 
 ## 10. Comparison & regression
 
@@ -351,10 +425,26 @@ Three baseline-selection modes (all requested):
 - **On-demand A/B** — any two refs (or a ref vs the working tree), each materialized via `git show`
   (§6.1). Manual investigation.
 
-A **regression** is a statistically significant slowdown beyond a configurable threshold;
-comparison must project *away* pew's own provenance keys so differing commit/machine metadata
-doesn't fragment the benchstat grouping (with machine guarded separately — never compare across
-machine fingerprints silently).
+### 10.1 Regression criterion
+
+A **regression** on a metric requires all three: (1) it moved the **worse** direction (higher
+sec/op, B/op, or allocs/op); (2) the change is **statistically significant** — Mann–Whitney U via
+benchmath, default α = 0.05, *not* CI-overlap; and (3) its magnitude clears a **threshold** (default
+3%, just above good-hygiene noise). All three are needed: significance without a magnitude floor
+flags real-but-trivial changes; a floor without significance flags noise.
+
+- **`pew stat` (default)** reports the benchstat-style table and marks `⚠ regression` on any metric
+  meeting the three conditions. **`--fail-on-regression`** drives a non-zero exit on the same
+  criterion for CI. `sec/op` gates by default; `allocs/op` and `B/op` are flagged but failing on
+  them is opt-in.
+- Comparison projects *away* pew's own provenance keys (`commit`, `pew-closure`, …) so differing
+  metadata doesn't fragment the benchstat grouping, and **matches on `machine`** — never comparing
+  across machine fingerprints silently (§8).
+
+Every tunable across pew — α, threshold, `-count`, `-benchtime`, pinning, strictness, gating
+metrics — is **configurable with the stated values as defaults**; the correctness guards (§7) are
+*not* knobs. Deliberately un-optimized (no per-metric thresholds, adaptive noise floors, persistent
+caches) until real use asks for it.
 
 ## 11. Architecture & dependencies
 
@@ -363,10 +453,11 @@ where it *is* the API.** No fork of x/perf (importable, Go-team-maintained); **n
 go-git keeps pew self-contained (`go install` works with no external binary beyond `go`).
 
 - **Imported (Go-team / stdlib-tier):** `golang.org/x/perf/{benchfmt,benchproc,benchmath,benchunit}`;
-  `golang.org/x/tools/go/{packages,ssa,callgraph,callgraph/cha}`; `go/types`, `go/ast` via
-  `go/packages`. (`golang.org/x/perf/benchseries` is a candidate later for across-commit trends.)
+  `golang.org/x/tools/go/{packages,ssa,callgraph,callgraph/rta}` (RTA — CHA rejected as too imprecise,
+  §7.4; VTA a documented upgrade path, §7.4); `go/types`, `go/ast` via `go/packages`.
+  (`golang.org/x/perf/benchseries` is a candidate later for across-commit trends.)
 - **Imported (third-party, deliberate):** `github.com/go-git/go-git/v5` as the **git access layer**.
-  pew is a pure git *reader* (HEAD/commit/commit-time/branch, ref resolution, blob reads for
+  pew is a pure git *reader* (HEAD, commit metadata, ref resolution, blob reads for
   baselines, file-scoped log for trends — §6.1, §9). Every `git show <ref>:<path>` /
   `git log -- <path>` in this spec is performed via go-git's object API, **never** by shelling to a
   `git` binary. *Tradeoff accepted:* go-git's `Worktree.Status()` (used only for the informational
@@ -381,27 +472,36 @@ go-git keeps pew self-contained (`go install` works with no external binary beyo
 - Per project policy, go-git is the one deliberately-added third-party dep (user-approved); any
   *further* third-party dependency is flagged and asked before adding.
 
-## 12. Open questions (iterate here)
+## 12. CLI surface
 
-1. **Closure-hash storage** — sidecar `index.json` cache vs per-benchmark in-band config lines.
-   Overwrite (§6) means each file has a single block, so the original objection to in-band closure
-   lines (a varying key fragmenting the benchstat projection) no longer applies — in-band becomes
-   viable again. Re-evaluate sidecar vs in-band (namespaced, e.g. `pew-closure`, so pew can strip it
-   from comparison projections) under overwrite.
-2. **`index.json` in git** — committed (shareable cache, reviewable) vs `.gitignore`d (pure local
-   cache, always recomputable)? Affects whether the cache is a repo artifact.
-3. **Blind-spot resolution depth** — §7.3 fixes the soundness (unresolved ⇒ maximal widening;
-   external ⇒ `unverifiable`). Open: how much asm/linkname parsing to implement before falling back
-   to maximal widening (precision-only, never affects soundness), and the exact call-signature set
-   that flags Class-B I/O (`os`, `net`, `plugin`, cgo-external) without over-flagging.
-4. **Machine fingerprint field set** — exact fields, and whether to add a calibration probe.
-5. **Run defaults** — concrete `-count` and `-benchtime` values; pinning default on/off; which
-   quiesce checks warn vs hard-gate.
-6. **Regression criterion** — threshold default; p-value gate vs confidence-interval overlap.
-7. **Cross-module closures** — benchmarks whose closure crosses into other modules (replace
-   directives, workspace mode); hashing strategy there.
-8. **CLI surface** — proposed `pew run` / `pew status` (valid vs stale listing) / `pew stat`
-   (compare) / `pew list` / `pew gc`; finalize names and flags.
+Four commands; names follow the `go test` / benchstat idiom.
+
+- **`pew run [packages] [flags]`** — run with hygiene (§9), store (overwrite, in-band provenance §5).
+  - selection: `[packages]` (default `./...`), `-bench <pat>` (default `.`)
+  - **`--stale`** — (re)run only benchmarks currently `stale` / `unverifiable` / `unrecorded`; skip
+    `valid` ones (the reuse-don't-rerun win; shares the `status` closure-analysis path).
+  - hygiene: `-count` (10), `-benchtime` (1s), `--pin`, `--strict` (§9)
+  - storage: `--label <name>` (§6); purity overrides: `--assume-pure <bench>` (§7.5),
+    `--impure <bench>` (§7.3) — a durable code-directive alternative is deferred
+    (`docs/issues/purity-directives.md`).
+- **`pew status [packages]`** — per-benchmark verdict: `valid` / `stale ⟨reason⟩` /
+  `unverifiable ⟨reason⟩` / `unrecorded`. `--stale` filters to non-valid (scriptable; feeds
+  `run --stale`).
+- **`pew stat [ref | refA refB] [flags]`** — compare; the three baselines (§10) fall out of arg
+  count (none → auto, one → pinned, two → A/B). `--fail-on-regression`, `--threshold` (3%),
+  `--alpha` (0.05), metric selection (§10.1).
+- **`pew gc`** — remove stored results for benchmarks no longer present in the code.
+
+(`pew list` dropped — `status` is the inventory-plus-verdict view.) Every flag value is a **default,
+configurable** (§10.1); the correctness guards (§7) are not flags.
+
+*Design log — resolved & folded in:* closure-hash storage → in-band `pew-closure`, no sidecar
+(§5/§6); call-graph → RTA (§7.4); std-callback → load stdlib bodies (§7.4); cross-module →
+cache-vs-mutable-local (§7.7); blind-spot resolution → leaf-asm + resolve-linkname, best-effort
+Class-B (§7.3); machine fingerprint → stable-identity, no transient conditions, no probe (§8); run
+defaults → `-count=10`/`-benchtime=1s`, pinning opt-in, quiesce=warn+`--strict` (§9); regression →
+Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred explorations live in
+`docs/issues/`.
 
 ## 13. Project invariants (spec-tier)
 
@@ -450,3 +550,10 @@ triage gate resolves these `Lands:` conditions.
   data file leaves the hash unchanged → `B` reported `valid` while its behavior moved. *Kind:*
   entailed. *Anchor tests:* const-flip, struct-field change, embed-file edit ⇒ each reports stale.
   *Lands:* when closure analysis is first implemented.
+- **INV-8 — Mutable-local deps are hashed by content.** Any reachable dependency whose resolved
+  source is *not* under `GOMODCACHE` (local `replace => ./path`, `go.work use`, `vendor/`) is hashed
+  by its source content, never pinned by `(module, version)` (§7.7). *Violation:* `B` reaches a
+  locally-replaced dep; the dep's reachable source changes; `go.mod`/`go.sum` untouched; version-
+  pinning → hash unchanged → `B` reported `valid` while its dependency moved → false-`valid`.
+  *Kind:* entailed. *Anchor test:* edit a locally-replaced dep's reachable code without touching
+  `go.mod` ⇒ `B` reports stale. *Lands:* when closure analysis handles dependencies.
