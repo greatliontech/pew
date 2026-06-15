@@ -1,0 +1,15 @@
+goos: linux
+goarch: amd64
+pkg: example.com/pewspikes/sample
+cpu: TestCPU
+commit: aaaaaaa
+toolchain: go1.26.4
+machine: m-deadbeef
+buildconfig: default
+pew-closure: 1111111111111111
+BenchmarkRun-8 1000000 1230 ns/op 456 B/op 7 allocs/op
+BenchmarkRun-8 1000000 1240 ns/op 456 B/op 7 allocs/op
+BenchmarkRun-8 1000000 1225 ns/op 456 B/op 7 allocs/op
+BenchmarkRun-8 1000000 1235 ns/op 456 B/op 7 allocs/op
+BenchmarkRun-8 1000000 1228 ns/op 456 B/op 7 allocs/op
+BenchmarkRun-8 1000000 1232 ns/op 456 B/op 7 allocs/op
