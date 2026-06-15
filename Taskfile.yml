@@ -1,0 +1,31 @@
+version: '3'
+
+tasks:
+  build:
+    desc: Build the pew binary
+    cmds:
+      - go build -o bin/pew ./cmd/pew
+
+  test:
+    desc: Run all tests
+    cmds:
+      - go test ./...
+
+  test:race:
+    desc: Run tests with the race detector
+    cmds:
+      - go test -race ./...
+
+  vet:
+    desc: go vet
+    cmds:
+      - go vet ./...
+
+  tidy:
+    desc: Tidy modules
+    cmds:
+      - go mod tidy
+
+  check:
+    desc: Vet + test
+    deps: [vet, test]
