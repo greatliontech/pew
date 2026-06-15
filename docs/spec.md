@@ -362,16 +362,23 @@ Guard 3 is a **drift guard**, compared by **exact equality**: "same machine conf
 recorded?" — not cross-machine normalization (§3). So the fingerprint hashes **stable identity facts
 whose change plausibly shifts timing**, and *nothing transient* (or it fires spuriously):
 
-- **CPU model / microarchitecture** (implies cache sizes, base clock, SIMD width)
+- **CPU model / microarchitecture** (implies cache sizes, base clock, SIMD width) — taken from the
+  arch-appropriate `/proc/cpuinfo` identity: `model name` on x86, the composed
+  implementer/part/variant/revision on ARM. An empty identity is a hard capture error, never a
+  silent collision.
 - **physical + logical core counts** (SMT falls out of the ratio; matters for `b.RunParallel`)
 - **total RAM**
 - **OS + kernel version** — in deliberately: a kernel bump can move scheduler/syscall/mitigation
   costs, so reusing pre-bump numbers would be a quiet guard hole. The cost (rerun after a kernel
   update) is the price of soundness, like the toolchain guard.
-- **GOARCH + arch feature level** (GOAMD64/GOARM64 — affects codegen)
+- **GOARCH** — the host architecture. The codegen *feature level* (GOAMD64/GOARM/…) is
+  build-determined, so it lives in the **buildconfig** digest (guard 4, §5), not the fingerprint: a
+  feature-level change moves guard 4, a host-arch change moves guard 3; both captured, neither
+  dropped.
 
 The hash of these is the `machine` config line; a mismatch makes every result from the old
-fingerprint stale.
+fingerprint stale. The fingerprint reflects **host** topology (cores/RAM as the OS sees the
+hardware), not cgroup/container-effective limits — consistent with the single-machine scope (§3).
 
 **Transient run conditions are excluded** (governor/scaling-driver, turbo/boost, CPU pinning,
 thermal/load). They are not machine *identity*: you set `performance` governor *for benchmarking*

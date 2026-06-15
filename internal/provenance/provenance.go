@@ -1,0 +1,142 @@
+// Package provenance captures the run-context facts pew records in-band with
+// each benchmark recording and uses as staleness guards (spec §5, §8): the
+// measured commit and dirty flag, the toolchain identity, a machine fingerprint,
+// and a build-config digest.
+package provenance
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os/exec"
+	"sort"
+	"strconv"
+	"strings"
+
+	gogit "github.com/go-git/go-git/v5"
+	"golang.org/x/perf/benchfmt"
+)
+
+// Provenance is the set of facts about how a recording was produced. commit and
+// dirty are not derivable from the recording's later git position (§6.1); the
+// other three are exact-equality staleness guards (§7). pew-closure (guard 1) is
+// added separately by the closure analysis (chunk 3).
+type Provenance struct {
+	Commit      string // SHA of the code measured (not the recording's git commit, §6.1)
+	Dirty       bool   // working tree had uncommitted changes at run
+	Toolchain   string // `go version` identity (guard 2)
+	Machine     string // machine fingerprint, §8 (guard 3)
+	BuildConfig string // build-settings digest (guard 4)
+}
+
+// Config returns the in-band provenance lines in spec §5 order.
+func (p Provenance) Config() []benchfmt.Config {
+	return []benchfmt.Config{
+		{Key: "commit", Value: []byte(p.Commit)},
+		{Key: "toolchain", Value: []byte(p.Toolchain)},
+		{Key: "machine", Value: []byte(p.Machine)},
+		{Key: "buildconfig", Value: []byte(p.BuildConfig)},
+		{Key: "dirty", Value: []byte(strconv.FormatBool(p.Dirty))},
+	}
+}
+
+// Capture gathers provenance for a run whose code lives at moduleDir. It opens
+// the git repo there (pew is a pure reader) and queries the go toolchain.
+func Capture(moduleDir string) (Provenance, error) {
+	commit, dirty, err := gitState(moduleDir)
+	if err != nil {
+		return Provenance{}, err
+	}
+	tc, err := toolchain()
+	if err != nil {
+		return Provenance{}, err
+	}
+	bc, err := buildConfig()
+	if err != nil {
+		return Provenance{}, err
+	}
+	facts, err := gatherFacts()
+	if err != nil {
+		return Provenance{}, err
+	}
+	return Provenance{
+		Commit:      commit,
+		Dirty:       dirty,
+		Toolchain:   tc,
+		Machine:     facts.Fingerprint(),
+		BuildConfig: bc,
+	}, nil
+}
+
+func gitState(dir string) (commit string, dirty bool, err error) {
+	repo, err := gogit.PlainOpenWithOptions(dir, &gogit.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return "", false, fmt.Errorf("provenance: open git repo at %s: %w", dir, err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		return "", false, fmt.Errorf("provenance: resolve HEAD: %w", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		return "", false, fmt.Errorf("provenance: worktree: %w", err)
+	}
+	st, err := wt.Status()
+	if err != nil {
+		return "", false, fmt.Errorf("provenance: worktree status: %w", err)
+	}
+	return head.Hash().String(), !st.IsClean(), nil
+}
+
+// toolchain is the `go version` identity, minus the redundant leading prefix —
+// e.g. "go1.26.4 linux/amd64" (incl. any custom/experiment suffix, which affects
+// codegen and so must be part of the guard).
+func toolchain() (string, error) {
+	out, err := goCmd("version")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimPrefix(strings.TrimSpace(string(out)), "go version "), nil
+}
+
+// buildConfig digests the build-determining settings (codegen feature level, cgo,
+// build flags). Run-flag-derived parts (-tags, -gcflags, PGO) integrate in chunk 5.
+func buildConfig() (string, error) {
+	out, err := goCmd("env", "-json")
+	if err != nil {
+		return "", err
+	}
+	var env map[string]string
+	if err := json.Unmarshal(out, &env); err != nil {
+		return "", fmt.Errorf("provenance: parse go env: %w", err)
+	}
+	keys := []string{"GOAMD64", "GOARM", "GOARM64", "GO386", "CGO_ENABLED", "GOFLAGS", "GOEXPERIMENT"}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		fmt.Fprintf(&b, "%s=%s\n", k, env[k])
+	}
+	return digest(b.String()), nil
+}
+
+// digest is a short stable content hash used for the machine and buildconfig
+// fingerprints.
+func digest(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// goCmd runs the go tool and, on failure, includes go's stderr in the error.
+func goCmd(args ...string) ([]byte, error) {
+	out, err := exec.Command("go", args...).Output()
+	if err != nil {
+		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
+			return nil, fmt.Errorf("provenance: go %s: %w: %s",
+				strings.Join(args, " "), err, strings.TrimSpace(string(ee.Stderr)))
+		}
+		return nil, fmt.Errorf("provenance: go %s: %w", strings.Join(args, " "), err)
+	}
+	return out, nil
+}

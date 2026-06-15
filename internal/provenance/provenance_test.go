@@ -1,0 +1,192 @@
+package provenance
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"runtime"
+	"strings"
+	"testing"
+)
+
+// TestCapture exercises the full capture path in pew's own repo and cross-checks
+// the commit against the git binary (go-git vs git). It enforces INV-4: every
+// guard input is populated.
+func TestCapture(t *testing.T) {
+	p, err := Capture(".")
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+
+	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Skipf("git rev-parse unavailable: %v", err)
+	}
+	if want := strings.TrimSpace(string(out)); p.Commit != want {
+		t.Errorf("commit: go-git gave %q, git gave %q", p.Commit, want)
+	}
+	if !strings.Contains(p.Toolchain, "go1") {
+		t.Errorf("toolchain looks wrong: %q", p.Toolchain)
+	}
+	if len(p.Machine) != 16 {
+		t.Errorf("machine fingerprint: got %q (len %d), want len 16", p.Machine, len(p.Machine))
+	}
+	if len(p.BuildConfig) != 16 {
+		t.Errorf("buildconfig: got %q (len %d), want len 16", p.BuildConfig, len(p.BuildConfig))
+	}
+}
+
+// TestConfigKeysAndOrder enforces the §5 in-band key set and order, and dirty
+// formatting (part of INV-4).
+func TestConfigKeysAndOrder(t *testing.T) {
+	p := Provenance{Commit: "abc", Toolchain: "go1.26.4", Machine: "m123", BuildConfig: "b456", Dirty: true}
+	cfg := p.Config()
+	want := [][2]string{
+		{"commit", "abc"}, {"toolchain", "go1.26.4"}, {"machine", "m123"},
+		{"buildconfig", "b456"}, {"dirty", "true"},
+	}
+	if len(cfg) != len(want) {
+		t.Fatalf("got %d config lines, want %d", len(cfg), len(want))
+	}
+	for i, w := range want {
+		if cfg[i].Key != w[0] || string(cfg[i].Value) != w[1] {
+			t.Errorf("config[%d]: got %s=%s, want %s=%s", i, cfg[i].Key, cfg[i].Value, w[0], w[1])
+		}
+	}
+}
+
+func TestFingerprintStableAndSensitive(t *testing.T) {
+	a := MachineFacts{
+		CPUModel: "Test CPU", PhysicalCores: 8, LogicalCores: 16,
+		TotalRAMBytes: 1 << 34, OS: "linux", KernelVersion: "7.0", GOARCH: "amd64",
+	}
+	if f1, f2 := a.Fingerprint(), a.Fingerprint(); f1 != f2 {
+		t.Errorf("fingerprint not deterministic: %q vs %q", f1, f2)
+	}
+	if len(a.Fingerprint()) != 16 {
+		t.Errorf("fingerprint len: got %d", len(a.Fingerprint()))
+	}
+	for _, mut := range []func(*MachineFacts){
+		func(f *MachineFacts) { f.CPUModel = "Other" },
+		func(f *MachineFacts) { f.PhysicalCores = 4 },
+		func(f *MachineFacts) { f.LogicalCores = 8 },
+		func(f *MachineFacts) { f.TotalRAMBytes = 1 << 33 },
+		func(f *MachineFacts) { f.KernelVersion = "7.1" },
+		func(f *MachineFacts) { f.GOARCH = "arm64" },
+	} {
+		b := a
+		mut(&b)
+		if a.Fingerprint() == b.Fingerprint() {
+			t.Errorf("fingerprint insensitive to a stable field change: %+v", b)
+		}
+	}
+}
+
+// TestMachineFactsExcludesTransient structurally enforces §8: the fingerprint
+// has no field for a transient run condition, so one cannot enter it.
+func TestMachineFactsExcludesTransient(t *testing.T) {
+	forbidden := []string{"governor", "turbo", "boost", "thermal", "scaling", "load", "freq"}
+	for _, field := range reflect.VisibleFields(reflect.TypeFor[MachineFacts]()) {
+		name := strings.ToLower(field.Name)
+		for _, bad := range forbidden {
+			if strings.Contains(name, bad) {
+				t.Errorf("MachineFacts.%s looks like a transient run condition (§8 forbids it in the fingerprint)", field.Name)
+			}
+		}
+	}
+}
+
+func TestGatherFacts(t *testing.T) {
+	f, err := gatherFacts()
+	if err != nil {
+		t.Fatalf("gatherFacts: %v", err)
+	}
+	if f.LogicalCores < 1 {
+		t.Errorf("logical cores: %d", f.LogicalCores)
+	}
+	if f.OS == "" || f.GOARCH == "" {
+		t.Errorf("OS/GOARCH empty: %+v", f)
+	}
+	if runtime.GOOS == "linux" {
+		if f.CPUModel == "" {
+			t.Error("linux: empty CPU model")
+		}
+		if f.TotalRAMBytes == 0 {
+			t.Error("linux: zero total RAM")
+		}
+		if f.PhysicalCores < 1 {
+			t.Errorf("linux: physical cores %d", f.PhysicalCores)
+		}
+	}
+}
+
+func TestGoCmdError(t *testing.T) {
+	if _, err := goCmd("this-is-not-a-go-subcommand"); err == nil {
+		t.Fatal("expected error from invalid go subcommand")
+	} else if !strings.Contains(err.Error(), "provenance: go") {
+		t.Errorf("error not wrapped with context: %v", err)
+	}
+}
+
+func TestBuildConfigStable(t *testing.T) {
+	a, err := buildConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := buildConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a != b {
+		t.Errorf("buildconfig not stable across calls: %q vs %q", a, b)
+	}
+	if len(a) != 16 {
+		t.Errorf("buildconfig len: got %d", len(a))
+	}
+}
+
+// TestGitStateDirty validates commit + dirty semantics against a real repo built
+// with the git binary: clean after commit, dirty with an untracked file.
+func TestGitStateDirty(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not available")
+	}
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init")
+	git("config", "user.email", "t@example.com")
+	git("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-m", "init")
+
+	commit, dirty, err := gitState(dir)
+	if err != nil {
+		t.Fatalf("gitState: %v", err)
+	}
+	if len(commit) != 40 {
+		t.Errorf("commit sha: got %q (len %d), want 40 hex", commit, len(commit))
+	}
+	if dirty {
+		t.Error("freshly-committed repo reported dirty")
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, dirty, err = gitState(dir); err != nil {
+		t.Fatalf("gitState after change: %v", err)
+	} else if !dirty {
+		t.Error("repo with an untracked file reported clean")
+	}
+}
