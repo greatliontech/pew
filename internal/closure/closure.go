@@ -2,13 +2,11 @@
 // of the source a benchmark exercises, used to decide whether a stored result is
 // still valid for HEAD.
 //
-// Compute is the Tier-2 entry point. Until declaration-granularity shrinking can
-// prove startup/global side-effect coverage (§7.1, §7.3-A′), it returns the
-// Tier-1 maximal closure: every linked non-std package, with stdlib cut by the
-// toolchain guard. Classification per §7.7: module-cache deps are pinned by their
-// immutable modpath@version; mutable-local packages (main module, local replace,
-// workspace, vendor) are hashed by content. Soundness (INV-1): the hashed set is
-// always a superset of the source able to affect the benchmark — never false-valid.
+// Compute is the Tier-2 entry point: reachable mutable-local declarations are
+// hashed by source, linked cache modules are pinned by module version, stdlib is
+// cut by the toolchain guard, and unresolved source blind spots widen to the
+// Tier-1 maximal closure. Soundness (INV-1): the hashed set is always a superset
+// of the source able to affect the benchmark — never false-valid.
 package closure
 
 import (
@@ -64,6 +62,11 @@ type listPkg struct {
 	Dir          string
 	GoFiles      []string
 	CgoFiles     []string
+	CgoCFLAGS    []string
+	CgoCPPFLAGS  []string
+	CgoCXXFLAGS  []string
+	CgoFFLAGS    []string
+	CgoPkgConfig []string
 	CFiles       []string
 	CXXFiles     []string
 	MFiles       []string
@@ -74,6 +77,7 @@ type listPkg struct {
 	SwigCXXFiles []string
 	SysoFiles    []string
 	EmbedFiles   []string
+	CgoLDFLAGS   []string
 	Module       *listMod
 	Error        *listErr
 }
@@ -112,11 +116,7 @@ func (h *Hasher) maximalHash(pkgPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(contribs) == 0 {
-		return "", fmt.Errorf("closure: %s reaches no non-stdlib source", pkgPath)
-	}
-	sum := sha256.Sum256([]byte(strings.Join(contribs, "\n")))
-	return hex.EncodeToString(sum[:])[:16], nil
+	return hashContributions(pkgPath, contribs)
 }
 
 func (h *Hasher) maximalContributions(pkgPath string) ([]string, error) {
@@ -140,6 +140,15 @@ func (h *Hasher) maximalContributions(pkgPath string) ([]string, error) {
 	return contribs, nil
 }
 
+func hashContributions(pkgPath string, contribs []string) (string, error) {
+	if len(contribs) == 0 {
+		return "", fmt.Errorf("closure: %s reaches no non-stdlib source", pkgPath)
+	}
+	sort.Strings(contribs)
+	sum := sha256.Sum256([]byte(strings.Join(contribs, "\n")))
+	return hex.EncodeToString(sum[:])[:16], nil
+}
+
 // contribution returns this package's contribution to the closure, or "" if it
 // is excluded (stdlib, a pseudo-package, or the synthesized test-main).
 func (h *Hasher) contribution(p listPkg) (string, error) {
@@ -151,20 +160,478 @@ func (h *Hasher) contribution(p listPkg) (string, error) {
 	}
 	if !p.Module.Main && h.underCache(p.Dir) {
 		// Immutable, version-locked cache dep (classified on the package Dir per
-		// §7.7): pin by the module's content dir (modpath@version, replace-correct
-		// via Module.Dir), never read its source. p.Dir and Module.Dir agree on
-		// under-cache classification for every reachable config; §7.7 names the
-		// package Dir, so we use it.
+		// §7.7): pin once by the module's content dir (modpath@version,
+		// replace-correct via Module.Dir), never read its source. p.Dir and
+		// Module.Dir agree on under-cache classification for every reachable config;
+		// §7.7 names the package Dir, so we use it.
 		rel := strings.TrimPrefix(filepath.Clean(p.Module.Dir), h.modCache+string(filepath.Separator))
-		return "cache:" + p.ImportPath + "=" + filepath.ToSlash(rel), nil
+		return "cache:" + filepath.ToSlash(rel), nil
 	}
 	// Mutable-local (main module, local replace, workspace, vendor): hash content
 	// so a silent edit moves the hash (INV-8).
-	fh, err := hashFiles(p.Dir, p.sourceFiles())
+	files := p.sourceFiles()
+	if hasCgoCallbackBlindspot(&p) {
+		if root := cgoIncludeRootOutsideDir(&p); root != "" {
+			return "", fmt.Errorf("closure: cgo include root outside package dir: %s", root)
+		}
+		var err error
+		files, err = allPackageFiles(p.Dir)
+		if err != nil {
+			return "", err
+		}
+		if include, err := cgoEscapingInclude(&p, files); err != nil {
+			return "", err
+		} else if include != "" {
+			return "", fmt.Errorf("closure: cgo include escapes package dir: %s", include)
+		}
+	}
+	if len(p.SFiles) > 0 {
+		_, _, opaque, includes, err := asmCallTargets(p.Dir, p.SFiles)
+		if err != nil {
+			return "", err
+		}
+		if opaque {
+			files, err = allPackageFiles(p.Dir)
+			if err != nil {
+				return "", err
+			}
+		}
+		for _, path := range includes {
+			rel, err := filepath.Rel(p.Dir, path)
+			if err != nil {
+				rel = path
+			}
+			files = append(files, rel)
+		}
+	}
+	files = uniqueStrings(files)
+	fh, err := hashFiles(p.Dir, files)
 	if err != nil {
 		return "", err
 	}
 	return "src:" + p.ImportPath + "=" + fh, nil
+}
+
+func allPackageFiles(dir string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !d.Type().IsRegular() {
+			if d.Type()&os.ModeSymlink == 0 {
+				return nil
+			}
+			info, err := os.Stat(path)
+			if err != nil {
+				return err
+			}
+			if !info.Mode().IsRegular() {
+				return nil
+			}
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		files = append(files, rel)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("closure: walk %s: %w", dir, err)
+	}
+	return files, nil
+}
+
+func cgoIncludeRootOutsideDir(p *listPkg) string {
+	if p == nil || p.Dir == "" {
+		return ""
+	}
+	for _, dir := range cgoIncludeFlagDirs(p) {
+		dir = expandCgoIncludeDir(p, dir)
+		if symlinkDir := symlinkDirInPath(dir, p.Dir); symlinkDir != "" {
+			return symlinkDir
+		}
+		dir = cleanCgoIncludeDir(p, dir)
+		if !pathWithin(dir, p.Dir) {
+			return dir
+		}
+		if realDir, err := filepath.EvalSymlinks(dir); err == nil && !pathWithin(realDir, p.Dir) {
+			return realDir
+		}
+	}
+	return ""
+}
+
+func cgoIncludeFlagDirs(p *listPkg) []string {
+	flags := append([]string{}, p.CgoCPPFLAGS...)
+	flags = append(flags, p.CgoCFLAGS...)
+	flags = append(flags, p.CgoCXXFLAGS...)
+	flags = append(flags, p.CgoFFLAGS...)
+	var dirs []string
+	for i := 0; i < len(flags); i++ {
+		flag := flags[i]
+		dir := ""
+		switch {
+		case flag == "-I" || flag == "-iquote" || flag == "-isystem" || flag == "-idirafter":
+			if i+1 >= len(flags) {
+				continue
+			}
+			i++
+			dir = flags[i]
+		case strings.HasPrefix(flag, "-I") && flag != "-I":
+			dir = flag[2:]
+		case strings.HasPrefix(flag, "-iquote") && flag != "-iquote":
+			dir = strings.TrimSpace(strings.TrimPrefix(flag, "-iquote"))
+		case strings.HasPrefix(flag, "-isystem") && flag != "-isystem":
+			dir = strings.TrimSpace(strings.TrimPrefix(flag, "-isystem"))
+		case strings.HasPrefix(flag, "-idirafter") && flag != "-idirafter":
+			dir = strings.TrimSpace(strings.TrimPrefix(flag, "-idirafter"))
+		}
+		if dir == "" {
+			continue
+		}
+		dirs = append(dirs, dir)
+	}
+	return dirs
+}
+
+func cgoIncludeSearchDirs(p *listPkg) []string {
+	if p == nil || p.Dir == "" {
+		return nil
+	}
+	var dirs []string
+	for _, dir := range cgoIncludeFlagDirs(p) {
+		dir = cleanCgoIncludeDir(p, expandCgoIncludeDir(p, dir))
+		if pathWithin(dir, p.Dir) {
+			dirs = append(dirs, dir)
+		}
+	}
+	return dirs
+}
+
+func expandCgoIncludeDir(p *listPkg, dir string) string {
+	return strings.ReplaceAll(dir, "${SRCDIR}", p.Dir)
+}
+
+func cleanCgoIncludeDir(p *listPkg, dir string) string {
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(p.Dir, dir)
+	}
+	return filepath.Clean(dir)
+}
+
+func cgoEscapingInclude(p *listPkg, files []string) (string, error) {
+	if p == nil || p.Dir == "" {
+		return "", nil
+	}
+	includeDirs := cgoIncludeSearchDirs(p)
+	for _, rel := range files {
+		if !isNativeIncludeSource(rel) {
+			continue
+		}
+		path := filepath.Join(p.Dir, rel)
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("closure: read %s: %w", path, err)
+		}
+		goFile := strings.EqualFold(filepath.Ext(rel), ".go")
+		text := string(content)
+		if goFile {
+			text = stripGoCgoCommentMarkers(text)
+			goFile = false
+		}
+		text = spliceCPreprocessorLines(text)
+		if cgoNativeFileHasRawString(rel, text) {
+			return "", fmt.Errorf("closure: unsupported cgo raw string in %s", path)
+		}
+		lines := strings.Split(text, "\n")
+		if !goFile {
+			lines = stripCBlockComments(lines)
+		}
+		for _, line := range lines {
+			include, quoted, ok := cgoIncludeDirective(line, goFile)
+			if !ok {
+				continue
+			}
+			if !quoted {
+				return "", fmt.Errorf("closure: unresolved cgo include %s", include)
+			}
+			if include == "_cgo_export.h" {
+				continue
+			}
+			if symlinkDir := symlinkDirInPath(include, filepath.Dir(path)); symlinkDir != "" {
+				return symlinkDir, nil
+			}
+			searchDirs := []string{filepath.Dir(path)}
+			if !filepath.IsAbs(include) {
+				searchDirs = append(searchDirs, includeDirs...)
+			}
+			found := false
+			for _, dir := range searchDirs {
+				if symlinkDir := symlinkDirInPath(include, dir); symlinkDir != "" {
+					return symlinkDir, nil
+				}
+				resolved := include
+				if !filepath.IsAbs(resolved) {
+					resolved = filepath.Join(dir, resolved)
+				}
+				resolved = filepath.Clean(resolved)
+				if !pathWithin(resolved, p.Dir) {
+					return resolved, nil
+				}
+				parent := filepath.Dir(resolved)
+				if realParent, err := filepath.EvalSymlinks(parent); err == nil && !pathWithin(realParent, p.Dir) {
+					return realParent, nil
+				}
+				if _, err := os.Stat(resolved); err == nil {
+					if relResolved, err := filepath.Rel(p.Dir, resolved); err == nil && !isNativeIncludeSource(relResolved) {
+						return "", fmt.Errorf("closure: unsupported cgo include source %s", include)
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				return "", fmt.Errorf("closure: unresolved cgo include %s", include)
+			}
+		}
+	}
+	return "", nil
+}
+
+func spliceCPreprocessorLines(text string) string {
+	text = strings.ReplaceAll(text, "\\\r\n", "")
+	return strings.ReplaceAll(text, "\\\n", "")
+}
+
+func stripGoCgoCommentMarkers(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		line = strings.TrimSpace(strings.TrimPrefix(line, "//"))
+		line = strings.TrimSpace(strings.TrimPrefix(line, "/*"))
+		line = strings.TrimSpace(strings.TrimPrefix(line, "*"))
+		line = strings.TrimSpace(strings.TrimSuffix(line, "*/"))
+		lines[i] = line
+	}
+	return strings.Join(lines, "\n")
+}
+
+func isNativeIncludeSource(rel string) bool {
+	ext := strings.ToLower(filepath.Ext(rel))
+	switch ext {
+	case ".syso", ".a", ".o", ".obj", ".so", ".dylib", ".dll", ".lib":
+		return false
+	}
+	return true
+}
+
+func cgoNativeFileHasRawString(_ string, text string) bool {
+	return strings.Contains(text, "R\"")
+}
+
+func cgoIncludeDirective(line string, goFile bool) (string, bool, bool) {
+	line = strings.TrimSpace(line)
+	if goFile {
+		line = strings.TrimSpace(strings.TrimPrefix(line, "//"))
+		line = strings.TrimSpace(strings.TrimPrefix(line, "/*"))
+		line = strings.TrimSpace(strings.TrimPrefix(line, "*"))
+		line = strings.TrimSpace(strings.TrimSuffix(line, "*/"))
+	}
+	line = strings.TrimSpace(stripCLineComments(line))
+	if !strings.HasPrefix(line, "#") {
+		return "", false, false
+	}
+	line = strings.TrimSpace(strings.TrimPrefix(line, "#"))
+	if strings.HasPrefix(line, "include") {
+		line = strings.TrimSpace(strings.TrimPrefix(line, "include"))
+	} else if strings.HasPrefix(line, "import") {
+		line = strings.TrimSpace(strings.TrimPrefix(line, "import"))
+	} else {
+		return "", false, false
+	}
+	if !strings.HasPrefix(line, "\"") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			return "", false, false
+		}
+		return fields[0], false, true
+	}
+	line = strings.TrimPrefix(line, "\"")
+	end := strings.IndexByte(line, '"')
+	if end < 0 {
+		return "", false, false
+	}
+	return line[:end], true, true
+}
+
+func stripCLineComments(line string) string {
+	var b strings.Builder
+	inString := false
+	escaped := false
+	for i := 0; i < len(line); {
+		if inString {
+			c := line[i]
+			b.WriteByte(c)
+			i++
+			if escaped {
+				escaped = false
+				continue
+			}
+			if c == '\\' {
+				escaped = true
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		if line[i] == '"' {
+			inString = true
+			b.WriteByte(line[i])
+			i++
+			continue
+		}
+		if i+1 < len(line) && line[i:i+2] == "//" {
+			break
+		}
+		if i+1 < len(line) && line[i:i+2] == "/*" {
+			b.WriteByte(' ')
+			end := strings.Index(line[i+2:], "*/")
+			if end < 0 {
+				break
+			}
+			i += len("/*") + end + len("*/")
+			continue
+		}
+		b.WriteByte(line[i])
+		i++
+	}
+	return b.String()
+}
+
+func stripCBlockComments(lines []string) []string {
+	inBlock := false
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		var b strings.Builder
+		inString := false
+		inChar := false
+		escaped := false
+		for i := 0; i < len(line); {
+			if inBlock {
+				end := strings.Index(line[i:], "*/")
+				if end < 0 {
+					break
+				}
+				i += end + len("*/")
+				inBlock = false
+				b.WriteByte(' ')
+				continue
+			}
+			c := line[i]
+			if inString || inChar {
+				b.WriteByte(c)
+				i++
+				if escaped {
+					escaped = false
+					continue
+				}
+				if c == '\\' {
+					escaped = true
+					continue
+				}
+				if inString && c == '"' {
+					inString = false
+				}
+				if inChar && c == '\'' {
+					inChar = false
+				}
+				continue
+			}
+			if c == '"' {
+				inString = true
+				b.WriteByte(c)
+				i++
+				continue
+			}
+			if c == '\'' {
+				inChar = true
+				b.WriteByte(c)
+				i++
+				continue
+			}
+			if i+1 < len(line) && line[i:i+2] == "/*" {
+				inBlock = true
+				b.WriteByte(' ')
+				i += len("/*")
+				continue
+			}
+			b.WriteByte(c)
+			i++
+		}
+		out = append(out, b.String())
+	}
+	return out
+}
+
+func symlinkDirInPath(path, base string) string {
+	path = filepath.FromSlash(path)
+	if !filepath.IsAbs(path) {
+		path = filepath.Clean(base) + string(filepath.Separator) + path
+	}
+	volume := filepath.VolumeName(path)
+	rest := path[len(volume):]
+	current := volume
+	if strings.HasPrefix(rest, string(filepath.Separator)) {
+		current += string(filepath.Separator)
+		rest = strings.TrimLeft(rest, string(filepath.Separator))
+	}
+	for _, part := range strings.Split(rest, string(filepath.Separator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			current = filepath.Dir(strings.TrimSuffix(current, string(filepath.Separator)))
+			continue
+		}
+		next := filepath.Join(current, part)
+		info, err := os.Lstat(next)
+		if err == nil && info.Mode()&os.ModeSymlink != 0 {
+			if targetInfo, err := os.Stat(next); err == nil && targetInfo.IsDir() {
+				return next
+			}
+		}
+		current = next
+	}
+	return ""
+}
+
+func pathWithin(path, root string) bool {
+	if root == "" {
+		return false
+	}
+	path = filepath.Clean(path)
+	root = filepath.Clean(root)
+	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := values[:0]
+	for _, v := range values {
+		if seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
 }
 
 // underCache reports whether dir is inside the module cache (a path segment
@@ -189,6 +656,15 @@ func hashFiles(dir string, files []string) (string, error) {
 		fmt.Fprintf(hasher, "%s\x00%x\n", f, sha256.Sum256(content))
 	}
 	return hex.EncodeToString(hasher.Sum(nil))[:16], nil
+}
+
+func hashFile(path string) (string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("closure: read %s: %w", path, err)
+	}
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])[:16], nil
 }
 
 func (h *Hasher) list(pkgPath string) ([]listPkg, error) {

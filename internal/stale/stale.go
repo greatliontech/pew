@@ -17,7 +17,7 @@ type Verdict string
 const (
 	Valid        Verdict = "valid"
 	Stale        Verdict = "stale"
-	Unverifiable Verdict = "unverifiable" // produced once Class-B detection lands (chunk 7)
+	Unverifiable Verdict = "unverifiable"
 	Unrecorded   Verdict = "unrecorded"
 )
 
