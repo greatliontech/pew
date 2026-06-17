@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -266,5 +267,59 @@ func TestReadCorrupt(t *testing.T) {
 	}
 	if _, err := s.Read("internal/foo", "BenchmarkRun", ""); err == nil {
 		t.Error("expected error reading corrupt recording, got nil")
+	}
+}
+
+func TestListRecordingsIgnoresNonStoreFiles(t *testing.T) {
+	s := New(t.TempDir())
+	if err := s.Write("internal/foo", "BenchmarkRun", "", parse(t, sample)); err != nil {
+		t.Fatalf("write unlabeled: %v", err)
+	}
+	if err := s.Write("internal/foo", "BenchmarkRun", "cgo", parse(t, sample)); err != nil {
+		t.Fatalf("write labeled: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(s.Root, "README.txt"), []byte("not a recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	badDir := filepath.Join(s.Root, "internal", "foo")
+	if err := os.WriteFile(filepath.Join(badDir, "notabench.txt"), []byte("ignored"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	recs, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	var got []string
+	for _, r := range recs {
+		got = append(got, r.PkgRel+"/"+r.Bench+"/"+r.Label)
+	}
+	sort.Strings(got)
+	want := []string{"internal/foo/BenchmarkRun/", "internal/foo/BenchmarkRun/cgo"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("List = %v, want %v", got, want)
+	}
+}
+
+func TestRemoveRecordingPrunesEmptyDirs(t *testing.T) {
+	s := New(t.TempDir())
+	if err := s.Write("internal/foo", "BenchmarkRun", "", parse(t, sample)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	recs, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("recordings = %d, want 1", len(recs))
+	}
+	if err := s.Remove(recs[0]); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if _, err := os.Stat(recs[0].Path); !os.IsNotExist(err) {
+		t.Fatalf("removed file still exists: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.Root, "internal")); !os.IsNotExist(err) {
+		t.Fatalf("empty package dirs were not pruned: %v", err)
 	}
 }

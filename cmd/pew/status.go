@@ -40,6 +40,7 @@ func newStatusCmd() *cobra.Command {
 
 type pkgMeta struct {
 	ImportPath string
+	Dir        string
 	Module     struct {
 		Path string
 		Dir  string

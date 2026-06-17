@@ -26,6 +26,14 @@ type Store struct {
 	Root string
 }
 
+// Recording is one benchmark recording present in a Store.
+type Recording struct {
+	PkgRel string
+	Bench  string
+	Label  string
+	Path   string
+}
+
 // New returns a Store rooted at dir (e.g. "./benchmarks").
 func New(dir string) *Store { return &Store{Root: dir} }
 
@@ -142,6 +150,102 @@ func (s *Store) Read(pkgRel, bench, label string) ([]*benchfmt.Result, error) {
 	}
 	defer f.Close()
 	return Parse(f, path)
+}
+
+// List returns the safely-addressable benchmark recordings currently present in
+// the store. Files that do not match pew's storage layout are ignored: gc removes
+// stored results, not arbitrary user files that happen to live under bench-dir.
+func (s *Store) List() ([]Recording, error) {
+	var out []Recording
+	if _, err := os.Stat(s.Root); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	err := filepath.WalkDir(s.Root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || filepath.Ext(path) != ".txt" {
+			return nil
+		}
+		r, ok := s.recordingFromPath(path)
+		if ok {
+			out = append(out, r)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *Store) recordingFromPath(path string) (Recording, bool) {
+	rel, err := filepath.Rel(s.Root, path)
+	if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return Recording{}, false
+	}
+	pkgRel := filepath.ToSlash(filepath.Dir(rel))
+	if pkgRel == "." {
+		pkgRel = ""
+	}
+	if !validPkgRel(pkgRel) {
+		return Recording{}, false
+	}
+	base := strings.TrimSuffix(filepath.Base(path), ".txt")
+	bench, label, _ := strings.Cut(base, ".")
+	if !benchRe.MatchString(bench) {
+		return Recording{}, false
+	}
+	if label != "" && !labelRe.MatchString(label) {
+		return Recording{}, false
+	}
+	want, err := s.Path(pkgRel, bench, label)
+	if err != nil || filepath.Clean(want) != filepath.Clean(path) {
+		return Recording{}, false
+	}
+	return Recording{PkgRel: pkgRel, Bench: bench, Label: label, Path: path}, true
+}
+
+// Remove deletes a recording and prunes empty package directories up to the store
+// root. The path is recomputed from the recording key rather than trusted.
+func (s *Store) Remove(r Recording) error {
+	path, err := s.Path(r.PkgRel, r.Bench, r.Label)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return s.pruneEmptyDirs(filepath.Dir(path))
+}
+
+func (s *Store) pruneEmptyDirs(dir string) error {
+	root := filepath.Clean(s.Root)
+	for dir = filepath.Clean(dir); dir != root && strings.HasPrefix(dir, root+string(filepath.Separator)); dir = filepath.Dir(dir) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+		if len(entries) > 0 {
+			return nil
+		}
+		if err := os.Remove(dir); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 // Parse reads canonical benchmark-format content into results, cloned and owned

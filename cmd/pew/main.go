@@ -3,7 +3,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
@@ -28,19 +27,7 @@ func newRootCmd() *cobra.Command {
 		newRunCmd(),
 		newStatusCmd(),
 		newStatCmd(),
-		stub("gc", "Remove stored results for benchmarks no longer in the code"),
+		newGCCmd(),
 	)
 	return root
-}
-
-// stub is a not-yet-implemented subcommand. Each is filled in by its plan chunk
-// (docs/plan.md); until then it fails honestly rather than pretending to work.
-func stub(use, short string) *cobra.Command {
-	return &cobra.Command{
-		Use:   use,
-		Short: short,
-		RunE: func(*cobra.Command, []string) error {
-			return errors.New(use + ": not implemented yet")
-		},
-	}
 }
