@@ -41,16 +41,36 @@ func TestRecordedConfigSerializable(t *testing.T) {
 }
 
 func TestTestArgs(t *testing.T) {
-	got := TestArgs("example/p", Options{Count: 10, Benchtime: "1s", Bench: "."}, "")
-	want := []string{"test", "-run", "^$", "-bench", ".", "-benchmem", "-count", "10", "-benchtime", "1s", "example/p"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("TestArgs = %v, want %v", got, want)
+	tests := []struct {
+		name    string
+		opts    Options
+		testlog string
+		want    []string
+	}{
+		{
+			name: "defaults",
+			opts: Options{Count: 10, Benchtime: "1s", Bench: "."},
+			want: []string{"test", "-run", "^$", "-bench", ".", "-benchmem", "-count", "10", "-benchtime", "1s", "example/p"},
+		},
+		{
+			name: "overrides",
+			opts: Options{Count: 3, Benchtime: "250ms", Bench: "BenchmarkHash"},
+			want: []string{"test", "-run", "^$", "-bench", "BenchmarkHash", "-benchmem", "-count", "3", "-benchtime", "250ms", "example/p"},
+		},
+		{
+			name:    "testlog",
+			opts:    Options{Count: 10, Benchtime: "1s", Bench: "."},
+			testlog: "/tmp/pew-testlog",
+			want:    []string{"test", "-run", "^$", "-bench", ".", "-benchmem", "-count", "10", "-benchtime", "1s", "example/p", "-args", "-test.testlogfile=/tmp/pew-testlog"},
+		},
 	}
-
-	got = TestArgs("example/p", Options{Count: 10, Benchtime: "1s", Bench: "."}, "/tmp/pew-testlog")
-	want = append(want, "-args", "-test.testlogfile=/tmp/pew-testlog")
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("TestArgs with testlog = %v, want %v", got, want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := TestArgs("example/p", tt.opts, tt.testlog)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("TestArgs = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

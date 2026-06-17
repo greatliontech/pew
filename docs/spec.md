@@ -159,7 +159,7 @@ avoid (see INV-6).
   lines (§5) plus sample lines. The file holds only the most recent recording; **history is git's
   job** (§6.1). Keeps files small, makes commit-to-commit diffs show the actual perf delta, and — per
   the single-source-of-truth discipline — avoids storing history twice (git *and* an in-file log)
-  where they could diverge under rebase or hand-edit. To add samples, raise `-count` (an explicit
+  where they could diverge under rebase or hand-edit. To add samples, raise `--count` (an explicit
   same-identity sample *merge* is a deferred option, tracked in `docs/issues/`).
 - **History axis vs parallel-variant axes.** The path encodes only the history-invariant identity
   `(pkg, benchmark)`; the rest of the identity tuple (§5.1) rides in-band. *Commit* is a **history**
@@ -485,7 +485,15 @@ provenance is captured atomically with the run:
 
 - `-run=^$ -bench=<pattern>` (benchmarks only), **`-count=10`** (enough for a real benchmath CI;
   n=3 gives a degenerate interval), **`-benchtime=1s`** time-based (works with Go 1.24+ `b.Loop()`;
-  per-op comparison makes the auto-scaled iteration count fine). Both configurable.
+  per-op comparison makes the auto-scaled iteration count fine). The benchmark pattern, count, and
+  benchtime are configurable run-selection/statistical knobs.
+- **`-benchmem` is always on** for pew-recorded runs, so allocation metrics (`B/op`, `allocs/op`)
+  are captured alongside timing. It is cheap, keeps stored results comparable, and lets `pew stat`
+  flag allocation regressions without requiring a second run.
+- **Build-affecting `go test` inputs are not generic run knobs.** Flags and environment that can
+  change generated code (`-tags`, `-gcflags`, `-ldflags`, PGO, cgo/compiler env, architecture
+  feature env) must be represented in the `buildconfig` guard (§7) before pew exposes or changes
+  their handling; otherwise a build-input change could produce a false `valid` recording.
 - **CPU pinning is opt-in** (`--pin`, Linux `taskset`/cpuset), **off by default** — it cuts
   scheduler-migration variance but is platform-specific and footgun-prone (core choice, SMT
   siblings, containers/VMs), so forcing it on would be the surprising default. The first knob to
@@ -539,7 +547,7 @@ flags real-but-trivial changes; a floor without significance flags noise.
   `machine`, `toolchain`, and `buildconfig` — never comparing across machine fingerprints,
   toolchains, or build variants silently (§6, §8).
 
-Every tunable across pew — α, threshold, `-count`, `-benchtime`, pinning, strictness, gating
+Every tunable across pew — α, threshold, `--count`, `--benchtime`, pinning, strictness, gating
 metrics — is **configurable with the stated values as defaults**; the correctness guards (§7) are
 *not* knobs. Deliberately un-optimized (no per-metric thresholds, adaptive noise floors, persistent
 caches) until real use asks for it.
@@ -576,10 +584,10 @@ go-git keeps pew self-contained (`go install` works with no external binary beyo
 Four commands; names follow the `go test` / benchstat idiom.
 
 - **`pew run [packages] [flags]`** — run with hygiene (§9), store (overwrite, in-band provenance §5).
-  - selection: `[packages]` (default `./...`), `-bench <pat>` (default `.`)
+  - selection: `[packages]` (default `./...`), `--bench <pat>` (default `.`)
   - **`--stale`** — (re)run only benchmarks currently `stale` / `unverifiable` / `unrecorded`; skip
     `valid` ones (the reuse-don't-rerun win; shares the `status` closure-analysis path).
-  - hygiene: `-count` (10), `-benchtime` (1s), `--pin`, `--strict` (§9)
+  - hygiene: `--count` (10), `--benchtime` (1s), `--pin`, `--strict` (§9)
   - storage: `--bench-dir <dir>` (default `<module>/benchmarks`), `--label <name>` (§6);
     purity overrides: `--assume-pure <bench>` (§7.5), `--impure <bench>` (§7.3) — a durable
     code-directive alternative is deferred (`docs/issues/purity-directives.md`).
@@ -601,7 +609,7 @@ configurable** (§10.1); the correctness guards (§7) are not flags.
 (§5/§6); call-graph → RTA (§7.4); std-callback → load stdlib bodies (§7.4); cross-module →
 cache-vs-mutable-local (§7.7); blind-spot resolution → leaf-asm + resolve-linkname, best-effort
 Class-B (§7.3); machine fingerprint → stable-identity, no transient conditions, no probe (§8); run
-defaults → `-count=10`/`-benchtime=1s`, pinning opt-in, quiesce=warn+`--strict` (§9); regression →
+defaults → `--count=10`/`--benchtime=1s`, pinning opt-in, quiesce=warn+`--strict` (§9); regression →
 Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred explorations live in
 `docs/issues/`.
 

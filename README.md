@@ -49,3 +49,21 @@ a digest. Environment values are hashed but not stored in clear text.
 
 By default recordings live under `<module>/benchmarks`. Use `--bench-dir` on the
 commands when a different storage directory is needed.
+
+## Benchmark Defaults
+
+`pew run` records benchmark output from:
+
+```sh
+go test -run '^$' -bench . -benchmem -count 10 -benchtime 1s <pkg>
+```
+
+- `-run '^$'` skips tests; pew records benchmarks only.
+- `-bench .` runs all benchmarks by default; use `--bench` to select a subset.
+- `-benchmem` is always enabled so memory metrics are stored with timing metrics.
+- `--count 10` records enough samples for meaningful comparison.
+- `--benchtime 1s` keeps each sample time-based and compatible with Go's auto-scaling benchmark loop.
+
+Use `--pin` for CPU affinity and `--strict` to make run-hygiene warnings fatal. Build-affecting Go
+flags such as tags, gcflags, ldflags, PGO, and cgo/compiler inputs are deliberately not generic
+pass-through flags; they must be covered by pew's `buildconfig` guard before being exposed.
