@@ -497,6 +497,8 @@ provenance is captured atomically with the run:
   run. **Run conditions are not recorded as provenance:** on a single machine you control conditions
   deliberately and the run-time warn catches a bad run at its source (a `runconditions` line +
   comparison-mismatch check can be added later if mixing ever bites).
+  On Linux, turbo/boost is checked via exposed `intel_pstate/no_turbo` or `cpufreq/boost` sysfs state,
+  and thermal throttling via exposed CPU `thermal_throttle/*_throttle_count` counters.
 - Records provenance (§5) and computes the run-commit closure hash (§7), recorded in-band as
   `pew-closure` (§5), plus observed runtime inputs (`pew-runtime*`, §7.8), at run time.
 
