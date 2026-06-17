@@ -106,7 +106,7 @@ func (s *Store) Write(pkgRel, bench, label string, results []*benchfmt.Result) e
 		return err
 	}
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := s.ensureDir(dir); err != nil {
 		return err
 	}
 
@@ -141,6 +141,18 @@ func (s *Store) Read(pkgRel, bench, label string) ([]*benchfmt.Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := s.checkParentDirs(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNotRecorded
+		}
+		return nil, err
+	}
+	if err := checkRegularFile(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNotRecorded
+		}
+		return nil, err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -157,13 +169,14 @@ func (s *Store) Read(pkgRel, bench, label string) ([]*benchfmt.Result, error) {
 // stored results, not arbitrary user files that happen to live under bench-dir.
 func (s *Store) List() ([]Recording, error) {
 	var out []Recording
-	if _, err := os.Stat(s.Root); err != nil {
+	root, err := s.checkedRoot()
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	err := filepath.WalkDir(s.Root, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -183,7 +196,8 @@ func (s *Store) List() ([]Recording, error) {
 }
 
 func (s *Store) recordingFromPath(path string) (Recording, bool) {
-	rel, err := filepath.Rel(s.Root, path)
+	root := filepath.Clean(s.Root)
+	rel, err := filepath.Rel(root, path)
 	if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
 		return Recording{}, false
 	}
@@ -204,6 +218,9 @@ func (s *Store) recordingFromPath(path string) (Recording, bool) {
 	}
 	want, err := s.Path(pkgRel, bench, label)
 	if err != nil || filepath.Clean(want) != filepath.Clean(path) {
+		return Recording{}, false
+	}
+	if err := s.checkParentDirs(path); err != nil {
 		return Recording{}, false
 	}
 	info, err := os.Lstat(path)
@@ -245,6 +262,18 @@ func (s *Store) Remove(r Recording) error {
 	if err != nil {
 		return err
 	}
+	if err := s.checkParentDirs(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if err := checkRegularFile(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
 	if err := os.Remove(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -257,6 +286,12 @@ func (s *Store) Remove(r Recording) error {
 func (s *Store) pruneEmptyDirs(dir string) error {
 	root := filepath.Clean(s.Root)
 	for dir = filepath.Clean(dir); dir != root && strings.HasPrefix(dir, root+string(filepath.Separator)); dir = filepath.Dir(dir) {
+		if err := checkDirNoSymlink(dir); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -273,6 +308,107 @@ func (s *Store) pruneEmptyDirs(dir string) error {
 			}
 			return err
 		}
+	}
+	return nil
+}
+
+func (s *Store) ensureDir(dir string) error {
+	root := filepath.Clean(s.Root)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return err
+	}
+	if err := checkDirNoSymlink(root); err != nil {
+		return err
+	}
+	rel, err := safeRel(root, dir)
+	if err != nil {
+		return err
+	}
+	if rel == "." {
+		return nil
+	}
+	cur := root
+	for _, seg := range strings.Split(rel, string(filepath.Separator)) {
+		cur = filepath.Join(cur, seg)
+		info, err := os.Lstat(cur)
+		if errors.Is(err, os.ErrNotExist) {
+			if err := os.Mkdir(cur, 0o755); err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("store: symlink path component %s", cur)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("store: path component is not a directory: %s", cur)
+		}
+	}
+	return nil
+}
+
+func (s *Store) checkedRoot() (string, error) {
+	root := filepath.Clean(s.Root)
+	return root, checkDirNoSymlink(root)
+}
+
+func (s *Store) checkParentDirs(path string) error {
+	root := filepath.Clean(s.Root)
+	if err := checkDirNoSymlink(root); err != nil {
+		return err
+	}
+	rel, err := safeRel(root, filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	if rel == "." {
+		return nil
+	}
+	cur := root
+	for _, seg := range strings.Split(rel, string(filepath.Separator)) {
+		cur = filepath.Join(cur, seg)
+		if err := checkDirNoSymlink(cur); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func safeRel(root, path string) (string, error) {
+	rel, err := filepath.Rel(root, filepath.Clean(path))
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("store: path escapes root: %s", path)
+	}
+	return rel, nil
+}
+
+func checkDirNoSymlink(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("store: symlink path component %s", path)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("store: path component is not a directory: %s", path)
+	}
+	return nil
+}
+
+func checkRegularFile(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("store: recording is a symlink: %s", path)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("store: recording is not a regular file: %s", path)
 	}
 	return nil
 }

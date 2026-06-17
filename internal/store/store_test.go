@@ -176,6 +176,97 @@ func TestRejectsUnsafeNames(t *testing.T) {
 	}
 }
 
+func TestWriteRejectsSymlinkDirectoryComponent(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "benchmarks")
+	outside := t.TempDir()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "internal")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	s := New(root)
+	if err := s.Write("internal/foo", "BenchmarkRun", "", parse(t, sample)); err == nil {
+		t.Fatal("Write through symlink directory succeeded")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "foo", "BenchmarkRun.txt")); !os.IsNotExist(err) {
+		t.Fatalf("Write created outside recording: %v", err)
+	}
+}
+
+func TestReadRejectsSymlinkBoundary(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "benchmarks")
+	outside := t.TempDir()
+	outsideDir := filepath.Join(outside, "foo")
+	if err := os.MkdirAll(outsideDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outsideDir, "BenchmarkRun.txt"), []byte(sample), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "internal")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	s := New(root)
+	if _, err := s.Read("internal/foo", "BenchmarkRun", ""); err == nil {
+		t.Fatal("Read through symlink directory succeeded")
+	}
+}
+
+func TestReadRejectsSymlinkRecordingLeaf(t *testing.T) {
+	s := New(t.TempDir())
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte(sample), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path, err := s.Path("internal/foo", "BenchmarkRun", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, path); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	if _, err := s.Read("internal/foo", "BenchmarkRun", ""); err == nil {
+		t.Fatal("Read of symlink recording leaf succeeded")
+	}
+}
+
+func TestRemoveRejectsSymlinkBoundary(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "benchmarks")
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "foo", "BenchmarkRun.txt")
+	if err := os.MkdirAll(filepath.Dir(outsideFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(outsideFile, []byte(sample), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "internal")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	s := New(root)
+	err := s.Remove(Recording{PkgRel: "internal/foo", Bench: "BenchmarkRun"})
+	if err == nil {
+		t.Fatal("Remove through symlink directory succeeded")
+	}
+	if _, err := os.Stat(outsideFile); err != nil {
+		t.Fatalf("outside recording was removed: %v", err)
+	}
+}
+
 func writeRaw(t *testing.T, s *Store, pkgRel, bench, content string) {
 	t.Helper()
 	p, err := s.Path(pkgRel, bench, "")
@@ -294,6 +385,16 @@ func TestListRecordingsIgnoresNonStoreFiles(t *testing.T) {
 	symlinkPath := filepath.Join(badDir, "BenchmarkSymlink.txt")
 	if err := os.Symlink(outside, symlinkPath); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
+	}
+	outsideDir := filepath.Join(t.TempDir(), "outside-dir")
+	if err := os.MkdirAll(filepath.Join(outsideDir, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outsideDir, "pkg", "BenchmarkOutside.txt"), []byte(sample), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideDir, filepath.Join(s.Root, "linked")); err != nil {
+		t.Skipf("directory symlink unavailable: %v", err)
 	}
 
 	recs, err := s.List()

@@ -174,6 +174,9 @@ avoid (see INV-6).
   sync. The recorded side of the validity check is thus in-band; `pew status` recomputes only the
   HEAD closure. If repeated `status` on an unchanged tree ever proves slow, a *gitignored* memo can
   be added then — not now.
+- **Path confinement.** Store operations never follow symlink directory components under
+  `<bench-dir>` and operate only on regular recording files. A lexical recording path must not resolve
+  outside the store through filesystem topology; reads and removals use the same boundary as writes.
 
 ### 6.1 History lives in git
 
