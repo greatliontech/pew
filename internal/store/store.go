@@ -206,7 +206,36 @@ func (s *Store) recordingFromPath(path string) (Recording, bool) {
 	if err != nil || filepath.Clean(want) != filepath.Clean(path) {
 		return Recording{}, false
 	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return Recording{}, false
+	}
+	if !isPewRecording(path) {
+		return Recording{}, false
+	}
 	return Recording{PkgRel: pkgRel, Bench: bench, Label: label, Path: path}, true
+}
+
+func isPewRecording(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	recs, err := Parse(f, path)
+	if err != nil || len(recs) == 0 {
+		return false
+	}
+	cfg := map[string]bool{}
+	for _, c := range recs[0].Config {
+		cfg[c.Key] = true
+	}
+	for _, key := range []string{"commit", "toolchain", "machine", "buildconfig", "dirty", "pew-closure", "pew-runtime", "pew-runtime-inputs"} {
+		if !cfg[key] {
+			return false
+		}
+	}
+	return true
 }
 
 // Remove deletes a recording and prunes empty package directories up to the store

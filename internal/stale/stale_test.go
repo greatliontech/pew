@@ -156,29 +156,3 @@ func TestCheckRuntimeUnverifiable(t *testing.T) {
 		t.Errorf("got %v/%q, want runtime unverifiable", v, reason)
 	}
 }
-
-func TestParseBenchList(t *testing.T) {
-	got := parseBenchList([]byte("BenchmarkA\nBenchmarkB\nok  \tx\t0.001s\n"))
-	if len(got) != 2 || got[0] != "BenchmarkA" || got[1] != "BenchmarkB" {
-		t.Errorf("got %v, want [BenchmarkA BenchmarkB]", got)
-	}
-	if g := parseBenchList([]byte("?   \tx\t[no test files]\n")); len(g) != 0 {
-		t.Errorf("expected no benchmarks, got %v", g)
-	}
-}
-
-func TestListBenchmarks(t *testing.T) {
-	names, err := ListBenchmarks("github.com/thegrumpylion/pew/internal/closure")
-	if err != nil {
-		t.Fatalf("ListBenchmarks: %v", err)
-	}
-	found := false
-	for _, n := range names {
-		if n == "BenchmarkHashFiles" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("BenchmarkHashFiles not listed; got %v", names)
-	}
-}

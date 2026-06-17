@@ -2,15 +2,11 @@
 
 package provenance
 
-import "runtime"
+import "fmt"
 
-// gatherFacts on non-Linux platforms: a best-effort fingerprint from runtime
-// facts only. pew's primary target is Linux single-machine (§3); richer hardware
-// probing on other OSes lands when needed.
+// gatherFacts on non-Linux platforms fails closed until that OS has a stable
+// machine-identity implementation. A weak runtime-only fingerprint would collide
+// across different hosts and permit false-valid reuse across machines (§8).
 func gatherFacts() (MachineFacts, error) {
-	return MachineFacts{
-		LogicalCores: runtime.NumCPU(),
-		OS:           runtime.GOOS,
-		GOARCH:       runtime.GOARCH,
-	}, nil
+	return MachineFacts{}, fmt.Errorf("provenance: machine fingerprint unsupported on this OS")
 }

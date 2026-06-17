@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/thegrumpylion/pew/internal/closure"
-	"github.com/thegrumpylion/pew/internal/gotool"
 	"github.com/thegrumpylion/pew/internal/provenance"
 	"golang.org/x/perf/benchfmt"
 )
@@ -117,24 +116,4 @@ func configMap(cfg []benchfmt.Config) map[string]string {
 		m[c.Key] = string(c.Value)
 	}
 	return m
-}
-
-// ListBenchmarks returns the top-level benchmark function names in pkg's test
-// binary (via `go test -list`), without running them.
-func ListBenchmarks(pkg string) ([]string, error) {
-	out, err := gotool.Run("test", "-list", "^Benchmark", pkg)
-	if err != nil {
-		return nil, err
-	}
-	return parseBenchList(out), nil
-}
-
-func parseBenchList(out []byte) []string {
-	var names []string
-	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		if line = strings.TrimSpace(line); strings.HasPrefix(line, "Benchmark") {
-			names = append(names, line)
-		}
-	}
-	return names
 }

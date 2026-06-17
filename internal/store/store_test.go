@@ -21,6 +21,8 @@ machine: m-deadbeef
 buildconfig: default
 dirty: false
 pew-closure: 1234abcd5678
+pew-runtime: abcdef1234567890
+pew-runtime-inputs: eyJ2IjoxfQ
 BenchmarkRun-8 1000000 1234 ns/op 456 B/op 7 allocs/op
 BenchmarkRun-8 1000000 1240 ns/op 456 B/op 7 allocs/op
 BenchmarkRun/case=big-8 200000 6100 ns/op 2048 B/op 9 allocs/op
@@ -284,6 +286,14 @@ func TestListRecordingsIgnoresNonStoreFiles(t *testing.T) {
 	badDir := filepath.Join(s.Root, "internal", "foo")
 	if err := os.WriteFile(filepath.Join(badDir, "notabench.txt"), []byte("ignored"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte(sample), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	symlinkPath := filepath.Join(badDir, "BenchmarkSymlink.txt")
+	if err := os.Symlink(outside, symlinkPath); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
 	}
 
 	recs, err := s.List()

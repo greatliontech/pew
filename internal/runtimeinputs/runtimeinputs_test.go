@@ -294,3 +294,52 @@ func TestChdirResolvesRelativePaths(t *testing.T) {
 		t.Fatal("relative path after chdir did not track the target file")
 	}
 }
+
+func TestModuleRootDirectoryManifestIsValid(t *testing.T) {
+	moduleDir, packageDir := testDirs(t)
+	if err := os.WriteFile(filepath.Join(moduleDir, "fixture.txt"), []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := FromTestLog([]byte("# test log\nopen ..\n"), moduleDir, packageDir)
+	if err != nil {
+		t.Fatalf("FromTestLog: %v", err)
+	}
+	if st.Unverifiable {
+		t.Fatalf("module root directory marked unverifiable: %s", st.Reason)
+	}
+	cur, err := Current(st.Manifest, moduleDir)
+	if err != nil {
+		t.Fatalf("Current: %v", err)
+	}
+	if cur.Digest != st.Digest {
+		t.Fatalf("module root digest changed without input change: %q vs %q", cur.Digest, st.Digest)
+	}
+}
+
+func TestCurrentRejectsRelativePathTraversal(t *testing.T) {
+	moduleDir, _ := testDirs(t)
+	encoded, err := encode(manifest{Version: manifestVersion, Paths: []pathID{{Kind: pathRel, Path: "../secret.txt"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Current(encoded, moduleDir); err == nil {
+		t.Fatal("Current accepted a relative path escaping the module")
+	}
+}
+
+func TestCurrentRejectsMalformedManifestIdentities(t *testing.T) {
+	moduleDir, _ := testDirs(t)
+	for _, m := range []manifest{
+		{Version: manifestVersion, Env: []string{"BAD\nNAME"}},
+		{Version: manifestVersion, Paths: []pathID{{Kind: pathRel, Path: "bad\npath"}}},
+		{Version: manifestVersion, Paths: []pathID{{Kind: pathAbs, Path: "relative"}}},
+	} {
+		encoded, err := encode(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Current(encoded, moduleDir); err == nil {
+			t.Fatalf("Current accepted malformed manifest: %+v", m)
+		}
+	}
+}

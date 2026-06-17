@@ -166,10 +166,10 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 		st := store.New(dir)
 		pkgRel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, p.Module.Path), "/")
 
-		benches, err := stale.ListBenchmarks(p.ImportPath)
+		benches, err := selectedBenchmarks(p)
 		if err != nil {
-			// Consistent with status/run: a package that does not build is reported
-			// and skipped, not fatal to the whole comparison.
+			// Consistent with status/run: a package whose benchmark declarations cannot
+			// be read is reported and skipped, not fatal to the whole comparison.
 			fmt.Fprintf(errw, "pew: warning: %s: %v\n", p.ImportPath, err)
 			continue
 		}

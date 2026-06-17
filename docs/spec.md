@@ -31,7 +31,10 @@ valid for HEAD, or must I re-run it?"** mechanically rather than by guesswork.
 - **G1 — Provenance.** Every stored result records enough to decide its own validity later:
   commit, toolchain, machine fingerprint, build configuration, and observed runtime inputs.
 - **G2 — Staleness.** For any stored result, decide *valid* (re-use) vs *stale* (re-run) for
-  the current tree, with **no false "valid"** (a stale result must never be reported valid).
+  the current tree, with **no false "valid" within pew's specified guard model**: source closure,
+  observed runtime inputs, toolchain, machine, and build configuration. Class-B external-dependence
+  detection has the documented best-effort boundary in §7.3; known external state outside that
+  detection is declared with `--impure`.
 - **G3 — Run hygiene.** Drive `go test -bench` with statistics-grade defaults (multiple counts,
   fixed benchtime, optional CPU pinning, environment quiesce checks).
 - **G4 — Comparison.** Detect regressions with proper statistics across three baseline modes
@@ -46,9 +49,10 @@ valid for HEAD, or must I re-run it?"** mechanically rather than by guesswork.
   or a results server. (Forward-compatible, not built now.)
 - **A benchmark results web UI / upload server.** Out of scope.
 - **Perfect dynamic-coverage staleness.** Static analysis cannot see all runtime behavior
-  (data files read at runtime, env-driven branches). pew is sound (never false-`valid`) by
-  *widening* bounded blind spots and marking unbounded external dependence `unverifiable`
-  (§7.3), not by claiming dynamic precision. See §7.
+  (data files read at runtime, env-driven branches). pew's no-false-`valid` guarantee applies to
+  the specified source/provenance/runtime-input guard model: bounded source blind spots are
+  *widened*, and recognized unbounded external dependence is marked `unverifiable` (§7.3), but
+  Class-B detection is explicitly best-effort for exotic unrecognized external state. See §7.
 - **Replacing the Go toolchain.** pew orchestrates `go test`/`go list`; it does not compile.
 
 ## 4. Vocabulary
@@ -163,7 +167,7 @@ avoid (see INV-6).
   **parallel-variant** axes: if you deliberately benchmark more than one (cgo on/off, a feature build
   tag, two Go versions) and want them retained side by side, `--label <name>` (§12, CLI surface) adds the
   filename discriminator (`BenchmarkFoo.cgo.txt`); without it the newer variant overwrites the older.
-  the toolchain/machine/buildconfig guards (§7) still prevent any silent *cross-variant comparison* either way — so omitting a
+  The toolchain/machine/buildconfig guards (§7, §10) still prevent any silent *cross-variant comparison* either way — so omitting a
   label is a retention choice, never a correctness one.
 - **No sidecar index.** The only derived datum — the closure hash — rides in-band as `pew-closure`
   (§5), so each benchmark's `.txt` is self-describing and there is no second artifact to keep in
@@ -189,7 +193,8 @@ log is required, and provenance-in-band is mandatory regardless of append-vs-ove
 ## 7. Staleness contract
 
 A stored result `R` for benchmark `B` gets one of **three verdicts** for HEAD, and the governing
-rule is **`valid` requires proof**:
+rule is **`valid` requires proof**. `unrecorded` is a `status` inventory state for a missing stored
+result, not a verdict about an existing result.
 
 - **valid** (reuse `R`) — all five guards below provably hold over a soundly over-approximated
    closure.
@@ -267,7 +272,7 @@ target read directly:
 
 | construct | how it's resolved |
 |-----------|-------------------|
-| `//go:linkname a b` | target `b` is named in the directive → add edge to `b` (std target → Guard-2-covered, ignore; non-std → include normally) |
+| `//go:linkname a b` | target `b` is named in the directive → add edge to `b` (std target → toolchain-guard-covered, ignore; non-std → include normally) |
 | Go-asm functions | always hash the `.s` (it is in the file set). Almost all asm is a **leaf** (no Go call-outs) ⇒ no missing callees ⇒ no widening — hashing the `.s` already catches any change. A cheap scan for Go-symbol call-refs (`·name(SB)`, `pkg·name(SB)`) resolves the rare call-out; only a *computed* call falls to A′. |
 | generics | built with `ssa.InstantiateGenerics` (§7.4) → every instantiation in the build is materialized and dispatched concretely; not a blind spot |
 
@@ -447,6 +452,8 @@ whose change plausibly shifts timing**, and *nothing transient* (or it fires spu
 The hash of these is the `machine` config line; a mismatch makes every result from the old
 fingerprint stale. The fingerprint reflects **host** topology (cores/RAM as the OS sees the
 hardware), not cgroup/container-effective limits — consistent with the single-machine scope (§3).
+An OS without a stable implementation of these identity facts fails provenance capture rather than
+emitting a weak best-effort fingerprint that could collide across machines.
 
 **Transient run conditions are excluded** (governor/scaling-driver, turbo/boost, CPU pinning,
 thermal/load). They are not machine *identity*: you set `performance` governor *for benchmarking*
@@ -513,8 +520,9 @@ flags real-but-trivial changes; a floor without significance flags noise.
   criterion for CI. `sec/op` gates by default; `allocs/op` and `B/op` are flagged but failing on
   them is opt-in.
 - Comparison projects *away* pew's own provenance keys (`commit`, `pew-closure`, …) so differing
-  metadata doesn't fragment the benchstat grouping, and **matches on `machine`** — never comparing
-  across machine fingerprints silently (§8).
+  metadata doesn't fragment the benchstat grouping, and separately requires non-empty equal
+  `machine`, `toolchain`, and `buildconfig` — never comparing across machine fingerprints,
+  toolchains, or build variants silently (§6, §8).
 
 Every tunable across pew — α, threshold, `-count`, `-benchtime`, pinning, strictness, gating
 metrics — is **configurable with the stated values as defaults**; the correctness guards (§7) are
@@ -531,7 +539,8 @@ go-git keeps pew self-contained (`go install` works with no external binary beyo
   `golang.org/x/tools/go/{packages,ssa,callgraph,callgraph/rta}` (RTA — CHA rejected as too imprecise,
   §7.4; VTA a documented upgrade path, §7.4); `go/types`, `go/ast` via `go/packages`.
   (`golang.org/x/perf/benchseries` is a candidate later for across-commit trends.)
-- **Imported (third-party, deliberate):** `github.com/go-git/go-git/v5` as the **git access layer**.
+- **Imported (third-party, deliberate):** `github.com/go-git/go-git/v5` as the **git access layer**,
+  and `github.com/spf13/cobra` as the CLI command/flag layer.
   pew is a pure git *reader* (HEAD, commit metadata, ref resolution, blob reads for
   baselines, file-scoped log for trends — §6.1, §9). Every `git show <ref>:<path>` /
   `git log -- <path>` in this spec is performed via go-git's object API, **never** by shelling to a
@@ -544,8 +553,8 @@ go-git keeps pew self-contained (`go install` works with no external binary beyo
   cannot produce a false-`valid`.
 - **Subprocesses (the Go toolchain only):** `go test -bench` (run), `go list -json` (Tier-1 file
   sets / build-config resolution); `go/packages` drives the same toolchain for Tier-2 loads.
-- Per project policy, go-git is the one deliberately-added third-party dep (user-approved); any
-  *further* third-party dependency is flagged and asked before adding.
+- Per project policy, go-git and cobra are the deliberately-added third-party deps (user-approved);
+  any *further* third-party dependency is flagged and asked before adding.
 
 ## 12. CLI surface
 
@@ -556,17 +565,19 @@ Four commands; names follow the `go test` / benchstat idiom.
   - **`--stale`** — (re)run only benchmarks currently `stale` / `unverifiable` / `unrecorded`; skip
     `valid` ones (the reuse-don't-rerun win; shares the `status` closure-analysis path).
   - hygiene: `-count` (10), `-benchtime` (1s), `--pin`, `--strict` (§9)
-  - storage: `--label <name>` (§6); purity overrides: `--assume-pure <bench>` (§7.5),
-    `--impure <bench>` (§7.3) — a durable code-directive alternative is deferred
-    (`docs/issues/purity-directives.md`).
+  - storage: `--bench-dir <dir>` (default `<module>/benchmarks`), `--label <name>` (§6);
+    purity overrides: `--assume-pure <bench>` (§7.5), `--impure <bench>` (§7.3) — a durable
+    code-directive alternative is deferred (`docs/issues/purity-directives.md`).
 - **`pew status [packages]`** — per-benchmark verdict: `valid` / `stale ⟨reason⟩` /
   `unverifiable ⟨reason⟩` / `unrecorded`. `--stale` filters to non-valid (scriptable; feeds
-  `run --stale`).
+  `run --stale`). Supports `--bench-dir <dir>`.
 - **`pew stat [ref | refA refB] [flags]`** — compare; the three baselines (§10) fall out of arg
   count (none → auto, one → pinned, two → A/B). `--fail-on-regression`, `--threshold` (3%),
   `--alpha` (0.05), metric selection (§10.1). `--explain` is reserved for a detailed guard/input
-  explanation view over `pew-closure` and `pew-runtime*`.
-- **`pew gc`** — remove stored results for benchmarks no longer present in the code.
+  explanation view over `pew-closure` and `pew-runtime*`. Supports `--bench-dir <dir>` and
+  `--label <name>`.
+- **`pew gc`** — remove stored results for benchmarks no longer present in the code. Supports
+  `--bench-dir <dir>`.
 
 (`pew list` dropped — `status` is the inventory-plus-verdict view.) Every flag value is a **default,
 configurable** (§10.1); the correctness guards (§7) are not flags.

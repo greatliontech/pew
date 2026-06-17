@@ -15,7 +15,21 @@ import (
 
 func writeRecording(t *testing.T, st *store.Store, pkgRel, bench, label string) string {
 	t.Helper()
-	recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}}}
+	recs := []*benchfmt.Result{{
+		Name:   benchfmt.Name(bench),
+		Iters:  1,
+		Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}},
+		Config: []benchfmt.Config{
+			{Key: "commit", Value: []byte("c1"), File: true},
+			{Key: "toolchain", Value: []byte("go-test"), File: true},
+			{Key: "machine", Value: []byte("m1"), File: true},
+			{Key: "buildconfig", Value: []byte("b1"), File: true},
+			{Key: "dirty", Value: []byte("false"), File: true},
+			{Key: "pew-closure", Value: []byte("cl1"), File: true},
+			{Key: "pew-runtime", Value: []byte("rt1"), File: true},
+			{Key: "pew-runtime-inputs", Value: []byte("manifest1"), File: true},
+		},
+	}}
 	if err := st.Write(pkgRel, bench, label, recs); err != nil {
 		t.Fatalf("Write(%q,%q,%q): %v", pkgRel, bench, label, err)
 	}
@@ -53,6 +67,16 @@ func TestGCStoreRemovesOnlyMissingBenchmarks(t *testing.T) {
 	if err := os.WriteFile(ignored, []byte("not a pew recording"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	pathShaped, err := st.Path("internal/notes", "BenchmarkNotes", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(pathShaped), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pathShaped, []byte("BenchmarkNotes-8 1 1 ns/op\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	removed, err := gcStore(st, map[string]map[string]bool{
 		"internal/foo": {"BenchmarkLive": true, "BenchmarkTagged": true},
@@ -70,6 +94,7 @@ func TestGCStoreRemovesOnlyMissingBenchmarks(t *testing.T) {
 	assertPathExists(t, hiddenLabel)
 	assertPathExists(t, protected)
 	assertPathExists(t, ignored)
+	assertPathExists(t, pathShaped)
 	assertPathMissing(t, deadBench)
 	assertPathMissing(t, deadLabel)
 	assertPathMissing(t, deadPkg)
@@ -90,6 +115,26 @@ func TestSourceBenchmarksIncludesBuildTaggedFiles(t *testing.T) {
 	}
 }
 
+func TestSelectedBenchmarksUsesBuildSelectedTestFiles(t *testing.T) {
+	dir := t.TempDir()
+	selected := []byte("package p\n\nimport \"testing\"\n\nfunc BenchmarkSelected(b *testing.B) {}\n")
+	if err := os.WriteFile(filepath.Join(dir, "selected_test.go"), selected, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hidden := []byte("package p\n\nimport \"testing\"\n\nfunc BenchmarkHidden(b *testing.B) {}\n")
+	if err := os.WriteFile(filepath.Join(dir, "hidden_test.go"), hidden, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	benches, err := selectedBenchmarks(pkgMeta{Dir: dir, TestGoFiles: []string{"selected_test.go"}})
+	if err != nil {
+		t.Fatalf("selectedBenchmarks: %v", err)
+	}
+	want := []string{"BenchmarkSelected"}
+	if !reflect.DeepEqual(benches, want) {
+		t.Fatalf("selectedBenchmarks = %v, want %v", benches, want)
+	}
+}
+
 func TestSourceBenchmarksAcceptsTestingBAlias(t *testing.T) {
 	dir := t.TempDir()
 	content := []byte("package p\n\nimport (\n\t\"testing\"\n\ttb \"example.com/tb\"\n)\n\ntype B = testing.B\n\nfunc BenchmarkAlias(b *B) {}\n\nfunc BenchmarkSelectorAlias(b *tb.B) {}\n")
@@ -107,7 +152,7 @@ func TestSourceBenchmarksAcceptsTestingBAlias(t *testing.T) {
 
 func TestSourceBenchmarksIgnoresInvalidBenchmarkSignature(t *testing.T) {
 	dir := t.TempDir()
-	content := []byte("package p\n\nimport \"testing\"\n\ntype MyB = testing.B\n\nfunc BenchmarkGone() {}\n\nfunc Benchmarkgone(b *testing.B) {}\n\nfunc BenchmarkGeneric[T any](b *testing.B) {}\n\nfunc BenchmarkMyAlias(b *MyB) {}\n")
+	content := []byte("package p\n\nimport \"testing\"\n\ntype MyB = testing.B\n\nfunc BenchmarkGone() {}\n\nfunc Benchmarkgone(b *testing.B) {}\n\nfunc BenchmarkGeneric[T any](b *testing.B) {}\n\nfunc BenchmarkMyAlias(b *MyB) {}\n\nfunc BenchmarkTwoParams(b, c *testing.B) {}\n")
 	if err := os.WriteFile(filepath.Join(dir, "gone_test.go"), content, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +163,7 @@ func TestSourceBenchmarksIgnoresInvalidBenchmarkSignature(t *testing.T) {
 	if !exists {
 		t.Fatal("sourceBenchmarks reported package missing")
 	}
-	for _, name := range []string{"BenchmarkGone", "Benchmarkgone", "BenchmarkGeneric", "BenchmarkMyAlias"} {
+	for _, name := range []string{"BenchmarkGone", "Benchmarkgone", "BenchmarkGeneric", "BenchmarkMyAlias", "BenchmarkTwoParams"} {
 		if benches[name] {
 			t.Fatalf("sourceBenchmarks = %v, want %s ignored", benches, name)
 		}

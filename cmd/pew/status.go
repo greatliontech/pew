@@ -28,7 +28,7 @@ func newStatusCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			patterns := args
 			if len(patterns) == 0 {
-				patterns = []string{"."}
+				patterns = []string{"./..."}
 			}
 			return runStatus(cmd.OutOrStdout(), benchDir, staleOnly, patterns)
 		},
@@ -39,9 +39,11 @@ func newStatusCmd() *cobra.Command {
 }
 
 type pkgMeta struct {
-	ImportPath string
-	Dir        string
-	Module     struct {
+	ImportPath   string
+	Dir          string
+	TestGoFiles  []string
+	XTestGoFiles []string
+	Module       struct {
 		Path string
 		Dir  string
 	}
@@ -70,7 +72,7 @@ func runStatus(w io.Writer, benchDir string, staleOnly bool, patterns []string) 
 }
 
 func statusPackage(w io.Writer, h *closure.Hasher, benchDir string, staleOnly bool, p pkgMeta) error {
-	benches, err := stale.ListBenchmarks(p.ImportPath)
+	benches, err := selectedBenchmarks(p)
 	if err != nil {
 		return err
 	}

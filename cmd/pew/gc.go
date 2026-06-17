@@ -18,11 +18,6 @@ import (
 	"github.com/thegrumpylion/pew/internal/store"
 )
 
-type parsedSource struct {
-	file   *ast.File
-	isTest bool
-}
-
 func newGCCmd() *cobra.Command {
 	var benchDir string
 	cmd := &cobra.Command{
@@ -179,24 +174,43 @@ func sourceBenchmarks(dir string) (map[string]bool, bool, error) {
 		}
 		return nil, false, err
 	}
-	var files []parsedSource
+	var files []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		files = append(files, e.Name())
+	}
+	benches, err := benchmarksInFiles(dir, files)
+	if err != nil {
+		return nil, true, err
+	}
+	return benches, true, nil
+}
+
+func selectedBenchmarks(p pkgMeta) ([]string, error) {
+	files := append([]string{}, p.TestGoFiles...)
+	files = append(files, p.XTestGoFiles...)
+	set, err := benchmarksInFiles(p.Dir, files)
+	if err != nil {
+		return nil, err
+	}
+	benches := make([]string, 0, len(set))
+	for b := range set {
+		benches = append(benches, b)
+	}
+	sort.Strings(benches)
+	return benches, nil
+}
+
+func benchmarksInFiles(dir string, names []string) (map[string]bool, error) {
 	benches := map[string]bool{}
 	fset := token.NewFileSet()
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
-			continue
-		}
-		file, err := parser.ParseFile(fset, filepath.Join(dir, e.Name()), nil, 0)
+	for _, name := range names {
+		file, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, 0)
 		if err != nil {
-			return nil, true, err
+			return nil, err
 		}
-		files = append(files, parsedSource{file: file, isTest: strings.HasSuffix(e.Name(), "_test.go")})
-	}
-	for _, parsed := range files {
-		if !parsed.isTest {
-			continue
-		}
-		file := parsed.file
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if ok && isBenchmarkDecl(fn) {
@@ -204,7 +218,7 @@ func sourceBenchmarks(dir string) (map[string]bool, bool, error) {
 			}
 		}
 	}
-	return benches, true, nil
+	return benches, nil
 }
 
 func isBenchmarkDecl(fn *ast.FuncDecl) bool {
@@ -215,6 +229,9 @@ func isBenchmarkDecl(fn *ast.FuncDecl) bool {
 		return false
 	}
 	if fn.Type.Results != nil && fn.Type.Results.NumFields() != 0 {
+		return false
+	}
+	if len(fn.Type.Params.List[0].Names) > 1 {
 		return false
 	}
 	star, ok := fn.Type.Params.List[0].Type.(*ast.StarExpr)

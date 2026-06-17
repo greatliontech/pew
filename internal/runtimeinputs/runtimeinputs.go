@@ -210,7 +210,11 @@ func relUnder(root, p string) (string, bool) {
 func materializePath(moduleDir string, id pathID) (string, error) {
 	switch id.Kind {
 	case pathRel:
-		return filepath.Join(moduleDir, filepath.FromSlash(id.Path)), nil
+		path := filepath.Clean(filepath.Join(moduleDir, filepath.FromSlash(id.Path)))
+		if _, ok := relUnder(moduleDir, path); !ok {
+			return "", fmt.Errorf("runtimeinputs: relative path escapes module: %q", id.Path)
+		}
+		return path, nil
 	case pathAbs:
 		if !filepath.IsAbs(id.Path) {
 			return "", fmt.Errorf("runtimeinputs: absolute path input is relative: %q", id.Path)
@@ -422,8 +426,41 @@ func decode(s string) (manifest, error) {
 	if m.Version != manifestVersion {
 		return manifest{}, fmt.Errorf("runtimeinputs: unsupported manifest version %d", m.Version)
 	}
+	if err := validateManifest(m); err != nil {
+		return manifest{}, err
+	}
 	sortManifest(&m)
 	return m, nil
+}
+
+func validateManifest(m manifest) error {
+	for _, name := range m.Env {
+		if name == "" || strings.ContainsAny(name, "\x00\r\n") {
+			return fmt.Errorf("runtimeinputs: invalid env name %q", name)
+		}
+	}
+	for _, id := range m.Paths {
+		if id.Path == "" || strings.ContainsAny(id.Path, "\x00\r\n") {
+			return fmt.Errorf("runtimeinputs: invalid path %q", id.Path)
+		}
+		switch id.Kind {
+		case pathRel:
+			if filepath.IsAbs(id.Path) {
+				return fmt.Errorf("runtimeinputs: relative path input is absolute: %q", id.Path)
+			}
+			clean := filepath.Clean(filepath.FromSlash(id.Path))
+			if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+				return fmt.Errorf("runtimeinputs: relative path escapes module: %q", id.Path)
+			}
+		case pathAbs:
+			if !filepath.IsAbs(id.Path) {
+				return fmt.Errorf("runtimeinputs: absolute path input is relative: %q", id.Path)
+			}
+		default:
+			return fmt.Errorf("runtimeinputs: unknown path kind %q", id.Kind)
+		}
+	}
+	return nil
 }
 
 func fprintf(w io.Writer, format string, args ...any) {

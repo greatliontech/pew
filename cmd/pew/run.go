@@ -41,7 +41,7 @@ func newRunCmd() *cobra.Command {
 			}
 			patterns := args
 			if len(patterns) == 0 {
-				patterns = []string{"."}
+				patterns = []string{"./..."}
 			}
 			return runRun(cmd.OutOrStdout(), cmd.ErrOrStderr(), rc, patterns)
 		},
@@ -88,6 +88,7 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 	if err != nil {
 		return err
 	}
+	var failures []string
 	for _, p := range pkgs {
 		if p.Module.Dir == "" {
 			continue
@@ -96,13 +97,17 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 		// reported and does not abort the rest of the tree.
 		if err := runPackage(w, h, rc, p); err != nil {
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
+			failures = append(failures, p.ImportPath)
 		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("run: %d package(s) failed: %s", len(failures), strings.Join(failures, ", "))
 	}
 	return nil
 }
 
 func runPackage(w io.Writer, h *closure.Hasher, rc runConfig, p pkgMeta) error {
-	benches, err := stale.ListBenchmarks(p.ImportPath)
+	benches, err := selectedBenchmarks(p)
 	if err != nil {
 		return err
 	}

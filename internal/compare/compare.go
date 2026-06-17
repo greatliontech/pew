@@ -19,8 +19,9 @@
 // A regression on a metric requires all three of (spec §10.1): the change is in
 // the worse direction, it is statistically significant (p < α, Mann–Whitney U),
 // and its magnitude clears a threshold. Comparisons are never made silently across
-// machine fingerprints (§8, §10): a benchmark whose two sides were recorded on
-// different machines is surfaced, not compared.
+// provenance guards that define a side-by-side variant (§6, §8, §10): a benchmark
+// whose two sides differ in machine, toolchain, or buildconfig is surfaced, not
+// compared.
 package compare
 
 import (
@@ -37,10 +38,13 @@ import (
 )
 
 // pewIgnore are pew's own provenance keys, projected away from grouping so that
-// the two sides (which legitimately differ in commit, closure, and possibly
-// toolchain) still line up for comparison (§10.1). machine is ignored here too —
-// it must not fragment grouping — but is enforced separately by the machine guard.
+// the two sides (which legitimately differ in commit, closure, runtime-input
+// digest, and dirty flag) still line up for comparison (§10.1). Variant guards
+// are ignored here too so they do not fragment grouping, but are enforced
+// separately by compareGuards.
 const pewIgnore = "commit toolchain machine buildconfig dirty pew-closure pew-runtime pew-runtime-inputs pure"
+
+var compareGuards = []string{"machine", "toolchain", "buildconfig"}
 
 // Options configure the regression criterion (spec §10.1). Every field is a
 // configurable default; the criterion itself is not a knob.
@@ -62,9 +66,9 @@ func DefaultOptions() Options {
 }
 
 // Result is the outcome of a comparison: one table per (file config, unit) plus
-// notes for benchmarks that could not be compared (one-sided, or a machine
-// mismatch). The notes exist so that an un-comparable benchmark is never silently
-// dropped.
+// notes for benchmarks that could not be compared (one-sided, missing/mixed
+// provenance, or variant-guard mismatch). The notes exist so that an
+// un-comparable benchmark is never silently dropped.
 type Result struct {
 	Tables []*Table
 	Notes  []string
@@ -121,34 +125,41 @@ var higherIsWorse = map[string]bool{"sec/op": true, "B/op": true, "allocs/op": t
 type cell struct{ base, newer []float64 }
 
 // group is one benchmark under one file configuration: its two sides' samples per
-// unit, plus the per-side machine fingerprint for the machine guard. Machine and
-// presence are tracked at the benchmark level (not per unit) so a mismatch or a
-// one-sided benchmark yields a single note, not one per metric.
+// unit, plus the per-side variant guard values. Guards and presence are tracked
+// at the benchmark level (not per unit) so a mismatch or one-sided benchmark
+// yields a single note, not one per metric.
 type group struct {
-	name                string
-	config              string
-	hasBase, hasNew     bool
-	baseMach, newMach   string
-	baseMixed, newMixed bool     // a side carried >1 distinct non-empty machine
-	units               []string // first-seen order, deduplicated
-	cells               map[string]*cell
+	name            string
+	config          string
+	hasBase, hasNew bool
+	baseGuards      map[string]guardValue
+	newGuards       map[string]guardValue
+	units           []string // first-seen order, deduplicated
+	cells           map[string]*cell
 }
 
-// recordMachine folds a result's machine fingerprint into a side. Empty (no
-// machine info) is ignored; two distinct non-empty fingerprints on one side set
-// mixed, so the guard refuses rather than silently picking one. In-spec each side
-// of a group comes from a single overwrite-written file (one machine), so mixed
-// only arises from hand-edited or externally-merged input — which the guard must
-// still never compare across (§8, §10).
-func recordMachine(cur string, mixed *bool, m string) string {
-	if m == "" {
+type guardValue struct {
+	value   string
+	seen    bool
+	missing bool
+	mixed   bool
+}
+
+// recordGuard folds one provenance guard into a side. Empty guard values are
+// missing, not wildcards: comparing an unknown machine/toolchain/buildconfig is a
+// silent cross-variant comparison risk.
+func recordGuard(cur guardValue, v string) guardValue {
+	if v == "" {
+		cur.missing = true
 		return cur
 	}
-	if cur == "" {
-		return m
+	if !cur.seen {
+		cur.value = v
+		cur.seen = true
+		return cur
 	}
-	if cur != m {
-		*mixed = true
+	if cur.value != v {
+		cur.mixed = true
 	}
 	return cur
 }
@@ -170,16 +181,24 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 			gk := gkey{configBy.Project(r), rowBy.Project(r)}
 			g := groups[gk]
 			if g == nil {
-				g = &group{name: string(r.Name), config: gk.cfg.String(), cells: map[string]*cell{}}
+				g = &group{
+					name:       string(r.Name),
+					config:     gk.cfg.String(),
+					baseGuards: map[string]guardValue{},
+					newGuards:  map[string]guardValue{},
+					cells:      map[string]*cell{},
+				}
 				groups[gk] = g
 			}
-			m := r.GetConfig("machine")
+			guards := g.newGuards
 			if isBase {
 				g.hasBase = true
-				g.baseMach = recordMachine(g.baseMach, &g.baseMixed, m)
+				guards = g.baseGuards
 			} else {
 				g.hasNew = true
-				g.newMach = recordMachine(g.newMach, &g.newMixed, m)
+			}
+			for _, key := range compareGuards {
+				guards[key] = recordGuard(guards[key], r.GetConfig(key))
 			}
 			for _, v := range r.Values {
 				c := g.cells[v.Unit]
@@ -224,16 +243,8 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 			res.Notes = append(res.Notes, fmt.Sprintf("%s: only present in %s; not compared", g.label(), side))
 			continue
 		}
-		// Machine guard (spec §8, §10): never compare across machine fingerprints
-		// silently. A side carrying mixed fingerprints, or two sides with differing
-		// non-empty fingerprints, is surfaced and skipped. Equal fingerprints
-		// (including both empty) compare.
-		if g.baseMixed || g.newMixed {
-			res.Notes = append(res.Notes, fmt.Sprintf("%s: mixed machine fingerprints within a side; not compared", g.label()))
-			continue
-		}
-		if g.baseMach != g.newMach && g.baseMach != "" && g.newMach != "" {
-			res.Notes = append(res.Notes, fmt.Sprintf("%s: machine mismatch (base=%s new=%s); not compared", g.label(), g.baseMach, g.newMach))
+		if note, ok := g.guardNote(); ok {
+			res.Notes = append(res.Notes, note)
 			continue
 		}
 
@@ -304,6 +315,22 @@ func (g *group) label() string {
 		return g.name
 	}
 	return g.name + " [" + g.config + "]"
+}
+
+func (g *group) guardNote() (string, bool) {
+	for _, key := range compareGuards {
+		base, newer := g.baseGuards[key], g.newGuards[key]
+		if base.mixed || newer.mixed {
+			return fmt.Sprintf("%s: mixed %s values within a side; not compared", g.label(), key), true
+		}
+		if base.missing || newer.missing || !base.seen || !newer.seen {
+			return fmt.Sprintf("%s: missing %s provenance; not compared", g.label(), key), true
+		}
+		if base.value != newer.value {
+			return fmt.Sprintf("%s: %s mismatch (base=%s new=%s); not compared", g.label(), key, base.value, newer.value), true
+		}
+	}
+	return "", false
 }
 
 // unitOrder is the preferred display order; unknown units follow alphabetically.

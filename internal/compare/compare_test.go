@@ -18,6 +18,8 @@ func sampleSet(name, machine string, units map[string][]float64) []*benchfmt.Res
 	if machine != "" {
 		cfg["machine"] = machine
 	}
+	cfg["toolchain"] = "go-test"
+	cfg["buildconfig"] = "build-test"
 	return benchResults(name, cfg, units)
 }
 
@@ -172,8 +174,8 @@ func sign(x float64) int {
 func TestDistinctPackagesNotMerged(t *testing.T) {
 	// Same benchmark name, two packages. Package a regresses (1000→1100); package
 	// b is flat (1000→1000). A merge would average them and hide a's regression.
-	cfgA := map[string]string{"pkg": "example.com/a", "machine": "m1"}
-	cfgB := map[string]string{"pkg": "example.com/b", "machine": "m1"}
+	cfgA := map[string]string{"pkg": "example.com/a", "machine": "m1", "toolchain": "go-test", "buildconfig": "build-test"}
+	cfgB := map[string]string{"pkg": "example.com/b", "machine": "m1", "toolchain": "go-test", "buildconfig": "build-test"}
 	base := append(
 		benchResults("BenchmarkParse-8", cfgA, map[string][]float64{"sec/op": seq(1000, 8)}),
 		benchResults("BenchmarkParse-8", cfgB, map[string][]float64{"sec/op": seq(1000, 8)})...,
@@ -223,12 +225,16 @@ func TestPewRuntimeKeysDoNotFragmentComparison(t *testing.T) {
 	baseCfg := map[string]string{
 		"pkg":                "example.com/a",
 		"machine":            "m1",
+		"toolchain":          "go-test",
+		"buildconfig":        "build-test",
 		"pew-runtime":        "old-runtime",
 		"pew-runtime-inputs": "old-manifest",
 	}
 	newCfg := map[string]string{
 		"pkg":                "example.com/a",
 		"machine":            "m1",
+		"toolchain":          "go-test",
+		"buildconfig":        "build-test",
 		"pew-runtime":        "new-runtime",
 		"pew-runtime-inputs": "new-manifest",
 	}
@@ -283,13 +289,40 @@ func TestMachineGuard(t *testing.T) {
 	}
 }
 
+func TestVariantGuards(t *testing.T) {
+	baseCfg := map[string]string{"pkg": "p", "machine": "m1", "toolchain": "go1", "buildconfig": "b1"}
+	for _, tc := range []struct {
+		name     string
+		newCfg   map[string]string
+		wantNote string
+	}{
+		{"toolchain mismatch", map[string]string{"pkg": "p", "machine": "m1", "toolchain": "go2", "buildconfig": "b1"}, "toolchain mismatch"},
+		{"buildconfig mismatch", map[string]string{"pkg": "p", "machine": "m1", "toolchain": "go1", "buildconfig": "b2"}, "buildconfig mismatch"},
+		{"missing machine", map[string]string{"pkg": "p", "toolchain": "go1", "buildconfig": "b1"}, "missing machine"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := Compare(
+				benchResults("BenchmarkX-8", baseCfg, map[string][]float64{"sec/op": seq(1000, 8)}),
+				benchResults("BenchmarkX-8", tc.newCfg, map[string][]float64{"sec/op": seq(1100, 8)}),
+				DefaultOptions(),
+			)
+			if len(res.Tables) != 0 {
+				t.Fatalf("compared across variant guard mismatch: got %d tables", len(res.Tables))
+			}
+			if len(res.Notes) != 1 || !strings.Contains(res.Notes[0], tc.wantNote) {
+				t.Fatalf("notes = %v, want %q", res.Notes, tc.wantNote)
+			}
+		})
+	}
+}
+
 // TestMixedMachineWithinSide: if one side carries two distinct machine
 // fingerprints for the same benchmark (hand-edited / externally-merged input), the
 // guard refuses rather than silently folding them — the §8/§10 contract holds
 // unconditionally, not just for the single-machine-per-file in-spec case.
 func TestMixedMachineWithinSide(t *testing.T) {
-	cfgA := map[string]string{"pkg": "p", "machine": "machineA"}
-	cfgB := map[string]string{"pkg": "p", "machine": "machineB"}
+	cfgA := map[string]string{"pkg": "p", "machine": "machineA", "toolchain": "go-test", "buildconfig": "build-test"}
+	cfgB := map[string]string{"pkg": "p", "machine": "machineB", "toolchain": "go-test", "buildconfig": "build-test"}
 	// Base side mixes machineA and machineB for the same benchmark; pkg is equal so
 	// they fall in one group (machine is projected away from grouping).
 	base := append(
@@ -396,7 +429,11 @@ func withUnit(name, machine, unit string, vals []float64) []*benchfmt.Result {
 			Name:   benchfmt.Name(name),
 			Iters:  1,
 			Values: []benchfmt.Value{{Value: v, Unit: unit}},
-			Config: []benchfmt.Config{{Key: "machine", Value: []byte(machine), File: true}},
+			Config: []benchfmt.Config{
+				{Key: "machine", Value: []byte(machine), File: true},
+				{Key: "toolchain", Value: []byte("go-test"), File: true},
+				{Key: "buildconfig", Value: []byte("build-test"), File: true},
+			},
 		})
 	}
 	return rs
