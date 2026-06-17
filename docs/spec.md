@@ -303,9 +303,11 @@ not source at all, so no source widening can bound it:
 | cgo linked against an external library (`#cgo LDFLAGS: -l…`) | C outside the build (in-tree `.c`/`.h` *are* hashed → that is A′, not B) |
 | `go:wasmimport` host functions | host code outside the binary |
 
-Any non-file Class-B dependence reachable in `B`'s closure → `unverifiable`. File I/O is
-`unverifiable` unless the recorded runtime-input manifest covers the observed files and the runtime
-guard passes (§7.8). (Ambient nondeterminism — `time.Now`, unseeded `rand` — is a
+Any non-file Class-B dependence reachable in `B`'s closure → `unverifiable`. File I/O reached by
+the closure also remains `unverifiable` unless the recorded runtime-input manifest proves complete
+coverage of the observed files and the runtime guard passes (§7.8). The current testlog manifest
+hashes inputs it observes, but does not prove that every reachable file-I/O path was emitted, so it
+cannot by itself suppress the Class-B marker. (Ambient nondeterminism — `time.Now`, unseeded `rand` — is a
 benchmark-*quality* issue, out of scope per §3, not a Class-B trigger.)
 
 Class-B detection is **best-effort coverage**, not a hard guarantee — perfect external-dependence
@@ -419,6 +421,10 @@ inputs that cannot be bounded are `unverifiable`, not valid.
 The Go testlog stream is package-run scoped, not benchmark-row scoped, so a package run's observed
 runtime inputs are conservatively attached to every benchmark result written from that run. This can
 make siblings stale together, but never makes a changed input look valid.
+The manifest is evidence about the identities present in the stream, not proof that the stream is
+complete for all reachable file I/O. Therefore matching `pew-runtime` can make a logged input change
+`stale`, but it does not make closure-level file I/O `valid` without an explicit complete-coverage
+proof in the manifest/mechanism.
 Package initialization runs before Go starts the testlog stream; file I/O reached only through init
 remains `unverifiable` unless some later benchmark/testlog-observed operation covers the same input.
 User `TestMain` code outside the `m.Run` execution window is likewise not proven by the benchmark

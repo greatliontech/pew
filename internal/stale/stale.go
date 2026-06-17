@@ -3,8 +3,6 @@
 package stale
 
 import (
-	"strings"
-
 	"github.com/thegrumpylion/pew/internal/closure"
 	"github.com/thegrumpylion/pew/internal/provenance"
 	"golang.org/x/perf/benchfmt"
@@ -89,14 +87,11 @@ func Check(cur provenance.Provenance, head closure.Closure, runtime RuntimeState
 		// guards as if verifiable.
 	default:
 		// No purity directive: an unhashable external dependence in HEAD's closure
-		// makes validity unprovable (§7.3 Class B). File I/O is the exception once
-		// the runtime-input guard has passed: actual os/template file observations
-		// are then covered by pew-runtime (§7.8).
+		// makes validity unprovable (§7.3 Class B). The runtime-input guard catches
+		// changes to inputs it observed, but it is not itself proof that every
+		// reachable file-I/O path was observed (§7.8).
 		if head.Unverifiable {
 			reason := head.Reason
-			if head.RuntimeFileIOOnly && runtimeCoveredFileIO(reason) {
-				break
-			}
 			if reason == "" {
 				reason = "external dependence"
 			}
@@ -104,10 +99,6 @@ func Check(cur provenance.Provenance, head closure.Closure, runtime RuntimeState
 		}
 	}
 	return Valid, ""
-}
-
-func runtimeCoveredFileIO(reason string) bool {
-	return strings.Contains(reason, "file I/O")
 }
 
 func configMap(cfg []benchfmt.Config) map[string]string {

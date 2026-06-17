@@ -10,7 +10,6 @@ close-out convention.
 | [dirty-runtime-inputs](dirty-runtime-inputs.md) | dirty/pinned-baseline semantics for ignored or untracked runtime inputs | when changing dirty baseline checks or runtime-input baseline semantics |
 | [purity-directives](purity-directives.md) | durable `//pew:pure` / `//pew:external` code directives vs CLI flags | when CLI purity flags prove insufficient |
 | [quiesce-turbo-thermal](quiesce-turbo-thermal.md) | turbo and thermal checks missing from strict quiesce implementation | when changing quiesce checks, strict-mode run hygiene, or §9 quiesce documentation |
-| [runtime-file-io-observability](runtime-file-io-observability.md) | prove testlog file-observation completeness before file-I/O closure becomes valid | when changing runtime file-I/O coverage or the `stale.Check` file-I/O bypass |
 | [stat-historical-inventory](stat-historical-inventory.md) | `pew stat` should inventory recordings from selected refs, not only current source | when changing `pew stat` inventory or git-ref recording enumeration |
 | [store-symlink-boundary](store-symlink-boundary.md) | confine store writes/reads/removes when bench-dir contains symlink ancestors | when changing store path creation, writes, reads, or removals |
 

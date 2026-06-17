@@ -70,11 +70,11 @@ func TestCheckUnverifiable(t *testing.T) {
 	}
 }
 
-func TestCheckRuntimeCoveredFileIOValid(t *testing.T) {
+func TestCheckRuntimeFileIORemainsUnverifiableWithoutCoverageProof(t *testing.T) {
 	p := prov()
 	head := closure.Closure{Hash: "cl1", Unverifiable: true, Reason: "reaches os.ReadFile (file I/O)", RuntimeFileIOOnly: true}
-	if v, reason := Check(p, head, rt("rt1"), recordFor(p, "cl1")); v != Valid || reason != "" {
-		t.Errorf("runtime-covered file I/O: got %v/%q, want valid", v, reason)
+	if v, reason := Check(p, head, rt("rt1"), recordFor(p, "cl1")); v != Unverifiable || reason != head.Reason {
+		t.Errorf("runtime file I/O without coverage proof: got %v/%q, want unverifiable/%q", v, reason, head.Reason)
 	}
 }
 
@@ -91,6 +91,10 @@ func TestCheckGuardFailurePrecedesUnverifiable(t *testing.T) {
 	rec := recordFor(p, "cl1")
 	if v, reason := Check(p, closure.Closure{Hash: "cl2", Unverifiable: true}, rt("rt1"), rec); v != Stale || reason != "pew-closure" {
 		t.Errorf("class-B with stale closure: got %v/%q, want stale/pew-closure", v, reason)
+	}
+	runtimeFileIO := closure.Closure{Hash: "cl1", Unverifiable: true, Reason: "reaches os.ReadFile (file I/O)", RuntimeFileIOOnly: true}
+	if v, reason := Check(p, runtimeFileIO, rt("rt2"), rec); v != Stale || reason != "pew-runtime" {
+		t.Errorf("class-B with stale runtime inputs: got %v/%q, want stale/pew-runtime", v, reason)
 	}
 	impureRec := append(recordFor(p, "cl1"), benchfmt.Config{Key: "pure", Value: []byte("false")})
 	if v, reason := Check(p, cl("cl2"), rt("rt1"), impureRec); v != Stale || reason != "pew-closure" {
