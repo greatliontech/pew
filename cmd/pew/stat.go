@@ -219,7 +219,7 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 			if checkStale && newOK {
 				if cl, e := hasher.Compute(p.ImportPath, b); e != nil {
 					fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", p.ImportPath, b, e)
-				} else if v, reason := stale.Check(prov, cl, newRecs[0].Config); v != stale.Valid {
+				} else if v, reason := stale.Check(prov, cl, currentRuntimeState(newRecs[0].Config, p.Module.Dir), newRecs[0].Config); v != stale.Valid {
 					msg := string(v)
 					if reason != "" {
 						msg += " (" + reason + ")"

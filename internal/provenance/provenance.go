@@ -20,14 +20,14 @@ import (
 
 // Provenance is the set of facts about how a recording was produced. commit and
 // dirty are not derivable from the recording's later git position (§6.1); the
-// other three are exact-equality staleness guards (§7). pew-closure (guard 1) is
-// added separately by the closure analysis (chunk 3).
+// other three are exact-equality staleness guards (§7). pew-closure and
+// pew-runtime are added separately by their guard builders.
 type Provenance struct {
 	Commit      string // SHA of the code measured (not the recording's git commit, §6.1)
 	Dirty       bool   // working tree had uncommitted changes at run
-	Toolchain   string // `go version` identity (guard 2)
-	Machine     string // machine fingerprint, §8 (guard 3)
-	BuildConfig string // build-settings digest (guard 4)
+	Toolchain   string // `go version` identity (toolchain guard)
+	Machine     string // machine fingerprint, §8 (machine guard)
+	BuildConfig string // build-settings digest (buildconfig guard)
 }
 
 // Config returns the in-band provenance lines in spec §5 order. File is set so

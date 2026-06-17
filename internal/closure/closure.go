@@ -31,9 +31,10 @@ import (
 // `valid`/`stale`. Unverifiable is a check-time verdict; the hash is always
 // computed (and recorded at run time, §7.6) regardless.
 type Closure struct {
-	Hash         string
-	Unverifiable bool
-	Reason       string // why unverifiable (e.g. "reaches os.Open (file I/O)")
+	Hash              string
+	Unverifiable      bool
+	Reason            string // why unverifiable (e.g. "reaches os.Open (file I/O)")
+	RuntimeFileIOOnly bool   // true iff all unverifiable causes are post-testlog file I/O
 }
 
 // Hasher computes closure hashes. New resolves GOMODCACHE once for the

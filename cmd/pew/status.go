@@ -13,8 +13,10 @@ import (
 	"github.com/thegrumpylion/pew/internal/closure"
 	"github.com/thegrumpylion/pew/internal/gotool"
 	"github.com/thegrumpylion/pew/internal/provenance"
+	"github.com/thegrumpylion/pew/internal/runtimeinputs"
 	"github.com/thegrumpylion/pew/internal/stale"
 	"github.com/thegrumpylion/pew/internal/store"
+	"golang.org/x/perf/benchfmt"
 )
 
 func newStatusCmd() *cobra.Command {
@@ -85,7 +87,7 @@ func statusPackage(w io.Writer, h *closure.Hasher, benchDir string, staleOnly bo
 	st := store.New(dir)
 	pkgRel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, p.Module.Path), "/")
 	for _, b := range benches {
-		verdict, reason, err := checkOne(st, h, p.ImportPath, pkgRel, b, "", prov)
+		verdict, reason, err := checkOne(st, h, p.ImportPath, pkgRel, p.Module.Dir, b, "", prov)
 		if err != nil {
 			return err
 		}
@@ -106,7 +108,7 @@ func statusPackage(w io.Writer, h *closure.Hasher, benchDir string, staleOnly bo
 // when a recording exists (the SSA load is the dominant cost, §7.4; an unrecorded
 // benchmark needs no analysis). The Tier-2 closure is per benchmark, so it is
 // computed here in the per-benchmark loop, not once per package.
-func checkOne(st *store.Store, h *closure.Hasher, pkgPath, pkgRel, bench, label string, prov provenance.Provenance) (stale.Verdict, string, error) {
+func checkOne(st *store.Store, h *closure.Hasher, pkgPath, pkgRel, moduleDir, bench, label string, prov provenance.Provenance) (stale.Verdict, string, error) {
 	recs, err := st.Read(pkgRel, bench, label)
 	switch {
 	case errors.Is(err, store.ErrNotRecorded):
@@ -118,9 +120,28 @@ func checkOne(st *store.Store, h *closure.Hasher, pkgPath, pkgRel, bench, label 
 		if err != nil {
 			return "", "", err
 		}
-		v, reason := stale.Check(prov, cl, recs[0].Config)
+		runtimeState := currentRuntimeState(recs[0].Config, moduleDir)
+		v, reason := stale.Check(prov, cl, runtimeState, recs[0].Config)
 		return v, reason, nil
 	}
+}
+
+func currentRuntimeState(cfg []benchfmt.Config, moduleDir string) stale.RuntimeState {
+	manifest := ""
+	for _, c := range cfg {
+		if c.Key == "pew-runtime-inputs" {
+			manifest = string(c.Value)
+			break
+		}
+	}
+	if manifest == "" {
+		return stale.RuntimeState{}
+	}
+	cur, err := runtimeinputs.Current(manifest, moduleDir)
+	if err != nil {
+		return stale.RuntimeState{}
+	}
+	return stale.RuntimeState{Digest: cur.Digest, Unverifiable: cur.Unverifiable, Reason: cur.Reason, OK: cur.OK}
 }
 
 func resolvePackages(patterns []string) ([]pkgMeta, error) {

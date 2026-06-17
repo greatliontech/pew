@@ -33,13 +33,24 @@ func TestRecordedConfigSerializable(t *testing.T) {
 	if !PureConfig("true").File {
 		t.Error("pure config must have File:true")
 	}
+	for _, cfg := range RuntimeConfig("rt1", "manifest1") {
+		if !cfg.File {
+			t.Errorf("%s config must have File:true", cfg.Key)
+		}
+	}
 }
 
 func TestTestArgs(t *testing.T) {
-	got := TestArgs("example/p", Options{Count: 10, Benchtime: "1s", Bench: "."})
+	got := TestArgs("example/p", Options{Count: 10, Benchtime: "1s", Bench: "."}, "")
 	want := []string{"test", "-run", "^$", "-bench", ".", "-benchmem", "-count", "10", "-benchtime", "1s", "example/p"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("TestArgs = %v, want %v", got, want)
+	}
+
+	got = TestArgs("example/p", Options{Count: 10, Benchtime: "1s", Bench: "."}, "/tmp/pew-testlog")
+	want = append(want, "-args", "-test.testlogfile=/tmp/pew-testlog")
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("TestArgs with testlog = %v, want %v", got, want)
 	}
 }
 

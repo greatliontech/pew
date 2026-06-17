@@ -19,7 +19,8 @@ cmd/pew/              # CLI entry (cobra subcommands)
 internal/store/       # benchmark-format read/write, paths, overwrite, in-band provenance
 internal/provenance/  # git (go-git) + toolchain + machine fingerprint + buildconfig
 internal/closure/     # Tier-1 (go list) then Tier-2 (RTA); the pew-closure hash
-internal/stale/       # the four guards → valid/stale/unverifiable
+internal/stale/       # the five guards → valid/stale/unverifiable
+internal/runtimeinputs/ # Go testlog manifest + pew-runtime digest
 internal/run/         # go test orchestration, hygiene, quiesce
 internal/compare/     # benchproc/benchmath, baselines, regression
 ```
@@ -55,7 +56,7 @@ x/tools are Go-team / stdlib-tier.
 - **Depends on:** 1
 
 ### 4 — Staleness verdicts + `pew status`
-- **Delivers:** `internal/stale` combines the four guards (closure from 3, toolchain/machine/
+- **Delivers:** `internal/stale` combines the pre-runtime guards (closure from 3, toolchain/machine/
   buildconfig from 2) into `valid`/`stale⟨reason⟩`/`unverifiable⟨reason⟩`/`unrecorded`; records
   `pew-closure` at run time, recomputes HEAD, compares. `pew status` ships. **First working tool**
   (coarse staleness detection).
@@ -91,7 +92,16 @@ x/tools are Go-team / stdlib-tier.
   each ⇒ stale). Differential test: Tier-2 hash-set ⊆ Tier-1 set on a fixture corpus.
 - **Depends on:** 3 (replaces its impl), 4
 
-### 8 — `pew gc` + polish
+### 8 — Observed runtime-input guard
+- **Delivers:** `internal/runtimeinputs` parses Go's testlog (`getenv`, `open`, `stat`, `chdir`),
+  stores `pew-runtime-inputs` as an identity-only manifest, stores `pew-runtime` as the value/content
+  digest, and wires `pew run` / `pew status` / `pew stat` to enforce the fifth guard. Missing or
+  malformed runtime metadata is `stale`; observed but unbounded inputs are `unverifiable`.
+- **Invariants:** runtime input changes move `pew-runtime` (env/file anchors); env values never appear
+  in stored config; package-run observed inputs attach to every benchmark row from that package run.
+- **Depends on:** 4, 5
+
+### 9 — `pew gc` + polish
 - **Delivers:** `pew gc` removes stored results for benchmarks no longer present in code (enumerate
   via `go list`/3); CLI help, README, end-to-end docs; opportunistic test-surface extension.
 - **Depends on:** 1, 3

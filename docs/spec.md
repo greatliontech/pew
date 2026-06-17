@@ -29,7 +29,7 @@ valid for HEAD, or must I re-run it?"** mechanically rather than by guesswork.
 ## 2. Goals
 
 - **G1 — Provenance.** Every stored result records enough to decide its own validity later:
-  commit, toolchain, machine fingerprint, build configuration.
+  commit, toolchain, machine fingerprint, build configuration, and observed runtime inputs.
 - **G2 — Staleness.** For any stored result, decide *valid* (re-use) vs *stale* (re-run) for
   the current tree, with **no false "valid"** (a stale result must never be reported valid).
 - **G3 — Run hygiene.** Drive `go test -bench` with statistics-grade defaults (multiple counts,
@@ -60,8 +60,11 @@ valid for HEAD, or must I re-run it?"** mechanically rather than by guesswork.
 - **Provenance** — facts about *how a result was produced*: commit, toolchain, machine,
   build config. Source-of-truth; not recomputable (you can't re-derive "what commit was this").
 - **Closure** — the set of source that can affect `B`'s runtime performance, reachable by
-  static analysis from `B`. Hashed to detect code change. *Derived* from (commit, build-config),
-  not provenance.
+   static analysis from `B`. Hashed to detect code change. *Derived* from (commit, build-config),
+   not provenance.
+- **Runtime input** — a non-source input that the benchmark process actually observed during the
+  recorded run, such as an environment variable or local file opened via Go's testlog-observable
+  runtime paths. Hashed separately from the source closure.
 - **Machine fingerprint** — a stable id over the hardware/OS facts that affect benchmark timing.
 - **Baseline** — the result set a fresh run is compared against to detect regression (§9).
 
@@ -74,13 +77,15 @@ extension point — so files stay self-describing and `benchstat`-readable.
 Toolchain already emits `goos`, `goarch`, `pkg`, `cpu`. pew adds (uniform per run, therefore
 global config lines):
 
-| key            | meaning                                                        | source-of-truth? |
-|----------------|---------------------------------------------------------------|------------------|
-| `commit`       | full SHA of HEAD at run time                                   | yes              |
-| `toolchain`    | `go version` output (compiler/runtime identity)               | yes              |
-| `machine`      | machine fingerprint id (§8)                                    | yes              |
-| `buildconfig`  | digest of build tags + relevant GOFLAGS/gcflags + cgo + PGO   | yes              |
-| `dirty`        | `true` if the working tree had uncommitted changes at run     | yes              |
+| key                  | meaning                                                       | source-of-truth? |
+|----------------------|---------------------------------------------------------------|------------------|
+| `commit`             | full SHA of HEAD at run time                                  | yes              |
+| `toolchain`          | `go version` output (compiler/runtime identity)               | yes              |
+| `machine`            | machine fingerprint id (§8)                                   | yes              |
+| `buildconfig`        | digest of build tags + relevant GOFLAGS/gcflags + cgo + PGO  | yes              |
+| `dirty`              | `true` if the working tree had uncommitted changes at run    | yes              |
+| `pew-runtime`        | digest of observed runtime inputs (§7.8)                     | derived          |
+| `pew-runtime-inputs` | encoded manifest of observed runtime input names/paths (§7.8) | yes              |
 
 **The closure hash rides in-band** as a namespaced `pew-closure` config line (no sidecar index). It
 is *derived*, not provenance (recomputable from commit + toolchain + build-config), so it is never
@@ -88,6 +93,11 @@ the source of truth and recomputing it never changes a verdict (INV-5). In-band 
 overwrite makes each file single-block, so the key cannot fragment a benchstat projection; pew
 additionally strips `pew-*` keys from its own comparison projections (§10). The `.txt` is therefore
 fully self-describing — everything needed to evaluate its own validity lives in one file.
+
+Observed runtime inputs use the same in-band rule: `pew-runtime-inputs` is the recorded manifest
+(input names/paths, not secret values), and `pew-runtime` is the digest of those inputs' run-time
+values/content. The manifest is source-of-truth for recomputing the current digest; the digest is the
+guard value.
 
 A `dirty` run is recorded but flagged: its `commit` does not faithfully describe its source, so
 its closure is computed from the *working tree*, and it is never usable as a pinned baseline.
@@ -104,22 +114,27 @@ analysis dead weight.
   fresh run recognize whether it is the *same point* as a prior recording (same tuple) or a new one.
   The per-commit history of identities lives in git (§6.1), not an in-file log.
 - **Validity** — is a stored measurement still usable for HEAD *without re-running*? The predicate
-  of §7: `closure ∧ toolchain ∧ machine ∧ buildconfig`, each compared HEAD-vs-record.
+  of §7: `closure ∧ runtime-inputs ∧ toolchain ∧ machine ∧ buildconfig`, each compared
+  HEAD/current-vs-record.
 
-The two keys differ in exactly one term — the **commit↔closure swap**:
+The two keys differ in which facts answer each question: commit identifies the recording point, while
+closure and observed runtime inputs prove reuse validity:
 
 | term         | identity (which record) | validity (reuse for HEAD) |
 |--------------|:-----------------------:|:-------------------------:|
 | commit sha   |           ✓             |        ✗ (excluded)       |
 | closure hash |           ✗             |             ✓             |
+| runtime inputs |         ✗             |             ✓             |
 | toolchain    |           ✓             |             ✓             |
 | machine      |           ✓             |             ✓             |
 | buildconfig  |           ✓             |             ✓             |
 
-Identity **pins** code by commit; validity **tests** code by closure. The commit is a coarse
-"some code somewhere changed" signal — correct for *naming a point in history*, fatally over-broad
-for *deciding a re-run*. The closure is the precise "code this benchmark exercises changed" signal.
-Swapping one for the other is the entire reason closure analysis exists (see INV-6).
+Identity **pins** code by commit; validity **tests** code by closure plus observed runtime inputs. The
+commit is a coarse "some code somewhere changed" signal — correct for *naming a point in history*,
+fatally over-broad for *deciding a re-run*. The closure is the precise "code this benchmark exercises
+changed" signal, and runtime inputs are the precise "observed non-source input changed" signal.
+Swapping commit for closure in the validity predicate is the classic trap closure analysis exists to
+avoid (see INV-6).
 
 ## 6. Storage layout
 
@@ -148,7 +163,7 @@ Swapping one for the other is the entire reason closure analysis exists (see INV
   **parallel-variant** axes: if you deliberately benchmark more than one (cgo on/off, a feature build
   tag, two Go versions) and want them retained side by side, `--label <name>` (§12, CLI surface) adds the
   filename discriminator (`BenchmarkFoo.cgo.txt`); without it the newer variant overwrites the older.
-  Guards 2–4 (§7) still prevent any silent *cross-variant comparison* either way — so omitting a
+  the toolchain/machine/buildconfig guards (§7) still prevent any silent *cross-variant comparison* either way — so omitting a
   label is a retention choice, never a correctness one.
 - **No sidecar index.** The only derived datum — the closure hash — rides in-band as `pew-closure`
   (§5), so each benchmark's `.txt` is self-describing and there is no second artifact to keep in
@@ -176,25 +191,26 @@ log is required, and provenance-in-band is mandatory regardless of append-vs-ove
 A stored result `R` for benchmark `B` gets one of **three verdicts** for HEAD, and the governing
 rule is **`valid` requires proof**:
 
-- **valid** (reuse `R`) — all four guards below provably hold over a soundly over-approximated
-  closure.
-- **stale** (re-run) — some guard demonstrably fails: closure, toolchain, machine, or build config
-  changed.
+- **valid** (reuse `R`) — all five guards below provably hold over a soundly over-approximated
+   closure.
+- **stale** (re-run) — some guard demonstrably fails: closure, runtime input, toolchain, machine, or
+   build config changed.
 - **unverifiable** (re-run, reason recorded) — guards would pass, but `B`'s closure reaches an
   external dependence pew cannot hash (Class B, §7.3), so validity can be neither proven nor
   refuted. Operationally a re-run, but distinct from `stale`: the user can assert purity to override
   (§7.5). Absence of proof never collapses to `valid` (INV-1).
 
-The four guards:
+The five guards:
 
 1. **Closure** — `closure-hash(B, HEAD) == closure-hash(B, R.commit)`
-2. **Toolchain** — current `go version` == `R.toolchain`
-3. **Machine** — current fingerprint == `R.machine`
-4. **Build config** — current digest == `R.buildconfig` (build tags, `-gcflags`, cgo on/off, PGO
+2. **Runtime inputs** — recomputed digest from `R.pew-runtime-inputs` == `R.pew-runtime` (§7.8)
+3. **Toolchain** — current `go version` == `R.toolchain`
+4. **Machine** — current fingerprint == `R.machine`
+5. **Build config** — current digest == `R.buildconfig` (build tags, `-gcflags`, cgo on/off, PGO
    profile hash)
 
-Guards 2–4 are exact-equality on recorded provenance — cheap and unambiguous. Guard 1 is the hard
-one; the rest of this section defines `closure-hash` and its soundness.
+Guards 3–5 are exact-equality on recorded provenance — cheap and unambiguous. Guards 1–2 are derived
+digests over source and observed runtime inputs; the rest of this section defines their soundness.
 
 ### 7.1 What the closure covers
 
@@ -219,11 +235,11 @@ concrete type in `init`, then `B` observes it later through package-level state 
 dispatch.
 
 **Scope cut — the standard library is excluded from the hash.** stdlib + runtime change *iff* the
-toolchain changes, which is Guard 2's job; hashing thousands of constant-per-toolchain std files is
+toolchain changes; hashing thousands of constant-per-toolchain std files is
 redundant and slow. The call graph is still **traversed through std** (so callbacks into your code —
 a user `MarshalJSON` invoked by `encoding/json` — stay reachable), but std declarations contribute
 nothing to the hash. Module **dependencies are included** (a `go.mod` bump changes their content,
-which Guard 2 does *not* cover). `go list -json` distinguishes them: `Standard: true` → excluded;
+which the toolchain guard does *not* cover). `go list -json` distinguishes them: `Standard: true` → excluded;
 everything else → hashed.
 
 ### 7.2 Tiers — same model, Tier 1 is the sound floor
@@ -271,19 +287,21 @@ These escalate to hashing the **entire non-std build closure** (Tier 1 maximal).
 reflection/asm/unsafe *inside stdlib* are below the §7.1 cut, A′ fires only on such constructs in
 **your code or a dependency** — rare, so precision stays high.
 
-**(B) Unhashable external dependence — verdict `unverifiable`, not a widening.** Behavior depends on
-state that is not source at all, so no source widening can bound it:
+**(B) External dependence — observe, or verdict `unverifiable`.** Behavior depends on state that is
+not source at all, so no source widening can bound it:
 
 | construct | external state |
 |-----------|----------------|
-| file I/O on a non-embedded path (`os.Open`, `os.ReadFile`, …) | a file that may change between record and HEAD |
+| file I/O on a non-embedded path (`os.Open`, `os.ReadFile`, …) | observed local file inputs are recorded by §7.8; an unobserved/unhashable file input remains `unverifiable` |
 | network I/O | a remote that may change |
 | `plugin.Open` / `plugin.Lookup` | code loaded from an arbitrary `.so` at runtime |
 | cgo linked against an external library (`#cgo LDFLAGS: -l…`) | C outside the build (in-tree `.c`/`.h` *are* hashed → that is A′, not B) |
 | `go:wasmimport` host functions | host code outside the binary |
 
-Any of these reachable in `B`'s closure → `unverifiable`. (Ambient nondeterminism — `time.Now`,
-unseeded `rand` — is a benchmark-*quality* issue, out of scope per §3, not a Class-B trigger.)
+Any non-file Class-B dependence reachable in `B`'s closure → `unverifiable`. File I/O is
+`unverifiable` unless the recorded runtime-input manifest covers the observed files and the runtime
+guard passes (§7.8). (Ambient nondeterminism — `time.Now`, unseeded `rand` — is a
+benchmark-*quality* issue, out of scope per §3, not a Class-B trigger.)
 
 Class-B detection is **best-effort coverage**, not a hard guarantee — perfect external-dependence
 detection is impossible (§3 non-goal), so unlike INV-1's source-soundness it can miss exotic cases.
@@ -367,9 +385,48 @@ Two consequences:
   side effects can affect `B` without a declaration edge. Per-declaration hashing *into* cache deps is
   an available precision upgrade (like VTA), not a default.
 
+### 7.8 Observed runtime inputs
+
+During `pew run`, pew enables Go's testlog channel for the benchmark process and records the inputs
+the runtime reports as observed. This is a separate guard from the source closure: source changes move
+`pew-closure`; observed non-source changes move `pew-runtime`.
+
+Recorded data:
+
+- `pew-runtime-inputs` — an encoded manifest of observed input identities: environment variable names
+  and file paths. Environment values are **not** stored in clear text.
+- `pew-runtime` — a digest over the manifest's current values/content at record time.
+
+At status time, pew decodes `pew-runtime-inputs`, re-hashes those same inputs in the current working
+tree/environment, and compares the digest to `pew-runtime`. A mismatch is `stale` with reason
+`pew-runtime`. Missing runtime-input metadata is stale: validity requires proof, and old recordings
+did not carry this guard.
+
+File inputs under the module directory are stored module-relative so moving a checkout does not make a
+recording stale. External file inputs are stored absolute. Missing files hash as missing, so a file
+appearing/disappearing moves the guard. Opened regular files hash both content and stable `FileInfo`
+metadata; opened directories hash their tree entries, entry content, and stable entry metadata.
+Package-local directories may be hashed as directory trees; directory symlinks are hashed through only
+when their resolved target remains inside the module. Metadata-only `stat` observations are
+`unverifiable` unless pew can bound the full metadata value the benchmark observed. Directories or
+inputs that cannot be bounded are `unverifiable`, not valid.
+
+The Go testlog stream is package-run scoped, not benchmark-row scoped, so a package run's observed
+runtime inputs are conservatively attached to every benchmark result written from that run. This can
+make siblings stale together, but never makes a changed input look valid.
+Package initialization runs before Go starts the testlog stream; file I/O reached only through init
+remains `unverifiable` unless some later benchmark/testlog-observed operation covers the same input.
+User `TestMain` code outside the `m.Run` execution window is likewise not proven by the benchmark
+testlog and remains `unverifiable` when it reaches file I/O.
+Relative runtime paths are valid only when the initial testlog CWD is known not to have been changed
+before the stream starts; pre-testlog CWD changes, including syscall/unix wrappers, make relative
+observed paths `unverifiable`. Path binding, file creation, or directory creation mutations that the
+testlog does not observe, such as symlink/remove/rename/create/temp-directory changes, are likewise not
+runtime-coverable proof of a stable input identity.
+
 ## 8. Machine fingerprint
 
-Guard 3 is a **drift guard**, compared by **exact equality**: "same machine config as when this was
+The machine guard is a **drift guard**, compared by **exact equality**: "same machine config as when this was
 recorded?" — not cross-machine normalization (§3). So the fingerprint hashes **stable identity facts
 whose change plausibly shifts timing**, and *nothing transient* (or it fires spuriously):
 
@@ -383,8 +440,8 @@ whose change plausibly shifts timing**, and *nothing transient* (or it fires spu
   costs, so reusing pre-bump numbers would be a quiet guard hole. The cost (rerun after a kernel
   update) is the price of soundness, like the toolchain guard.
 - **GOARCH** — the host architecture. The codegen *feature level* (GOAMD64/GOARM/…) is
-  build-determined, so it lives in the **buildconfig** digest (guard 4, §5), not the fingerprint: a
-  feature-level change moves guard 4, a host-arch change moves guard 3; both captured, neither
+  build-determined, so it lives in the **buildconfig** digest (§5), not the fingerprint: a
+  feature-level change moves the buildconfig guard, a host-arch change moves the machine guard; both captured, neither
   dropped.
 
 The hash of these is the `machine` config line; a mismatch makes every result from the old
@@ -425,7 +482,7 @@ provenance is captured atomically with the run:
   deliberately and the run-time warn catches a bad run at its source (a `runconditions` line +
   comparison-mismatch check can be added later if mixing ever bites).
 - Records provenance (§5) and computes the run-commit closure hash (§7), recorded in-band as
-  `pew-closure` (§5), at run time.
+  `pew-closure` (§5), plus observed runtime inputs (`pew-runtime*`, §7.8), at run time.
 
 ## 10. Comparison & regression
 
@@ -507,7 +564,8 @@ Four commands; names follow the `go test` / benchstat idiom.
   `run --stale`).
 - **`pew stat [ref | refA refB] [flags]`** — compare; the three baselines (§10) fall out of arg
   count (none → auto, one → pinned, two → A/B). `--fail-on-regression`, `--threshold` (3%),
-  `--alpha` (0.05), metric selection (§10.1).
+  `--alpha` (0.05), metric selection (§10.1). `--explain` is reserved for a detailed guard/input
+  explanation view over `pew-closure` and `pew-runtime*`.
 - **`pew gc`** — remove stored results for benchmarks no longer present in the code.
 
 (`pew list` dropped — `status` is the inventory-plus-verdict view.) Every flag value is a **default,
@@ -527,7 +585,7 @@ Recorded at the spec because no code exists yet. Each promotes to an enforced te
 check when code able to violate it is first written (per project conventions). The chunk-start
 triage gate resolves these `Lands:` conditions.
 
-- **INV-1 — Closure soundness (`valid` requires proof).** pew reports `valid` only when all four
+- **INV-1 — Closure soundness (`valid` requires proof).** pew reports `valid` only when all five
   guards (§7) provably hold over a closure that is a *superset* of the source able to affect `B`'s
   performance. Every blind spot is **resolved** to a precise edge, **widened** to the maximal non-std
   closure, or **downgraded** to `unverifiable` — never silently dropped, never narrowing the covered
@@ -536,7 +594,7 @@ triage gate resolves these `Lands:` conditions.
   hash is unchanged, and `B` is reported `valid` → silent regression behind a stale baseline (the
   core failure pew exists to prevent). *Kind:* entailed. *Lands:* when closure analysis is first
   implemented.
-- **INV-2 — Validity verdict.** `B` is `valid` for HEAD iff *all four* guards hold **and** its
+- **INV-2 — Validity verdict.** `B` is `valid` for HEAD iff *all five* guards hold **and** its
   closure reaches no unhashable external dependence (Class B, §7.3); any guard failing ⇒ `stale`;
   guards holding but a Class-B dependence present ⇒ `unverifiable`. *Violation:* e.g. toolchain
   changed but reported valid, or a benchmark reading an external file reported valid after the file
@@ -545,17 +603,18 @@ triage gate resolves these `Lands:` conditions.
   benchmark-format file parseable by `benchfmt` and plain `benchstat`. *Violation:* a written file
   that `benchfmt` rejects → ecosystem lock-in, G5 broken. *Kind:* clause-explicit (§5, G5).
   *Lands:* when the storage writer is implemented.
-- **INV-4 — Provenance completeness.** Every stored result carries the provenance required to
-  evaluate all four guards (commit, toolchain, machine, buildconfig). *Violation:* a result missing
-  `commit` → closure guard unevaluable → validity undecidable → must conservatively re-run, defeating
-  G1/G2. *Kind:* entailed. *Lands:* when the storage writer is implemented.
+- **INV-4 — Provenance completeness.** Every stored result carries the provenance and manifests
+  required to evaluate all five guards (commit, runtime-input manifest, toolchain, machine,
+  buildconfig). *Violation:* a result missing `commit` or `pew-runtime-inputs` → closure/runtime
+  guard unevaluable → validity undecidable → must conservatively re-run, defeating G1/G2. *Kind:*
+  entailed. *Lands:* when the storage writer is implemented.
 - **INV-5 — Derived state is never authoritative.** Persisted closure hashes are a memoization keyed
   *only* by immutable inputs `(commit, toolchain, buildconfig)`; they are never the source of truth
   for provenance and recomputing/discarding them never changes a validity verdict. *Violation:* a
   validity check trusts a cached hash that disagrees with recomputation from source → INV-1 bypassed
   via a stale cache. *Kind:* entailed. *Lands:* when the closure cache is implemented.
 - **INV-6 — Validity is commit-sha-independent.** The validity predicate (§7) depends only on
-  `closure ∧ toolchain ∧ machine ∧ buildconfig`; it never reads the raw commit sha. *Violation:*
+  `closure ∧ runtime-inputs ∧ toolchain ∧ machine ∧ buildconfig`; it never reads the raw commit sha. *Violation:*
   two records identical in closure/toolchain/machine/buildconfig but differing in commit sha get
   different validity verdicts → every commit invalidates every benchmark → G2 (avoid wasted runs)
   defeated and the closure analysis rendered moot (the §5.1 trap). *Kind:* entailed. *Anchor test:*

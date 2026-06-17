@@ -10,8 +10,9 @@
 // Grouping mirrors benchstat: results are grouped into tables by their file
 // configuration (.config) and into rows by full benchmark name (.fullname). pew's
 // own provenance keys (commit, toolchain, machine, buildconfig, dirty,
-// pew-closure, pure) are projected away so that differing provenance between the
-// two sides does not fragment the grouping (§10.1); the native keys go test emits
+// pew-closure, pew-runtime, pew-runtime-inputs, pure) are projected away so that
+// differing provenance between the two sides does not fragment the grouping
+// (§10.1); the native keys go test emits
 // (pkg, goos, goarch, cpu) are kept, so the same benchmark name in two different
 // packages is never merged.
 //
@@ -39,7 +40,7 @@ import (
 // the two sides (which legitimately differ in commit, closure, and possibly
 // toolchain) still line up for comparison (§10.1). machine is ignored here too —
 // it must not fragment grouping — but is enforced separately by the machine guard.
-const pewIgnore = "commit toolchain machine buildconfig dirty pew-closure pure"
+const pewIgnore = "commit toolchain machine buildconfig dirty pew-closure pew-runtime pew-runtime-inputs pure"
 
 // Options configure the regression criterion (spec §10.1). Every field is a
 // configurable default; the criterion itself is not a knob.

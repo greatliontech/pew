@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/thegrumpylion/pew/internal/closure"
 	"github.com/thegrumpylion/pew/internal/provenance"
 	"github.com/thegrumpylion/pew/internal/run"
+	"github.com/thegrumpylion/pew/internal/runtimeinputs"
 	"github.com/thegrumpylion/pew/internal/stale"
 	"github.com/thegrumpylion/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
@@ -120,7 +122,7 @@ func runPackage(w io.Writer, h *closure.Hasher, rc runConfig, p pkgMeta) error {
 
 	opts := rc.opts
 	if rc.staleOnly {
-		need, err := nonValid(st, h, p.ImportPath, pkgRel, rc.label, benches, prov)
+		need, err := nonValid(st, h, p.ImportPath, pkgRel, p.Module.Dir, rc.label, benches, prov)
 		if err != nil {
 			return err
 		}
@@ -134,7 +136,25 @@ func runPackage(w io.Writer, h *closure.Hasher, rc runConfig, p pkgMeta) error {
 	// A benchmark failure makes `go test` exit non-zero and discards the whole
 	// package's run (the successful benches too) — a suspect package records
 	// nothing rather than a partial set.
-	out, err := run.Execute(p.Module.Dir, rc.pin, run.TestArgs(p.ImportPath, opts))
+	testlog, err := os.CreateTemp("", "pew-testlog-*.txt")
+	if err != nil {
+		return err
+	}
+	testlogPath := testlog.Name()
+	if err := testlog.Close(); err != nil {
+		return err
+	}
+	defer os.Remove(testlogPath)
+
+	out, err := run.Execute(p.Module.Dir, rc.pin, run.TestArgs(p.ImportPath, opts, testlogPath))
+	if err != nil {
+		return err
+	}
+	testlogBytes, err := os.ReadFile(testlogPath)
+	if err != nil {
+		return err
+	}
+	runtimeState, err := runtimeinputs.FromTestLog(testlogBytes, p.Module.Dir, filepath.Join(p.Module.Dir, filepath.FromSlash(pkgRel)))
 	if err != nil {
 		return err
 	}
@@ -152,6 +172,9 @@ func runPackage(w io.Writer, h *closure.Hasher, rc runConfig, p pkgMeta) error {
 			return err
 		}
 		recs = withConfig(recs, run.ClosureConfig(cl.Hash))
+		for _, cfg := range run.RuntimeConfig(runtimeState.Digest, runtimeState.Manifest) {
+			recs = withConfig(recs, cfg)
+		}
 		// Purity flags are per-benchmark (spec §7.5): apply only to the named ones.
 		if rc.pure[name] {
 			recs = withConfig(recs, run.PureConfig("true"))
@@ -177,10 +200,10 @@ func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {
 	return recs
 }
 
-func nonValid(st *store.Store, h *closure.Hasher, pkgPath, pkgRel, label string, benches []string, prov provenance.Provenance) ([]string, error) {
+func nonValid(st *store.Store, h *closure.Hasher, pkgPath, pkgRel, moduleDir, label string, benches []string, prov provenance.Provenance) ([]string, error) {
 	var need []string
 	for _, b := range benches {
-		v, _, err := checkOne(st, h, pkgPath, pkgRel, b, label, prov)
+		v, _, err := checkOne(st, h, pkgPath, pkgRel, moduleDir, b, label, prov)
 		if err != nil {
 			return nil, err
 		}

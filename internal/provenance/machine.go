@@ -17,7 +17,7 @@ type MachineFacts struct {
 }
 
 // Fingerprint is a stable digest of the facts. Equal facts ⇒ equal fingerprint
-// (the exact-equality guard 3, §7); any change ⇒ a different fingerprint.
+// (the exact-equality machine guard, §7); any change ⇒ a different fingerprint.
 func (f MachineFacts) Fingerprint() string {
 	b, _ := json.Marshal(f) // struct field order is stable
 	return digest(string(b))

@@ -219,6 +219,43 @@ func TestDistinctPackagesNotMerged(t *testing.T) {
 	}
 }
 
+func TestPewRuntimeKeysDoNotFragmentComparison(t *testing.T) {
+	baseCfg := map[string]string{
+		"pkg":                "example.com/a",
+		"machine":            "m1",
+		"pew-runtime":        "old-runtime",
+		"pew-runtime-inputs": "old-manifest",
+	}
+	newCfg := map[string]string{
+		"pkg":                "example.com/a",
+		"machine":            "m1",
+		"pew-runtime":        "new-runtime",
+		"pew-runtime-inputs": "new-manifest",
+	}
+	res := Compare(
+		benchResults("BenchmarkParse-8", baseCfg, map[string][]float64{"sec/op": seq(1000, 8)}),
+		benchResults("BenchmarkParse-8", newCfg, map[string][]float64{"sec/op": seq(1100, 8)}),
+		DefaultOptions(),
+	)
+
+	var secTables int
+	for _, tbl := range res.Tables {
+		if tbl.Unit != "sec/op" {
+			continue
+		}
+		secTables++
+		if strings.Contains(tbl.Config, "pew-runtime") {
+			t.Fatalf("runtime metadata leaked into comparison config: %q", tbl.Config)
+		}
+		if len(tbl.Rows) != 1 || !tbl.Rows[0].Regression {
+			t.Fatalf("runtime keys fragmented comparison; rows=%d regression=%v", len(tbl.Rows), len(tbl.Rows) == 1 && tbl.Rows[0].Regression)
+		}
+	}
+	if secTables != 1 {
+		t.Fatalf("got %d sec/op tables, want 1", secTables)
+	}
+}
+
 // TestMachineGuard encodes the §8/§10 invariant: differing machine fingerprints
 // are never compared silently — surfaced as a note, with no comparison row.
 func TestMachineGuard(t *testing.T) {

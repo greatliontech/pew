@@ -1015,8 +1015,501 @@ func TestComputeClassBUnverifiable(t *testing.T) {
 	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
 		t.Fatalf("Compute unverifiable = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
 	}
+	if !cl.RuntimeFileIOOnly {
+		t.Fatalf("RuntimeFileIOOnly = false for benchmark-time file I/O: %#v", cl)
+	}
 	if cl.Hash == "" {
 		t.Fatal("Compute returned empty hash for unverifiable closure")
+	}
+}
+
+func TestComputeInitFileIONotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/initfile"
+	cl, err := h.Compute(pkg, "BenchmarkInitFile")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
+		t.Fatalf("init file I/O = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("init-time file I/O marked runtime-coverable")
+	}
+}
+
+func TestComputeInitCWDRelativeFileIONotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/initcwd"
+	cl, err := h.Compute(pkg, "BenchmarkInitCWD")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
+		t.Fatalf("init CWD relative file I/O = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("relative benchmark file I/O after init CWD change marked runtime-coverable")
+	}
+}
+
+func TestComputeUnixCWDRelativeFileIONotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/unixcwd"
+	cl, err := h.Compute(pkg, "BenchmarkUnixCWD")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
+		t.Fatalf("unix CWD relative file I/O = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("relative benchmark file I/O after unix CWD change marked runtime-coverable")
+	}
+}
+
+func TestComputeInitStdHelperFileIONotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/initstdhelper"
+	cl, err := h.Compute(pkg, "BenchmarkInitStdHelper")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
+		t.Fatalf("init std helper file I/O = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("init-time std helper file I/O marked runtime-coverable")
+	}
+}
+
+func TestComputeSharedFileIOIsRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/sharedfile"
+	cl, err := h.Compute(pkg, "BenchmarkSharedFile")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
+		t.Fatalf("shared file I/O = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	}
+	if !cl.RuntimeFileIOOnly {
+		t.Fatal("shared init+benchmark file I/O was not marked runtime-coverable")
+	}
+}
+
+func TestComputeSharedParameterizedFileIONotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/sharedparam"
+	cl, err := h.Compute(pkg, "BenchmarkSharedParam")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
+		t.Fatalf("shared parameterized file I/O = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("shared parameterized init+benchmark file I/O marked runtime-coverable")
+	}
+}
+
+func TestComputeSharedGlobalFileIONotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/sharedglobal"
+	cl, err := h.Compute(pkg, "BenchmarkSharedGlobal")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
+		t.Fatalf("shared global file I/O = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("shared global-state init+benchmark file I/O marked runtime-coverable")
+	}
+}
+
+func TestComputeSharedChdirFileIONotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/sharedchdir"
+	cl, err := h.Compute(pkg, "BenchmarkSharedChdir")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
+		t.Fatalf("shared chdir file I/O = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("shared relative-path file I/O across chdir marked runtime-coverable")
+	}
+}
+
+func TestComputeSharedFchdirFileIONotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/sharedfchdir"
+	cl, err := h.Compute(pkg, "BenchmarkSharedFchdir")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
+		t.Fatalf("shared fchdir file I/O = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("shared relative-path file I/O across fchdir marked runtime-coverable")
+	}
+}
+
+func TestComputeUnixFchdirFileIONotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/unixfchdir"
+	cl, err := h.Compute(pkg, "BenchmarkUnixFchdir")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
+		t.Fatalf("unix fchdir file I/O = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("shared relative-path file I/O across unix fchdir marked runtime-coverable")
+	}
+}
+
+func TestComputePathBindingMutationNotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/pathbinding"
+	cl, err := h.Compute(pkg, "BenchmarkPathBinding")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "path mutation") {
+		t.Fatalf("path binding mutation = %v/%q, want path mutation", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("path-binding mutation marked runtime-coverable")
+	}
+}
+
+func TestComputeSyscallPathBindingMutationNotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/syscallbinding"
+	cl, err := h.Compute(pkg, "BenchmarkSyscallBinding")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "path mutation") {
+		t.Fatalf("syscall path binding mutation = %v/%q, want path mutation", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("syscall path-binding mutation marked runtime-coverable")
+	}
+}
+
+func TestComputeMkdirTempNotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/mkdirtemp"
+	cl, err := h.Compute(pkg, "BenchmarkMkdirTemp")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "path mutation") {
+		t.Fatalf("MkdirTemp = %v/%q, want path mutation", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("MkdirTemp marked runtime-coverable")
+	}
+}
+
+func TestComputeCreateTempNotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/createtemp"
+	cl, err := h.Compute(pkg, "BenchmarkCreateTemp")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "filesystem mutation") {
+		t.Fatalf("CreateTemp = %v/%q, want filesystem mutation", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("CreateTemp marked runtime-coverable")
+	}
+}
+
+func TestComputeFileMutationsNotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/filemutations"
+	for _, bench := range []string{"BenchmarkCreate", "BenchmarkOpenFileCreate", "BenchmarkWriteFile"} {
+		t.Run(bench, func(t *testing.T) {
+			cl, err := h.Compute(pkg, bench)
+			if err != nil {
+				t.Fatalf("Compute: %v", err)
+			}
+			if !cl.Unverifiable || !strings.Contains(cl.Reason, "filesystem mutation") {
+				t.Fatalf("%s = %v/%q, want filesystem mutation", bench, cl.Unverifiable, cl.Reason)
+			}
+			if cl.RuntimeFileIOOnly {
+				t.Fatalf("%s marked runtime-coverable", bench)
+			}
+		})
+	}
+}
+
+func TestComputeMkdirNotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/mkdir"
+	cl, err := h.Compute(pkg, "BenchmarkMkdir")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "path mutation") {
+		t.Fatalf("Mkdir = %v/%q, want path mutation", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("Mkdir marked runtime-coverable")
+	}
+}
+
+func TestComputeUnixAtPathBindingMutationNotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/unixatbinding"
+	cl, err := h.Compute(pkg, "BenchmarkUnixAtBinding")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "path mutation") {
+		t.Fatalf("unix *at path binding mutation = %v/%q, want path mutation", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("unix *at path-binding mutation marked runtime-coverable")
+	}
+}
+
+func TestComputeUnixOpenCreateNotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/unixopencreate"
+	cl, err := h.Compute(pkg, "BenchmarkUnixOpenCreate")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "filesystem mutation") {
+		t.Fatalf("unix open create = %v/%q, want filesystem mutation", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("unix open create marked runtime-coverable")
+	}
+}
+
+func TestComputeTempDirNotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/tempdir"
+	cl, err := h.Compute(pkg, "BenchmarkTempDir")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "path mutation") {
+		t.Fatalf("TempDir = %v/%q, want path mutation", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("TempDir marked runtime-coverable")
+	}
+}
+
+func TestComputeCopyFSNotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/copyfs"
+	cl, err := h.Compute(pkg, "BenchmarkCopyFS")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "path mutation") {
+		t.Fatalf("CopyFS = %v/%q, want path mutation", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("CopyFS marked runtime-coverable")
+	}
+}
+
+func TestComputeOpenFileReadIsRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/openfileread"
+	cl, err := h.Compute(pkg, "BenchmarkOpenFileRead")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
+		t.Fatalf("OpenFile read = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	}
+	if !cl.RuntimeFileIOOnly {
+		t.Fatal("read-only OpenFile was not runtime-coverable")
+	}
+}
+
+func TestComputeRootOpenFileReadIsRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/openrootread"
+	cl, err := h.Compute(pkg, "BenchmarkRootOpenFileRead")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
+		t.Fatalf("Root.OpenFile read = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	}
+	if !cl.RuntimeFileIOOnly {
+		t.Fatal("read-only Root.OpenFile was not runtime-coverable")
+	}
+}
+
+func TestComputeInitDynamicFileIONotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/initdynamic"
+	cl, err := h.Compute(pkg, "BenchmarkInitDynamic")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
+		t.Fatalf("init dynamic file I/O = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("init-time computed-call file I/O marked runtime-coverable")
+	}
+}
+
+func TestComputeInitStdCallbackFileIONotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/initstdcallback"
+	cl, err := h.Compute(pkg, "BenchmarkInitStdCallback")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
+		t.Fatalf("init std callback file I/O = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("init-time std callback file I/O marked runtime-coverable")
+	}
+}
+
+func TestComputeTestMainFileIONotRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/testmainfile"
+	cl, err := h.Compute(pkg, "BenchmarkTestMainFile")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
+		t.Fatalf("TestMain file I/O = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("TestMain file I/O marked runtime-coverable")
+	}
+}
+
+func TestComputeTestMainRuntimeFileIOIsRuntimeCoverable(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/testmainruntimefile"
+	cl, err := h.Compute(pkg, "BenchmarkTestMainRuntimeFile")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
+		t.Fatalf("TestMain runtime file I/O = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	}
+	if !cl.RuntimeFileIOOnly {
+		t.Fatal("benchmark file I/O reached through m.Run was not runtime-coverable")
+	}
+}
+
+func TestComputeMixedExternalNotRuntimeFileIOOnly(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/mixedexternal"
+	cl, err := h.Compute(pkg, "BenchmarkMixedExternal")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	if !cl.Unverifiable || !strings.Contains(cl.Reason, "network I/O") {
+		t.Fatalf("mixed external = %v/%q, want network I/O", cl.Unverifiable, cl.Reason)
+	}
+	if cl.RuntimeFileIOOnly {
+		t.Fatal("mixed file+network dependency marked runtime-file-only")
 	}
 }
 

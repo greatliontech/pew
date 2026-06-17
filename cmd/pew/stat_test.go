@@ -6,6 +6,7 @@ import (
 	"github.com/thegrumpylion/pew/internal/closure"
 	"github.com/thegrumpylion/pew/internal/compare"
 	"github.com/thegrumpylion/pew/internal/provenance"
+	"github.com/thegrumpylion/pew/internal/runtimeinputs"
 	"github.com/thegrumpylion/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
 )
@@ -124,6 +125,10 @@ func TestNonValidUsesLabel(t *testing.T) {
 		t.Fatalf("Compute: %v", err)
 	}
 	p := provenance.Provenance{Commit: "c1", Toolchain: "go1.26.4", Machine: "m1", BuildConfig: "b1"}
+	rt, err := runtimeinputs.FromTestLog([]byte("# test log\n"), ".", ".")
+	if err != nil {
+		t.Fatalf("runtime inputs: %v", err)
+	}
 	st := store.New(t.TempDir())
 	write := func(label, hash string) {
 		t.Helper()
@@ -133,6 +138,8 @@ func TestNonValidUsesLabel(t *testing.T) {
 			{Key: "machine", Value: []byte(p.Machine), File: true},
 			{Key: "buildconfig", Value: []byte(p.BuildConfig), File: true},
 			{Key: "pew-closure", Value: []byte(hash), File: true},
+			{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
+			{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
 			{Key: "dirty", Value: []byte("false"), File: true},
 		}
 		recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
@@ -143,14 +150,14 @@ func TestNonValidUsesLabel(t *testing.T) {
 	write("", cl.Hash)
 	write("x", cl.Hash+"-stale")
 
-	need, err := nonValid(st, h, pkg, "", "x", []string{bench}, p)
+	need, err := nonValid(st, h, pkg, "", ".", "x", []string{bench}, p)
 	if err != nil {
 		t.Fatalf("nonValid labeled: %v", err)
 	}
 	if len(need) != 1 || need[0] != bench {
 		t.Fatalf("labeled nonValid = %v, want [%s]", need, bench)
 	}
-	need, err = nonValid(st, h, pkg, "", "", []string{bench}, p)
+	need, err = nonValid(st, h, pkg, "", ".", "", []string{bench}, p)
 	if err != nil {
 		t.Fatalf("nonValid unlabeled: %v", err)
 	}

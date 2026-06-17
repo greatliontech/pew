@@ -19,12 +19,17 @@ type Options struct {
 	Bench     string // -bench pattern (default ".")
 }
 
-// TestArgs builds the `go test` argument list for benchmarking pkg.
-func TestArgs(pkg string, o Options) []string {
-	return []string{
+// TestArgs builds the `go test` argument list for benchmarking pkg. If testlog
+// is non-empty, it enables Go's testlog channel for observed runtime inputs.
+func TestArgs(pkg string, o Options, testlog string) []string {
+	args := []string{
 		"test", "-run", "^$", "-bench", o.Bench, "-benchmem",
 		"-count", strconv.Itoa(o.Count), "-benchtime", o.Benchtime, pkg,
 	}
+	if testlog != "" {
+		args = append(args, "-args", "-test.testlogfile="+testlog)
+	}
+	return args
 }
 
 // Execute runs the benchmark command (optionally pinned via `taskset -c <pin>`)
@@ -90,8 +95,16 @@ func PureConfig(v string) benchfmt.Config {
 	return benchfmt.Config{Key: "pure", Value: []byte(v), File: true}
 }
 
+// RuntimeConfig records the runtime-input guard and its manifest (§7.8).
+func RuntimeConfig(digest, manifest string) []benchfmt.Config {
+	return []benchfmt.Config{
+		{Key: "pew-runtime", Value: []byte(digest), File: true},
+		{Key: "pew-runtime-inputs", Value: []byte(manifest), File: true},
+	}
+}
+
 // Demux groups results by top-level benchmark function, appending extra config
-// (provenance + pew-closure) to each. Results are cloned defensively.
+// (provenance + guard configs) to each. Results are cloned defensively.
 func Demux(results []*benchfmt.Result, extra []benchfmt.Config) map[string][]*benchfmt.Result {
 	groups := map[string][]*benchfmt.Result{}
 	for _, r := range results {
