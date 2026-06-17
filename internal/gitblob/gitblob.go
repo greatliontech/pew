@@ -12,9 +12,12 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
@@ -23,6 +26,9 @@ type Repo struct {
 	repo *gogit.Repository
 	root string // absolute worktree root, for repo-relative path resolution
 }
+
+// Root returns the repository worktree root used for absolute path resolution.
+func (r *Repo) Root() string { return r.root }
 
 // Open opens the repository containing dir (walking up to the .git directory).
 func Open(dir string) (*Repo, error) {
@@ -62,11 +68,60 @@ func (r *Repo) ReadAt(ref, absPath string) (content []byte, ok bool, err error) 
 		}
 		return nil, false, fmt.Errorf("gitblob: read %s@%s: %w", rel, ref, err)
 	}
+	if !isRegularBlob(f.Mode) {
+		return nil, false, nil
+	}
 	s, err := f.Contents()
 	if err != nil {
 		return nil, false, fmt.Errorf("gitblob: contents %s@%s: %w", rel, ref, err)
 	}
 	return []byte(s), true, nil
+}
+
+// ListAt returns the absolute worktree paths of files committed under absDir at
+// ref. A missing directory is an expected empty result; a bad ref is an error.
+func (r *Repo) ListAt(ref, absDir string) ([]string, error) {
+	relDir, err := r.relPath(absDir)
+	if err != nil {
+		return nil, err
+	}
+	h, err := r.repo.ResolveRevision(plumbing.Revision(ref))
+	if err != nil {
+		return nil, fmt.Errorf("gitblob: resolve ref %q: %w", ref, err)
+	}
+	commit, err := r.repo.CommitObject(*h)
+	if err != nil {
+		return nil, fmt.Errorf("gitblob: commit %s: %w", h, err)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, fmt.Errorf("gitblob: tree %s: %w", h, err)
+	}
+	prefix := filepath.ToSlash(relDir)
+	if prefix == "." {
+		prefix = ""
+	}
+	var paths []string
+	err = tree.Files().ForEach(func(f *object.File) error {
+		name := f.Name
+		if prefix != "" && !strings.HasPrefix(name, prefix+"/") {
+			return nil
+		}
+		if !isRegularBlob(f.Mode) {
+			return nil
+		}
+		paths = append(paths, filepath.Join(r.root, filepath.FromSlash(name)))
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gitblob: list %s@%s: %w", relDir, ref, err)
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+func isRegularBlob(mode filemode.FileMode) bool {
+	return mode == filemode.Regular || mode == filemode.Deprecated || mode == filemode.Executable
 }
 
 // relPath converts an absolute filesystem path to a slash-separated path relative

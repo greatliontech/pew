@@ -9,7 +9,6 @@ close-out convention.
 | [buildconfig-completeness](buildconfig-completeness.md) | exact buildconfig guard inputs, including cgo and PGO content | when changing buildconfig guard inputs or build-flag handling |
 | [dirty-runtime-inputs](dirty-runtime-inputs.md) | dirty/pinned-baseline semantics for ignored or untracked runtime inputs | when changing dirty baseline checks or runtime-input baseline semantics |
 | [purity-directives](purity-directives.md) | durable `//pew:pure` / `//pew:external` code directives vs CLI flags | when CLI purity flags prove insufficient |
-| [stat-historical-inventory](stat-historical-inventory.md) | `pew stat` should inventory recordings from selected refs, not only current source | when changing `pew stat` inventory or git-ref recording enumeration |
 
 ## In-spec upgrade paths (tracked inline, not here)
 

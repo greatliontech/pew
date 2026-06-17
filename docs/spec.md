@@ -518,6 +518,10 @@ Three baseline-selection modes (all requested):
 - **On-demand A/B** — any two refs (or a ref vs the working tree), each materialized via `git show`
   (§6.1). Manual investigation.
 
+For historical sides, `pew stat` inventories recording paths from the selected ref trees (plus the
+working-tree store for a working-tree side). Current benchmark declarations may inform working-tree
+staleness warnings, but they are not the authority for which historical recordings exist.
+
 ### 10.1 Regression criterion
 
 A **regression** on a metric requires all three: (1) it moved the **worse** direction (higher

@@ -1,9 +1,15 @@
 package gitblob
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	gogit "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 // Open against the pew repository itself, then read a committed file at HEAD.
@@ -55,6 +61,43 @@ func TestReadAtBadRef(t *testing.T) {
 	}
 }
 
+func TestListAndReadAtSkipSymlinkBlobs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "benchmarks", "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	regular := filepath.Join(dir, "benchmarks", "pkg", "BenchmarkRegular.txt")
+	if err := os.WriteFile(regular, []byte("BenchmarkRegular-8 1 1 sec/op\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	symlink := filepath.Join(dir, "benchmarks", "pkg", "BenchmarkSymlink.txt")
+	if err := os.Symlink("BenchmarkRegular.txt", symlink); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	ref := commitAll(t, raw)
+	repo, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	paths, err := repo.ListAt(ref.String(), filepath.Join(dir, "benchmarks"))
+	if err != nil {
+		t.Fatalf("ListAt: %v", err)
+	}
+	if !containsPath(paths, regular) {
+		t.Fatalf("ListAt omitted regular blob: %v", paths)
+	}
+	if containsPath(paths, symlink) {
+		t.Fatalf("ListAt included symlink blob: %v", paths)
+	}
+	if _, ok, err := repo.ReadAt(ref.String(), symlink); err != nil || ok {
+		t.Fatalf("ReadAt symlink ok=%v err=%v, want ok=false nil err", ok, err)
+	}
+}
+
 // A path outside the repository is rejected rather than silently treated as
 // not-recorded — surfacing a misconfigured --bench-dir.
 func TestRelPathOutsideRepo(t *testing.T) {
@@ -82,4 +125,29 @@ func openRepo(t *testing.T) *Repo {
 		t.Fatalf("Open: %v", err)
 	}
 	return repo
+}
+
+func containsPath(paths []string, want string) bool {
+	for _, path := range paths {
+		if path == want {
+			return true
+		}
+	}
+	return false
+}
+
+func commitAll(t *testing.T, repo *gogit.Repository) plumbing.Hash {
+	t.Helper()
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	h, err := wt.Commit("commit", &gogit.CommitOptions{Author: &object.Signature{Name: "pew test", Email: "pew@example.invalid", When: time.Unix(1, 0)}})
+	if err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	return h
 }

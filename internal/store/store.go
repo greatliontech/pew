@@ -195,7 +195,13 @@ func (s *Store) List() ([]Recording, error) {
 	return out, nil
 }
 
-func (s *Store) recordingFromPath(path string) (Recording, bool) {
+// KeyFromPath converts a path in this store's layout to its recording key without
+// reading from disk. It is used for historical git blobs whose paths are known but
+// whose files may not exist in the current worktree.
+func (s *Store) KeyFromPath(path string) (Recording, bool) {
+	if filepath.Ext(path) != ".txt" {
+		return Recording{}, false
+	}
 	root := filepath.Clean(s.Root)
 	rel, err := filepath.Rel(root, path)
 	if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
@@ -220,6 +226,14 @@ func (s *Store) recordingFromPath(path string) (Recording, bool) {
 	if err != nil || filepath.Clean(want) != filepath.Clean(path) {
 		return Recording{}, false
 	}
+	return Recording{PkgRel: pkgRel, Bench: bench, Label: label, Path: path}, true
+}
+
+func (s *Store) recordingFromPath(path string) (Recording, bool) {
+	r, ok := s.KeyFromPath(path)
+	if !ok {
+		return Recording{}, false
+	}
 	if err := s.checkParentDirs(path); err != nil {
 		return Recording{}, false
 	}
@@ -230,7 +244,7 @@ func (s *Store) recordingFromPath(path string) (Recording, bool) {
 	if !isPewRecording(path) {
 		return Recording{}, false
 	}
-	return Recording{PkgRel: pkgRel, Bench: bench, Label: label, Path: path}, true
+	return r, true
 }
 
 func isPewRecording(path string) bool {
@@ -241,6 +255,16 @@ func isPewRecording(path string) bool {
 	defer f.Close()
 	recs, err := Parse(f, path)
 	if err != nil || len(recs) == 0 {
+		return false
+	}
+	return IsRecording(recs)
+}
+
+// IsRecording reports whether parsed results carry pew's required provenance and
+// guard keys. It lets callers distinguish pew recordings from arbitrary benchmark
+// files that happen to match the storage path shape.
+func IsRecording(recs []*benchfmt.Result) bool {
+	if len(recs) == 0 {
 		return false
 	}
 	cfg := map[string]bool{}

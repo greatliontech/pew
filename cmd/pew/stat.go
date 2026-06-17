@@ -2,19 +2,23 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/thegrumpylion/pew/internal/closure"
 	"github.com/thegrumpylion/pew/internal/compare"
 	"github.com/thegrumpylion/pew/internal/gitblob"
+	"github.com/thegrumpylion/pew/internal/gotool"
 	"github.com/thegrumpylion/pew/internal/provenance"
 	"github.com/thegrumpylion/pew/internal/stale"
 	"github.com/thegrumpylion/pew/internal/store"
+	"golang.org/x/mod/modfile"
 	"golang.org/x/perf/benchfmt"
 )
 
@@ -40,7 +44,8 @@ The baseline mode follows the number of refs:
   pew stat <refA> <refB> A/B:    <refA>'s recording vs <refB>'s
 
 pew stat does not run benchmarks; it compares already-stored results (run them
-with 'pew run' first). It scans ./... for benchmarks to compare.`,
+with 'pew run' first). It inventories stored recording paths from the selected
+refs and working-tree store.`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gu, err := parseGateUnits(gate)
@@ -104,6 +109,27 @@ func parseGateUnits(s string) (map[string]bool, error) {
 // semantics" for the auto and pinned modes (spec §10).
 type baseline struct{ baseRef, newRef string }
 
+type statKey struct {
+	pkgRel string
+	bench  string
+	label  string
+}
+
+type currentBench struct {
+	importPath string
+	moduleDir  string
+}
+
+type statModule struct {
+	modulePath string
+	moduleDir  string
+	benchDir   string
+	store      *store.Store
+	repo       *gitblob.Repo
+	keys       map[statKey]bool
+	current    map[statKey]currentBench
+}
+
 func baselineFor(refs []string) (baseline, error) {
 	switch len(refs) {
 	case 0:
@@ -117,17 +143,41 @@ func baselineFor(refs []string) (baseline, error) {
 	}
 }
 
+func (b baseline) historicalRefs() []string {
+	refs := []string{b.baseRef}
+	if b.newRef != "" {
+		refs = append(refs, b.newRef)
+	}
+	return refs
+}
+
 func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 	bl, err := baselineFor(refs)
 	if err != nil {
 		return err
 	}
-	pkgs, err := resolvePackages([]string{"./..."})
+	pkgs, err := statPackages(bl, errw)
+	if err != nil {
+		return err
+	}
+	repo, err := gitblob.Open(".")
 	if err != nil {
 		return err
 	}
 
-	repos := map[string]*gitblob.Repo{} // cached per module dir
+	modules, err := statModules(pkgs, sc, errw)
+	if err != nil {
+		return err
+	}
+	scanRoots, err := historicalScanRoots(modules)
+	if err != nil {
+		return err
+	}
+	modules, err = addHistoricalModules(modules, repo, bl.historicalRefs(), sc, scanRoots)
+	if err != nil {
+		return err
+	}
+	modules = dedupeStatModules(modules)
 	var baseAll, newAll []*benchfmt.Result
 
 	// When the new side is the working-tree recording (auto/pinned), a recording
@@ -142,60 +192,29 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 		}
 	}
 
-	for _, p := range pkgs {
-		if p.Module.Dir == "" {
-			continue // not in a module (e.g. a stdlib pattern) — nothing recorded
+	for _, m := range modules {
+		if err := addStatInventory(m, bl, sc.label); err != nil {
+			return err
 		}
-		repo := repos[p.Module.Dir]
-		if repo == nil {
-			if repo, err = gitblob.Open(p.Module.Dir); err != nil {
-				return err
-			}
-			repos[p.Module.Dir] = repo
-		}
-		dir := sc.benchDir
-		switch {
-		case dir == "":
-			dir = filepath.Join(p.Module.Dir, "benchmarks")
-		case !filepath.IsAbs(dir):
-			// blob reads need an absolute, repo-relative path; resolve now.
-			if dir, err = filepath.Abs(dir); err != nil {
-				return err
-			}
-		}
-		st := store.New(dir)
-		pkgRel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, p.Module.Path), "/")
-
-		benches, err := selectedBenchmarks(p)
-		if err != nil {
-			// Consistent with status/run: a package whose benchmark declarations cannot
-			// be read is reported and skipped, not fatal to the whole comparison.
-			fmt.Fprintf(errw, "pew: warning: %s: %v\n", p.ImportPath, err)
-			continue
-		}
-		if len(benches) == 0 {
-			continue
-		}
-
 		// Provenance for the working-tree staleness check (the closure is per
 		// benchmark, computed in the loop). Best-effort: a failure warns but never
 		// blocks the comparison.
 		var prov provenance.Provenance
 		checkStale := false
 		if bl.newRef == "" {
-			if pv, e := provenance.Capture(p.Module.Dir); e != nil {
-				fmt.Fprintf(errw, "pew: warning: %s: cannot check working-tree staleness: %v\n", p.ImportPath, e)
+			if pv, e := provenance.Capture(m.moduleDir); e != nil {
+				fmt.Fprintf(errw, "pew: warning: %s: cannot check working-tree staleness: %v\n", m.modulePath, e)
 			} else {
 				prov, checkStale = pv, true
 			}
 		}
 
-		for _, b := range benches {
-			baseRecs, baseOK, err := readSide(st, repo, bl.baseRef, pkgRel, b, sc.label)
+		for _, key := range sortedStatKeys(m.keys) {
+			baseRecs, baseOK, err := readSide(m.store, m.repo, bl.baseRef, key.pkgRel, key.bench, key.label)
 			if err != nil {
 				return err
 			}
-			newRecs, newOK, err := readSide(st, repo, bl.newRef, pkgRel, b, sc.label)
+			newRecs, newOK, err := readSide(m.store, m.repo, bl.newRef, key.pkgRel, key.bench, key.label)
 			if err != nil {
 				return err
 			}
@@ -209,22 +228,25 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 			// side (newRef=="") is the code under test and may be dirty. Skip a
 			// dirty baseline rather than report a verdict against unfaithful numbers.
 			if baseOK && isDirty(baseRecs) {
-				fmt.Fprintf(errw, "pew: warning: baseline %s:%s is a dirty recording; skipping (spec §10)\n", bl.baseRef, b)
+				fmt.Fprintf(errw, "pew: warning: baseline %s:%s is a dirty recording; skipping (spec §10)\n", bl.baseRef, key.bench)
 				continue
 			}
 			if newOK && bl.newRef != "" && isDirty(newRecs) {
-				fmt.Fprintf(errw, "pew: warning: baseline %s:%s is a dirty recording; skipping (spec §10)\n", bl.newRef, b)
+				fmt.Fprintf(errw, "pew: warning: baseline %s:%s is a dirty recording; skipping (spec §10)\n", bl.newRef, key.bench)
 				continue
 			}
 			if checkStale && newOK {
-				if cl, e := hasher.Compute(p.ImportPath, b); e != nil {
-					fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", p.ImportPath, b, e)
-				} else if v, reason := stale.Check(prov, cl, currentRuntimeState(newRecs[0].Config, p.Module.Dir), newRecs[0].Config); v != stale.Valid {
+				cur, ok := m.current[key]
+				if !ok {
+					fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s has no current benchmark declaration; comparison may not reflect HEAD — re-run `pew run`\n", key.pkgRel, key.bench)
+				} else if cl, e := hasher.Compute(cur.importPath, key.bench); e != nil {
+					fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, e)
+				} else if v, reason := stale.Check(prov, cl, currentRuntimeState(newRecs[0].Config, cur.moduleDir), newRecs[0].Config); v != stale.Valid {
 					msg := string(v)
 					if reason != "" {
 						msg += " (" + reason + ")"
 					}
-					fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is %s; comparison may not reflect HEAD — re-run `pew run`\n", p.ImportPath, b, msg)
+					fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is %s; comparison may not reflect HEAD — re-run `pew run`\n", cur.importPath, key.bench, msg)
 				}
 			}
 			baseAll = append(baseAll, baseRecs...)
@@ -246,6 +268,270 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 	return nil
 }
 
+func statPackages(bl baseline, errw io.Writer) ([]pkgMeta, error) {
+	pkgs, err := resolvePackages([]string{"./..."})
+	if err != nil {
+		fallback, fallbackErr := fallbackStatPackages()
+		if fallbackErr != nil {
+			if bl.newRef != "" {
+				fmt.Fprintf(errw, "pew: warning: current package inventory unavailable: %v\n", err)
+				return nil, nil
+			}
+			return nil, err
+		}
+		fmt.Fprintf(errw, "pew: warning: current package inventory unavailable: %v\n", err)
+		return fallback, nil
+	}
+	if len(pkgs) != 0 {
+		return pkgs, nil
+	}
+	fallback, err := fallbackStatPackages()
+	if err != nil {
+		if bl.newRef != "" {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return fallback, nil
+}
+
+func statModules(pkgs []pkgMeta, sc statConfig, errw io.Writer) ([]*statModule, error) {
+	byDir := map[string]*statModule{}
+	for _, p := range pkgs {
+		if p.Module.Dir == "" {
+			continue // not in a module (e.g. a stdlib pattern) — nothing recorded
+		}
+		m := byDir[p.Module.Dir]
+		if m == nil {
+			dir, err := statBenchDir(p.Module.Dir, sc.benchDir)
+			if err != nil {
+				return nil, err
+			}
+			repo, err := gitblob.Open(p.Module.Dir)
+			if err != nil {
+				return nil, err
+			}
+			m = &statModule{
+				modulePath: p.Module.Path,
+				moduleDir:  p.Module.Dir,
+				benchDir:   dir,
+				store:      store.New(dir),
+				repo:       repo,
+				keys:       map[statKey]bool{},
+				current:    map[statKey]currentBench{},
+			}
+			byDir[p.Module.Dir] = m
+		}
+		benches, err := selectedBenchmarks(p)
+		if err != nil {
+			// Consistent with status/run: a package whose benchmark declarations cannot
+			// be read is reported and skipped, not fatal to the whole comparison.
+			fmt.Fprintf(errw, "pew: warning: %s: %v\n", p.ImportPath, err)
+			continue
+		}
+		pkgRel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, p.Module.Path), "/")
+		for _, b := range benches {
+			m.current[statKey{pkgRel: pkgRel, bench: b, label: sc.label}] = currentBench{importPath: p.ImportPath, moduleDir: p.Module.Dir}
+		}
+	}
+	mods := make([]*statModule, 0, len(byDir))
+	for _, m := range byDir {
+		mods = append(mods, m)
+	}
+	sort.Slice(mods, func(i, j int) bool { return mods[i].moduleDir < mods[j].moduleDir })
+	return mods, nil
+}
+
+func statBenchDir(moduleDir, benchDir string) (string, error) {
+	if benchDir == "" {
+		return filepath.Join(moduleDir, "benchmarks"), nil
+	}
+	if filepath.IsAbs(benchDir) {
+		return benchDir, nil
+	}
+	return filepath.Abs(benchDir)
+}
+
+func historicalScanRoots(mods []*statModule) ([]string, error) {
+	seen := map[string]bool{}
+	var roots []string
+	for _, m := range mods {
+		root := filepath.Clean(m.moduleDir)
+		if !seen[root] {
+			seen[root] = true
+			roots = append(roots, root)
+		}
+	}
+	if len(roots) == 0 {
+		cwd, err := filepath.Abs(".")
+		if err != nil {
+			return nil, err
+		}
+		roots = append(roots, filepath.Clean(cwd))
+	}
+	sort.Strings(roots)
+	return roots, nil
+}
+
+func addHistoricalModules(mods []*statModule, repo *gitblob.Repo, refs []string, sc statConfig, scanRoots []string) ([]*statModule, error) {
+	byDir := map[string]*statModule{}
+	for _, m := range mods {
+		byDir[m.moduleDir] = m
+	}
+	for _, ref := range refs {
+		for _, root := range scanRoots {
+			paths, err := repo.ListAt(ref, root)
+			if err != nil {
+				return nil, err
+			}
+			for _, path := range paths {
+				if filepath.Base(path) != "go.mod" {
+					continue
+				}
+				moduleDir := filepath.Dir(path)
+				if _, ok := byDir[moduleDir]; ok {
+					continue
+				}
+				content, ok, err := repo.ReadAt(ref, path)
+				if err != nil {
+					return nil, err
+				}
+				if !ok {
+					continue
+				}
+				f, err := modfile.Parse(path, content, nil)
+				if err != nil || f.Module == nil {
+					continue
+				}
+				benchDir, err := statBenchDir(moduleDir, sc.benchDir)
+				if err != nil {
+					return nil, err
+				}
+				byDir[moduleDir] = &statModule{
+					modulePath: f.Module.Mod.Path,
+					moduleDir:  moduleDir,
+					benchDir:   benchDir,
+					store:      store.New(benchDir),
+					repo:       repo,
+					keys:       map[statKey]bool{},
+					current:    map[statKey]currentBench{},
+				}
+			}
+		}
+	}
+	out := make([]*statModule, 0, len(byDir))
+	for _, m := range byDir {
+		out = append(out, m)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].moduleDir < out[j].moduleDir })
+	return out, nil
+}
+
+func dedupeStatModules(mods []*statModule) []*statModule {
+	byStore := map[string]*statModule{}
+	var out []*statModule
+	for _, m := range mods {
+		key := filepath.Clean(m.benchDir)
+		if existing := byStore[key]; existing != nil {
+			for k, v := range m.current {
+				existing.current[k] = v
+			}
+			continue
+		}
+		byStore[key] = m
+		out = append(out, m)
+	}
+	return out
+}
+
+func fallbackStatPackages() ([]pkgMeta, error) {
+	p, err := currentModulePackage()
+	if err != nil {
+		return nil, err
+	}
+	return []pkgMeta{p}, nil
+}
+
+func currentModulePackage() (pkgMeta, error) {
+	out, err := gotool.Run("list", "-m", "-json")
+	if err != nil {
+		return pkgMeta{}, err
+	}
+	var mod struct {
+		Path string
+		Dir  string
+	}
+	if err := json.Unmarshal(out, &mod); err != nil {
+		return pkgMeta{}, fmt.Errorf("stat: decode go list -m: %w", err)
+	}
+	if mod.Path == "" || mod.Dir == "" {
+		return pkgMeta{}, fmt.Errorf("stat: current module unavailable")
+	}
+	var p pkgMeta
+	p.Dir = mod.Dir
+	p.Module.Path = mod.Path
+	p.Module.Dir = mod.Dir
+	return p, nil
+}
+
+func addStatInventory(m *statModule, bl baseline, label string) error {
+	if err := addRefInventory(m, bl.baseRef, label); err != nil {
+		return err
+	}
+	if bl.newRef == "" {
+		recs, err := m.store.List()
+		if err != nil {
+			return err
+		}
+		for _, r := range recs {
+			if r.Label == label {
+				m.keys[statKey{pkgRel: r.PkgRel, bench: r.Bench, label: r.Label}] = true
+			}
+		}
+		return nil
+	}
+	return addRefInventory(m, bl.newRef, label)
+}
+
+func addRefInventory(m *statModule, ref, label string) error {
+	paths, err := m.repo.ListAt(ref, m.benchDir)
+	if err != nil {
+		return err
+	}
+	for _, path := range paths {
+		r, ok := m.store.KeyFromPath(path)
+		if !ok || r.Label != label {
+			continue
+		}
+		recs, sideOK, err := readSide(m.store, m.repo, ref, r.PkgRel, r.Bench, r.Label)
+		if err != nil {
+			return err
+		}
+		if !sideOK || !store.IsRecording(recs) {
+			continue
+		}
+		m.keys[statKey{pkgRel: r.PkgRel, bench: r.Bench, label: r.Label}] = true
+	}
+	return nil
+}
+
+func sortedStatKeys(keys map[statKey]bool) []statKey {
+	out := make([]statKey, 0, len(keys))
+	for k := range keys {
+		out = append(out, k)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].pkgRel != out[j].pkgRel {
+			return out[i].pkgRel < out[j].pkgRel
+		}
+		if out[i].bench != out[j].bench {
+			return out[i].bench < out[j].bench
+		}
+		return out[i].label < out[j].label
+	})
+	return out
+}
+
 // isDirty reports whether a recording was made on a dirty working tree (§5). The
 // flag is uniform across a recording's results (one overwrite-written block), so
 // the first result decides.
@@ -265,6 +551,9 @@ func readSide(st *store.Store, repo *gitblob.Repo, ref, pkgRel, bench, label str
 		if err != nil {
 			return nil, false, err
 		}
+		if !store.IsRecording(recs) {
+			return nil, false, nil
+		}
 		return recs, true, nil
 	}
 	abs, err := st.Path(pkgRel, bench, label)
@@ -281,6 +570,9 @@ func readSide(st *store.Store, repo *gitblob.Repo, ref, pkgRel, bench, label str
 	recs, err := store.Parse(bytes.NewReader(content), ref+":"+filepath.Base(abs))
 	if err != nil {
 		return nil, false, err
+	}
+	if !store.IsRecording(recs) {
+		return nil, false, nil
 	}
 	return recs, true, nil
 }

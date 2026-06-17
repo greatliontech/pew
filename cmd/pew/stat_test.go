@@ -1,10 +1,19 @@
 package main
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
+	gogit "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/thegrumpylion/pew/internal/closure"
 	"github.com/thegrumpylion/pew/internal/compare"
+	"github.com/thegrumpylion/pew/internal/gitblob"
 	"github.com/thegrumpylion/pew/internal/provenance"
 	"github.com/thegrumpylion/pew/internal/runtimeinputs"
 	"github.com/thegrumpylion/pew/internal/store"
@@ -93,6 +102,337 @@ func TestValidateOptions(t *testing.T) {
 			t.Errorf("validateOptions(%+v): want error", o)
 		}
 	}
+}
+
+func TestStatABIncludesHistoricalOnlyRecording(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statinv\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	writeStatRecording(t, st, "pkg", "BenchmarkOld", 100)
+	base := commitAll(t, repo, "base")
+
+	writeStatRecording(t, st, "pkg", "BenchmarkOld", 120)
+	newer := commitAll(t, repo, "newer")
+
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+
+	var out, errOut bytes.Buffer
+	err = runStat(&out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	if err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if !strings.Contains(out.String(), "BenchmarkOld") {
+		t.Fatalf("stat output omitted historical-only benchmark:\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+}
+
+func TestStatABFallsBackToModuleWithoutCurrentPackages(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statnopkg\n\ngo 1.26.4\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	writeStatRecording(t, st, "pkg", "BenchmarkOld", 100)
+	base := commitAll(t, repo, "base")
+	writeStatRecording(t, st, "pkg", "BenchmarkOld", 120)
+	newer := commitAll(t, repo, "newer")
+
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	err = runStat(&out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	if err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if !strings.Contains(out.String(), "BenchmarkOld") {
+		t.Fatalf("stat output omitted ref-only module recording:\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+}
+
+func TestStatPinnedIncludesWorkingTreeOnlyRecordingWithoutCurrentBenchmark(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statpinnedworktree\n\ngo 1.26.4\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	base := commitAll(t, repo, "base")
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	writeStatRecording(t, st, "pkg", "BenchmarkNew", 120)
+
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	err = runStat(&out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String()})
+	if err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if !strings.Contains(out.String(), "BenchmarkNew") {
+		t.Fatalf("stat output omitted working-tree-only recording:\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "no current benchmark declaration") {
+		t.Fatalf("stat stderr omitted missing current declaration warning:\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+}
+
+func TestStatABDiscoversHistoricalModuleAbsentFromCurrentPackages(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/current\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "oldmod", "go.mod"), "module example.com/oldmod\n\ngo 1.26.4\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "oldmod", "benchmarks"))
+	writeStatRecording(t, st, "pkg", "BenchmarkOld", 100)
+	base := commitAll(t, repo, "base")
+	writeStatRecording(t, st, "pkg", "BenchmarkOld", 120)
+	newer := commitAll(t, repo, "newer")
+	if err := os.RemoveAll(filepath.Join(dir, "oldmod")); err != nil {
+		t.Fatal(err)
+	}
+
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	err = runStat(&out, &errOut, statConfig{opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	if err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if !strings.Contains(out.String(), "BenchmarkOld") {
+		t.Fatalf("stat output omitted deleted historical module recording:\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+}
+
+func TestStatABDoesNotDiscoverSiblingModuleOutsideCurrentScope(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "modA", "go.mod"), "module example.com/modA\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "modB", "go.mod"), "module example.com/modB\n\ngo 1.26.4\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "modB", "benchmarks"))
+	writeStatRecording(t, st, "pkg", "BenchmarkSibling", 100)
+	base := commitAll(t, repo, "base")
+	writeStatRecording(t, st, "pkg", "BenchmarkSibling", 120)
+	newer := commitAll(t, repo, "newer")
+
+	withWorkingDir(t, filepath.Join(dir, "modA"))
+	var out, errOut bytes.Buffer
+	err = runStat(&out, &errOut, statConfig{opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	if err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if strings.Contains(out.String(), "BenchmarkSibling") {
+		t.Fatalf("stat output included sibling module outside current scope:\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+}
+
+func TestDedupeStatModulesMergesSharedBenchDir(t *testing.T) {
+	shared := filepath.Join(t.TempDir(), "benchmarks")
+	key := statKey{pkgRel: "pkg", bench: "BenchmarkShared"}
+	mods := []*statModule{
+		{moduleDir: "/repo/modA", benchDir: shared, current: map[statKey]currentBench{}},
+		{moduleDir: "/repo/modB", benchDir: shared, current: map[statKey]currentBench{key: {importPath: "example.com/modB/pkg", moduleDir: "/repo/modB"}}},
+	}
+	got := dedupeStatModules(mods)
+	if len(got) != 1 {
+		t.Fatalf("dedupeStatModules returned %d modules, want 1", len(got))
+	}
+	if got[0].current[key].importPath != "example.com/modB/pkg" {
+		t.Fatalf("dedupeStatModules did not merge current benchmark metadata: %#v", got[0].current)
+	}
+}
+
+func TestStatABIgnoresHistoricalPathShapedNonPewRecording(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statghost\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	ghostPath, err := st.Path("pkg", "BenchmarkGhost", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, ghostPath, "machine: m1\ntoolchain: go-test\nbuildconfig: b1\nBenchmarkGhost-8 1 100 sec/op\n")
+	base := commitAll(t, repo, "base")
+	writeFile(t, ghostPath, "machine: m1\ntoolchain: go-test\nbuildconfig: b1\nBenchmarkGhost-8 1 120 sec/op\n")
+	newer := commitAll(t, repo, "newer")
+	reader, err := gitblob.Open(dir)
+	if err != nil {
+		t.Fatalf("gitblob open: %v", err)
+	}
+	m := &statModule{benchDir: st.Root, store: st, repo: reader, keys: map[statKey]bool{}}
+	if err := addRefInventory(m, base.String(), ""); err != nil {
+		t.Fatalf("addRefInventory: %v", err)
+	}
+	if len(m.keys) != 0 {
+		t.Fatalf("non-pew path-shaped blob entered inventory: %v", sortedStatKeys(m.keys))
+	}
+
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	err = runStat(&out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	if err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if strings.Contains(out.String(), "BenchmarkGhost") {
+		t.Fatalf("stat output compared non-pew recording:\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+}
+
+func TestReadSideIgnoresNonPewBlobAtInventoriedKey(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statghostside\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	writeStatRecording(t, st, "pkg", "BenchmarkGhost", 100)
+	base := commitAll(t, repo, "base")
+	ghostPath, err := st.Path("pkg", "BenchmarkGhost", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, ghostPath, "machine: m1\ntoolchain: go-test\nbuildconfig: b1\nBenchmarkGhost-8 1 120 sec/op\n")
+	newer := commitAll(t, repo, "newer")
+	reader, err := gitblob.Open(dir)
+	if err != nil {
+		t.Fatalf("gitblob open: %v", err)
+	}
+	if _, ok, err := readSide(st, reader, base.String(), "pkg", "BenchmarkGhost", ""); err != nil || !ok {
+		t.Fatalf("valid base side ok=%v err=%v", ok, err)
+	}
+	if recs, ok, err := readSide(st, reader, newer.String(), "pkg", "BenchmarkGhost", ""); err != nil || ok || len(recs) != 0 {
+		t.Fatalf("non-pew side read as recording: ok=%v len=%d err=%v", ok, len(recs), err)
+	}
+}
+
+func TestAddRefInventoryReportsMalformedHistoricalRecording(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statbad\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	badPath, err := st.Path("pkg", "BenchmarkBad", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, badPath, strings.Join([]string{
+		"commit: c1",
+		"toolchain: go-test",
+		"machine: m1",
+		"buildconfig: b1",
+		"dirty: false",
+		"pew-closure: cl1",
+		"pew-runtime: rt1",
+		"pew-runtime-inputs: manifest1",
+		"BenchmarkBad-8 nope 100 sec/op",
+		"",
+	}, "\n"))
+	ref := commitAll(t, repo, "bad")
+	reader, err := gitblob.Open(dir)
+	if err != nil {
+		t.Fatalf("gitblob open: %v", err)
+	}
+	m := &statModule{benchDir: st.Root, store: st, repo: reader, keys: map[statKey]bool{}}
+	err = addRefInventory(m, ref.String(), "")
+	if err == nil || !strings.Contains(err.Error(), "corrupt recording") {
+		t.Fatalf("addRefInventory err=%v, want corrupt recording", err)
+	}
+}
+
+func withWorkingDir(t *testing.T, dir string) {
+	t.Helper()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeStatRecording(t *testing.T, st *store.Store, pkgRel, bench string, value float64) {
+	t.Helper()
+	var recs []*benchfmt.Result
+	for i := range 8 {
+		recs = append(recs, &benchfmt.Result{
+			Name:  benchfmt.Name(bench),
+			Iters: 1,
+			Values: []benchfmt.Value{
+				{Value: value + float64(i), Unit: "sec/op"},
+			},
+			Config: []benchfmt.Config{
+				{Key: "commit", Value: []byte("c1"), File: true},
+				{Key: "toolchain", Value: []byte("go-test"), File: true},
+				{Key: "machine", Value: []byte("m1"), File: true},
+				{Key: "buildconfig", Value: []byte("b1"), File: true},
+				{Key: "dirty", Value: []byte("false"), File: true},
+				{Key: "pew-closure", Value: []byte("cl1"), File: true},
+				{Key: "pew-runtime", Value: []byte("rt1"), File: true},
+				{Key: "pew-runtime-inputs", Value: []byte("manifest1"), File: true},
+			},
+		})
+	}
+	if err := st.Write(pkgRel, bench, "", recs); err != nil {
+		t.Fatalf("Write(%q,%q): %v", pkgRel, bench, err)
+	}
+}
+
+func commitAll(t *testing.T, repo *gogit.Repository, msg string) plumbing.Hash {
+	t.Helper()
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	h, err := wt.Commit(msg, &gogit.CommitOptions{Author: &object.Signature{Name: "pew test", Email: "pew@example.invalid", When: time.Unix(1, 0)}})
+	if err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	return h
 }
 
 func TestIsDirty(t *testing.T) {
