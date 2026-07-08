@@ -1346,23 +1346,48 @@ func TestASMCallTargetsExpandsParamMacro(t *testing.T) {
 }
 
 func TestASMCallTargetsIndirectCallWidens(t *testing.T) {
-	// A ≥3-field indirect-call mnemonic (riscv64 JALR through a loaded Go function
-	// pointer) has no (SB) operand and no `_`, so asmUnknownOpMayHideCall would
-	// treat it as a leaf; it must instead widen (computed) so the pointed-to Go
-	// body cannot change unhashed (§7.3-A′).
-	// The JALR must be the sole computed-call trigger: no (SB) operand on any
-	// other line, else that line would set computed and mask the mnemonic under test.
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tJALR RA, 0(T0)\n\tRET\n")
-	_, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if !computed {
-		t.Fatalf("computed = false, want true for indirect JALR")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
+	// Every register/computed-target call or jump across Go's arches must widen
+	// (computed) so the Go function it dispatches cannot change unhashed (§7.3-A′).
+	// The ≥3-field forms (JALR/JIRL) are the ones only isASMIndirectCallOp catches
+	// (asmUnknownOpMayHideCall's 2-field and single-op rules miss them); the rest are
+	// belt-and-suspenders. Each mnemonic is the sole computed trigger — no (SB)
+	// operand on any other line — so the assertion is about that mnemonic alone.
+	for _, tc := range []struct {
+		name, line   string
+		wantComputed bool
+		wantTarget   string
+	}{
+		{"jalr riscv64 (3-field)", "JALR RA, 0(T0)", true, ""},
+		{"jirl loong64 (3-field)", "JIRL R1, R12, 0", true, ""},
+		{"jr mips", "JR R5", true, ""},
+		{"blr arm64", "BLR R0", true, ""},
+		{"bctrl ppc64", "BCTRL", true, ""},
+		{"bctr ppc64", "BCTR", true, ""},
+		{"bx arm", "BX R1", true, ""},
+		{"blx arm", "BLX R2", true, ""},
+		{"bal mips", "BAL R3", true, ""},
+		{"callind", "CALLIND R4", true, ""},
+		// Negative: a direct call to a Go symbol still RESOLVES (not over-widened),
+		// so precision is preserved for ordinary hand-asm call-outs.
+		{"direct bl to symbol", "BL ·helper(SB)", false, "·helper"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "macro.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\t"+tc.line+"\n\tRET\n")
+			targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+			if err != nil {
+				t.Fatalf("asmCallTargets: %v", err)
+			}
+			if opaque {
+				t.Fatalf("opaque = true, want false")
+			}
+			if computed != tc.wantComputed {
+				t.Fatalf("computed = %v, want %v for %q", computed, tc.wantComputed, tc.line)
+			}
+			if tc.wantTarget != "" && !stringSliceContains(targets, tc.wantTarget) {
+				t.Fatalf("targets = %v, want %q resolved", targets, tc.wantTarget)
+			}
+		})
 	}
 }
 
@@ -2226,20 +2251,32 @@ func TestClassBReasonNetDialContext(t *testing.T) {
 }
 
 func TestTier2CgoExternalLibraryUnverifiable(t *testing.T) {
-	typesPkg := types.NewPackage("example.com/cgodep", "cgodep")
-	idx := &pkgIndex{
-		cache: true,
-		meta:  &listPkg{CgoLDFLAGS: []string{"-lm"}},
-	}
-	a := &tier2Analyzer{
-		idxByTypes: map[*types.Package]*pkgIndex{typesPkg: idx},
-		filePkgs:   map[*pkgIndex]bool{},
-		scanned:    map[*ssa.Function]bool{},
-	}
-
-	a.scanFunction(&ssa.Function{Pkg: &ssa.Package{Pkg: typesPkg}, Blocks: []*ssa.BasicBlock{{}}})
-	if !a.unverifiable || !strings.Contains(a.reason, "cgo external library") {
-		t.Fatalf("cgo Class-B = %v/%q, want external library", a.unverifiable, a.reason)
+	// End-to-end (through scanFunction → hasExternalCgoMeta → hasExternalCgo →
+	// markUnverifiable), not just the hasExternalCgo predicate: a plain `-lm` and a
+	// grouped linker flag `-Wl,-Bstatic,-lfoo,-Bdynamic` (which hides the `-l` inside
+	// one whitespace token) must both mark the closure unverifiable, else the external
+	// library could change while the benchmark reports valid (§7.3-B).
+	for _, ldflags := range [][]string{
+		{"-lm"},
+		{"-Wl,-Bstatic,-lfoo,-Bdynamic"},
+		{"-Wl,--no-as-needed,-lssl,--pop-state"},
+	} {
+		t.Run(strings.Join(ldflags, " "), func(t *testing.T) {
+			typesPkg := types.NewPackage("example.com/cgodep", "cgodep")
+			idx := &pkgIndex{
+				cache: true,
+				meta:  &listPkg{CgoLDFLAGS: ldflags},
+			}
+			a := &tier2Analyzer{
+				idxByTypes: map[*types.Package]*pkgIndex{typesPkg: idx},
+				filePkgs:   map[*pkgIndex]bool{},
+				scanned:    map[*ssa.Function]bool{},
+			}
+			a.scanFunction(&ssa.Function{Pkg: &ssa.Package{Pkg: typesPkg}, Blocks: []*ssa.BasicBlock{{}}})
+			if !a.unverifiable || !strings.Contains(a.reason, "cgo external library") {
+				t.Fatalf("cgo Class-B = %v/%q, want external library", a.unverifiable, a.reason)
+			}
+		})
 	}
 }
 

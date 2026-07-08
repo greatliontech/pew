@@ -115,6 +115,19 @@ func toolchain(dir string) (string, error) {
 //
 // Not yet digested: PGO profile content, and build-affecting CLI pass-throughs
 // (e.g. -tags/-gcflags supplied outside GOFLAGS).
+// buildConfigGoEnvKeys are the go-env-reported build-affecting settings hashed into
+// the buildconfig guard: codegen feature level, cgo toolchain environment, and build
+// flags. Host GOOS/GOARCH are deliberately absent — they ride the machine guard (§8).
+var buildConfigGoEnvKeys = []string{
+	"GOAMD64", "GOARM", "GOARM64", "GO386", "GOEXPERIMENT",
+	"CGO_ENABLED", "CGO_CFLAGS", "CGO_CPPFLAGS", "CGO_CXXFLAGS", "CGO_FFLAGS", "CGO_LDFLAGS",
+	"CC", "CXX", "PKG_CONFIG", "GOFLAGS",
+}
+
+// buildConfigOSEnvKeys are the pkg-config search variables — plain OS env, not go env
+// vars — that change which .pc files cgo resolves and thus the compiled code.
+var buildConfigOSEnvKeys = []string{"PKG_CONFIG_PATH", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR"}
+
 func buildConfig(dir string) (string, error) {
 	out, err := gotool.RunIn(dir, "env", "-json")
 	if err != nil {
@@ -125,21 +138,13 @@ func buildConfig(dir string) (string, error) {
 		return "", fmt.Errorf("provenance: parse go env: %w", err)
 	}
 	// Effective build settings `go test` uses, as reported by `go env` (which merges
-	// go env defaults with OS-env overrides): codegen feature level, cgo toolchain,
-	// build flags.
+	// go env defaults with OS-env overrides), plus the OS-env pkg-config search vars
+	// (pew's process env is the one `go test` inherits).
 	vals := map[string]string{}
-	for _, k := range []string{
-		"GOAMD64", "GOARM", "GOARM64", "GO386", "GOEXPERIMENT",
-		"CGO_ENABLED", "CGO_CFLAGS", "CGO_CPPFLAGS", "CGO_CXXFLAGS", "CGO_FFLAGS", "CGO_LDFLAGS",
-		"CC", "CXX", "PKG_CONFIG", "GOFLAGS",
-	} {
+	for _, k := range buildConfigGoEnvKeys {
 		vals[k] = env[k]
 	}
-	// The pkg-config search environment is plain OS env, not a go env var, but it
-	// changes which .pc files cgo resolves and thus the compiled code. pew's own
-	// process env is the one `go test` inherits, so os.Getenv reflects what the build
-	// will see.
-	for _, k := range []string{"PKG_CONFIG_PATH", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR"} {
+	for _, k := range buildConfigOSEnvKeys {
 		vals[k] = os.Getenv(k)
 	}
 	keys := make([]string, 0, len(vals))

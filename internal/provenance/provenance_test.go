@@ -175,6 +175,34 @@ func TestBuildConfigCapturesBuildAffectingEnv(t *testing.T) {
 	}
 }
 
+// TestBuildConfigExcludesHostArch pins that host GOOS/GOARCH are NOT part of the
+// buildconfig digest — they ride the machine guard (§8), so a feature-level change
+// moves buildconfig while a host-arch change moves machine, neither dropped. Asserted
+// structurally (not behaviorally: setting GOARCH cross-compiles, which indirectly
+// disables cgo and would move the digest for an unrelated reason).
+func TestBuildConfigExcludesHostArch(t *testing.T) {
+	all := append(append([]string{}, buildConfigGoEnvKeys...), buildConfigOSEnvKeys...)
+	in := func(want string) bool {
+		for _, k := range all {
+			if k == want {
+				return true
+			}
+		}
+		return false
+	}
+	for _, k := range []string{"GOOS", "GOARCH"} {
+		if in(k) {
+			t.Errorf("%s is in the buildconfig digest; it must ride the machine guard (§8)", k)
+		}
+	}
+	// The codegen feature level and cgo toolchain must be present.
+	for _, k := range []string{"GOAMD64", "GOEXPERIMENT", "CGO_ENABLED", "CGO_CFLAGS", "CC"} {
+		if !in(k) {
+			t.Errorf("%s missing from the buildconfig digest", k)
+		}
+	}
+}
+
 // TestGitStateDirty validates commit + dirty semantics against a real repo built
 // with the git binary: clean after commit, dirty with an untracked file.
 func TestGitStateDirty(t *testing.T) {
