@@ -171,7 +171,7 @@ func (h *Hasher) contribution(p listPkg) (string, error) {
 	// so a silent edit moves the hash (INV-8).
 	files := p.sourceFiles()
 	if hasCgoCallbackBlindspot(&p) {
-		if root := cgoIncludeRootOutsideDir(&p); root != "" {
+		if root := cgoIncludeRootOutsideDir(&p, h.modCache); root != "" {
 			return "", fmt.Errorf("closure: cgo include root outside package dir: %s", root)
 		}
 		var err error
@@ -246,22 +246,50 @@ func allPackageFiles(dir string) ([]string, error) {
 	return files, nil
 }
 
-func cgoIncludeRootOutsideDir(p *listPkg) string {
+// resolveReal follows symlinks to a path's real target, resolving `..` at the OS
+// level so a directory-symlink component cannot be lexically cleaned away. Falls
+// back to a lexical clean when the path does not exist.
+func resolveReal(path string) string {
+	if r, err := filepath.EvalSymlinks(path); err == nil {
+		return r
+	}
+	return filepath.Clean(path)
+}
+
+// cgoIncludeRootOutsideDir returns a cgo `-I` search root the caller must fail
+// closed on because it can pull in-tree headers the package-dir hash would miss.
+// A root is safe only when it is under the package dir (hashed by allPackageFiles)
+// or under the module cache (a version-pinned dependency whose C headers ride the
+// cache guard, §7.7). Any other root — an in-module sibling, a local `replace`/
+// `go.work` sibling module, or a directory pew cannot prove is a pinned dependency —
+// is mutable in-tree source and fails closed. A genuine system `-I` root is
+// indistinguishable from a mutable local one, so it fails closed too; system headers
+// reached by the C compiler's *default* search (no in-tree `-I`) are still skipped
+// via the not-found path in cgoEscapingInclude. The `-I` value is resolved through
+// symlink components before the check (a lexical clean would hide a `symlink/..`
+// escape). modCache is GOMODCACHE (empty when unknown → fail closed, never skipped).
+func cgoIncludeRootOutsideDir(p *listPkg, modCache string) string {
 	if p == nil || p.Dir == "" {
 		return ""
 	}
+	pkgDir := resolveReal(p.Dir)
 	for _, dir := range cgoIncludeFlagDirs(p) {
-		dir = expandCgoIncludeDir(p, dir)
-		if symlinkDir := symlinkDirInPath(dir, p.Dir); symlinkDir != "" {
-			return symlinkDir
+		raw := expandCgoIncludeDir(p, dir)
+		if !filepath.IsAbs(raw) {
+			raw = p.Dir + string(filepath.Separator) + raw
 		}
-		dir = cleanCgoIncludeDir(p, dir)
-		if !pathWithin(dir, p.Dir) {
-			return dir
+		real := resolveReal(raw)
+		if pathWithin(real, pkgDir) {
+			continue // under the package dir → hashed by allPackageFiles
 		}
-		if realDir, err := filepath.EvalSymlinks(dir); err == nil && !pathWithin(realDir, p.Dir) {
-			return realDir
+		if modCache != "" && pathWithin(real, resolveReal(modCache)) {
+			// Module-cache dependency → version-pinned (§7.7); its C headers ride the
+			// cache guard. We trust the cached tree whole: the module cache is immutable
+			// and module zips carry no symlinks, so a header inside it cannot symlink
+			// back out to mutable in-tree source.
+			continue
 		}
+		return real
 	}
 	return ""
 }
@@ -358,7 +386,18 @@ func cgoEscapingInclude(p *listPkg, files []string) (string, error) {
 				continue
 			}
 			if !quoted {
-				return "", fmt.Errorf("closure: unresolved cgo include %s", include)
+				// `#include <name>` is an angle-bracket header: resolve it like a
+				// quoted include; if it is not found in-tree it is a system/toolchain
+				// header (skipped below, §7.1). A bare token that is neither quoted nor
+				// angle-bracketed is an opaque macro/computed include whose expansion
+				// could reach in-tree source, so fail closed.
+				if !strings.HasPrefix(include, "<") || !strings.HasSuffix(include, ">") {
+					return "", fmt.Errorf("closure: unresolved cgo include %s", include)
+				}
+				include = strings.TrimSpace(include[1 : len(include)-1])
+				if include == "" {
+					return "", fmt.Errorf("closure: empty cgo include directive")
+				}
 			}
 			if include == "_cgo_export.h" {
 				continue
@@ -396,7 +435,11 @@ func cgoEscapingInclude(p *listPkg, files []string) (string, error) {
 				}
 			}
 			if !found {
-				return "", fmt.Errorf("closure: unresolved cgo include %s", include)
+				// Not found under the package or its in-package `-I` roots → a
+				// system/toolchain header found by the C compiler's default search
+				// path (§7.1). Skip; build environment, not hashed. cgoIncludeRootOutsideDir
+				// has already refused any in-module `-I` root, so no in-tree source hides here.
+				continue
 			}
 		}
 	}

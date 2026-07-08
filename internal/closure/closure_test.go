@@ -253,20 +253,106 @@ func TestContributionCgoRelativeIncludeEscapeFailsClosed(t *testing.T) {
 	}
 }
 
-func TestContributionCgoSystemQuoteIncludeFailsClosed(t *testing.T) {
-	dir := t.TempDir()
+// TestContributionCgoSystemIncludeSkipped: a system/toolchain header not found in
+// the package's in-tree search space is build environment (§7.1) — covered by the
+// toolchain and machine guards within pew's single-machine scope — so it is skipped
+// rather than failing closed, both for quoted (`"stdio.h"`) and angle-bracket
+// (`<stdio.h>`, `<sys/types.h>`) forms. The package's own C source is still hashed.
+func TestContributionCgoSystemIncludeSkipped(t *testing.T) {
+	for _, inc := range []string{`"stdio.h"`, `<stdio.h>`, `<sys/types.h>`} {
+		t.Run(inc, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
+			writeFile(t, dir, "bridge.c", "#include "+inc+"\nvoid bridge(void) { GoCallback(); }\n")
+			h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+			pkg := listPkg{
+				ImportPath: "example/cgocallback",
+				Dir:        dir,
+				CgoFiles:   []string{"cg.go"},
+				CFiles:     []string{"bridge.c"},
+				Module:     &listMod{Main: true, Dir: dir},
+			}
+			got, err := h.contribution(pkg)
+			if err != nil {
+				t.Fatalf("contribution: %v, want system include skipped", err)
+			}
+			if got == "" {
+				t.Fatal("contribution empty; want package source hashed")
+			}
+			// The package's own C source must still be hashed: editing bridge.c moves it.
+			writeFile(t, dir, "bridge.c", "#include "+inc+"\nvoid bridge(void) { GoCallback(); GoCallback(); }\n")
+			again, err := h.contribution(pkg)
+			if err != nil {
+				t.Fatalf("contribution after edit: %v", err)
+			}
+			if got == again {
+				t.Fatal("editing in-tree cgo source did not move the contribution")
+			}
+		})
+	}
+}
+
+// TestContributionCgoNonPackageIncludeRootFailsClosed: a `-I` root outside the
+// package and outside the module cache holds mutable first-party C source pew cannot
+// prove is version-pinned — a local `replace => ../sibling` header, a `go.work`
+// sibling, or an unidentifiable system dir. Editing such a header changes the
+// benchmark, so the root must fail closed rather than be skipped (pew cannot
+// distinguish it from a genuine system root; system headers reached by the
+// compiler's default search fail-closed-free via the not-found path). Regression for
+// the local-replace false-valid: without it, `#include "api.h"` via the outside-
+// module `-I` root would be skipped and an api.h edit would report valid.
+func TestContributionCgoNonPackageIncludeRootFailsClosed(t *testing.T) {
+	parent := t.TempDir()
+	mod := filepath.Join(parent, "mod")
+	dir := filepath.Join(mod, "pkg")
+	shared := filepath.Join(parent, "shared", "include") // local-replace sibling, outside mod, not under cache
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
-	writeFile(t, dir, "bridge.c", "#include \"stdio.h\"\nvoid bridge(void) { GoCallback(); }\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	writeFile(t, dir, "bridge.c", "#include \"api.h\"\nvoid bridge(void) { GoCallback(); }\n")
+	writeFile(t, shared, "api.h", "#define N 1\n")
+	h := &Hasher{modCache: filepath.Join(parent, "gomodcache")}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
 		CgoFiles:   []string{"cg.go"},
+		CgoCFLAGS:  []string{"-I" + shared},
+		CFiles:     []string{"bridge.c"},
+		Module:     &listMod{Main: true, Dir: mod},
+	}
+	if _, err := h.contribution(pkg); err == nil || !strings.Contains(err.Error(), "cgo include root outside package dir") {
+		t.Fatalf("contribution error = %v, want cgo include root outside package dir", err)
+	}
+}
+
+// TestContributionCgoCacheIncludeRootAllowed: a `-I` root under GOMODCACHE is a
+// version-pinned dependency (§7.7) whose C headers ride the cache guard, so it is
+// allowed rather than failing closed.
+func TestContributionCgoCacheIncludeRootAllowed(t *testing.T) {
+	cache := t.TempDir()
+	dir := t.TempDir()
+	dep := filepath.Join(cache, "dep@v1.0.0", "include")
+	if err := os.MkdirAll(dep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
+	writeFile(t, dir, "bridge.c", "#include <dep.h>\nvoid bridge(void) { GoCallback(); }\n")
+	writeFile(t, dep, "dep.h", "#define N 1\n")
+	h := &Hasher{modCache: cache}
+	pkg := listPkg{
+		ImportPath: "example/cgocallback",
+		Dir:        dir,
+		CgoFiles:   []string{"cg.go"},
+		CgoCFLAGS:  []string{"-I" + dep},
 		CFiles:     []string{"bridge.c"},
 		Module:     &listMod{Main: true, Dir: dir},
 	}
-	if _, err := h.contribution(pkg); err == nil || !strings.Contains(err.Error(), "unresolved cgo include") {
-		t.Fatalf("contribution error = %v, want unresolved cgo include", err)
+	if _, err := h.contribution(pkg); err != nil {
+		t.Fatalf("contribution: %v, want cache -I root allowed", err)
 	}
 }
 
@@ -2043,6 +2129,32 @@ func TestTier2CgoCallbackSourceWidens(t *testing.T) {
 	}
 	if !contribContains(a.contribs, "file:example.com/cgocallback:cg.go=") || !contribContains(a.contribs, "file:example.com/cgocallback:bridge.c=") || !contribContains(a.contribs, "file:example.com/cgocallback:include/cfg.h=") {
 		t.Fatalf("cgo source files missing from contributions: %v", a.contribs)
+	}
+}
+
+// TestTier2CgoSystemIncludeSkipped mirrors the contribution-level system-include
+// skip on the Tier-2 addReachedPackageFiles path (which shares cgoEscapingInclude):
+// a `<stdio.h>` system header is skipped, the package C source is still hashed.
+func TestTier2CgoSystemIncludeSkipped(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
+	writeFile(t, dir, "bridge.c", "#include <stdio.h>\nvoid bridge(void) { GoCallback(); }\n")
+	idx := &pkgIndex{
+		id:      "example.com/cgocallback",
+		mutable: true,
+		meta: &listPkg{
+			Dir:      dir,
+			CgoFiles: []string{"cg.go"},
+			CFiles:   []string{"bridge.c"},
+			Module:   &listMod{Main: true, Dir: dir},
+		},
+	}
+	a := &tier2Analyzer{filePkgs: map[*pkgIndex]bool{idx: true}, seenContrib: map[string]bool{}}
+	if err := a.addReachedPackageFiles(); err != nil {
+		t.Fatalf("addReachedPackageFiles: %v, want system include skipped", err)
+	}
+	if !contribContains(a.contribs, "bridge.c") {
+		t.Fatalf("package cgo source missing from contributions: %v", a.contribs)
 	}
 }
 

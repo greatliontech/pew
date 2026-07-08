@@ -258,6 +258,23 @@ nothing to the hash. Module **dependencies are included** (a `go.mod` bump chang
 which the toolchain guard does *not* cover). `go list -json` distinguishes them: `Standard: true` → excluded;
 everything else → hashed.
 
+**System C headers are build environment, not hashed.** A cgo package's `#include` of a
+toolchain/system header (`<stdio.h>`, an `openssl` header) that the C compiler finds on its
+**default search path** — one pew does not resolve under the package or a module-cache dependency —
+is cut like stdlib: covered by the toolchain and machine guards within pew's single-machine scope
+(§3, §8), not hashed. This is a **weaker** cut than the Go stdlib one — C system headers are not
+Go-toolchain-versioned, so a libc/system-header update between record and status is caught only
+insofar as it moves the machine fingerprint (OS/kernel version, §8), and cross-machine reuse is
+already barred (§10); hashing per-machine-varying system paths is impractical. **In-tree C headers
+are still hashed:** an include resolving under the package dir rides the package file-set hash. A
+`-I` root — or an include reached via `..`/an absolute path — that leaves the package dir is safe
+only when it lands under the **module cache** (a version-pinned dependency, §7.7); anything else — an
+in-module sibling, a local `replace`/`go.work` sibling module, or a directory pew cannot prove is a
+pinned dependency — is mutable first-party source and **fails closed**. A genuine system `-I` root
+is indistinguishable from a mutable local one, so it fails closed too; only the default-search
+(not-found) system header is skipped. An opaque macro/computed `#include`, whose expansion could
+reach in-tree source, also fails closed.
+
 ### 7.2 Tiers — same model, Tier 1 is the sound floor
 
 - **Tier 1 (package closure):** hash the resolved file sets (`GoFiles`/`CgoFiles`/`SFiles`/

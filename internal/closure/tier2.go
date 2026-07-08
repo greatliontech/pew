@@ -990,7 +990,11 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 		}
 		if idx.mutable {
 			if hasCgoCallbackBlindspot(idx.meta) {
-				if root := cgoIncludeRootOutsideDir(idx.meta); root != "" {
+				modCache := ""
+				if a.h != nil {
+					modCache = a.h.modCache
+				}
+				if root := cgoIncludeRootOutsideDir(idx.meta, modCache); root != "" {
 					return fmt.Errorf("closure: cgo include root outside package dir: %s", root)
 				}
 				a.requestWiden("cgo callback source in " + idx.id)
