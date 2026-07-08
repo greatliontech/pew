@@ -825,10 +825,17 @@ func TestComputeIncludesInitRegisteredSideEffectPackage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tier2Contributions: %v", err)
 	}
-	if contribHasAll(contribs, codecPkg, "codec.go", ":init=") {
-		return
+	// The init body must be hashed, but the load-bearing edit for this false-valid
+	// is the *registered method* body: the benchmark dispatches gz.Decode through
+	// registry state and an interface without naming codec, so gz.Decode is reached
+	// only because all package inits are RTA roots. Hashing only the init would
+	// leave a gz.Decode body change unhashed (§7.1 reference/side-effect closure).
+	if !contribHasAll(contribs, codecPkg, "codec.go", ":init=") {
+		t.Fatalf("init-registered side-effect package %s init body missing from closure contributions: %v", codecPkg, contribs)
 	}
-	t.Fatalf("init-registered side-effect package %s init body missing from closure contributions: %v", codecPkg, contribs)
+	if !contribHasAll(contribs, codecPkg, "codec.go", "Decode") {
+		t.Fatalf("init-registered method gz.Decode missing from closure contributions: %v", contribs)
+	}
 }
 
 func TestComputeIncludesTestMainRoot(t *testing.T) {
