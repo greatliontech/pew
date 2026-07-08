@@ -893,6 +893,14 @@ func (a *tier2Analyzer) addObject(obj types.Object) {
 	}
 	if node == nil {
 		if _, ok := obj.(*types.Func); ok {
+			// A func object with no source decl node is source-free: buildIndex
+			// records a decl for every FuncDecl (incl. asm bodies and generic
+			// origins), so this is a synthetic/instantiated func whose real body,
+			// if any, is hashed through RTA (addFunction resolves fn.Origin() for
+			// every reachable instantiation — incl. methods RTA marks reachable
+			// when their concrete type is converted to an interface). Hashing its
+			// signature suffices; widening here would only lose precision. A
+			// non-func with no node is genuinely missing source → widen.
 			a.addType(obj.Type())
 			return
 		}
@@ -1621,11 +1629,30 @@ func classBReason(pkgPath, name string) string {
 
 func hasExternalCgo(flags []string) bool {
 	for _, f := range flags {
-		if strings.HasPrefix(f, "-l") || f == "-framework" || strings.Contains(f, "-framework") || strings.HasSuffix(f, ".a") || strings.HasSuffix(f, ".dylib") || strings.HasSuffix(f, ".so") || strings.Contains(f, ".dylib.") || strings.Contains(f, ".so.") {
-			return true
+		for _, tok := range expandLinkerFlag(f) {
+			if isExternalLinkToken(tok) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// expandLinkerFlag splits a linker pass-through flag into its sub-arguments. gcc
+// carries multiple linker arguments in one comma-joined token (`-Wl,-Bstatic,-lfoo,
+// -Bdynamic`), so a `-l` element can hide inside a single whitespace token; without
+// expanding it, an external library links unseen and the closure reports `valid`
+// while that library changes (§7.3-B, INV-2). `-Xlinker <arg>` needs no expansion —
+// go list already emits its argument as a separate token.
+func expandLinkerFlag(f string) []string {
+	if rest, ok := strings.CutPrefix(f, "-Wl,"); ok {
+		return strings.Split(rest, ",")
+	}
+	return []string{f}
+}
+
+func isExternalLinkToken(f string) bool {
+	return strings.HasPrefix(f, "-l") || f == "-framework" || strings.Contains(f, "-framework") || strings.HasSuffix(f, ".a") || strings.HasSuffix(f, ".dylib") || strings.HasSuffix(f, ".so") || strings.Contains(f, ".dylib.") || strings.Contains(f, ".so.")
 }
 
 func hasExternalCgoMeta(p *listPkg) bool {
@@ -1771,6 +1798,15 @@ func asmTargetFromFields(fields []string, labels map[string]bool) (string, bool,
 			return "", true, false
 		}
 		return "", false, false
+	}
+	if isASMIndirectCallOp(fields[0]) {
+		// Register/computed-target call or jump (e.g. riscv64 `JALR RA, 0(T0)`,
+		// mips `JR R5`): the callee is a runtime register value, never a parseable
+		// symbol, so it is a computed call → widen to the maximal closure
+		// (§7.3-A′). Without this, a ≥3-field indirect mnemonic falls through
+		// asmUnknownOpMayHideCall's leaf return and its Go-function-pointer target
+		// changes unhashed → false-valid.
+		return "", true, false
 	}
 	if !isASMCallOp(fields[0]) {
 		if asmUnknownOpMayHideCall(fields) {
@@ -1927,6 +1963,23 @@ func isASMCallOp(op string) bool {
 	}
 	switch op {
 	case "CALL", "JMP", "BL", "JAL", "B", "BR":
+		return true
+	}
+	return false
+}
+
+// isASMIndirectCallOp reports whether op transfers control through a register or
+// otherwise computed target across Go's target architectures. Such a mnemonic's
+// callee is never a parseable symbol, so any occurrence is a computed call that
+// must widen to the maximal closure (§7.3-A′) — listing them explicitly keeps
+// ordinary data-processing instructions (which also carry register operands)
+// precise instead of blanket-widening on every register operand.
+func isASMIndirectCallOp(op string) bool {
+	if i := strings.IndexByte(op, '.'); i >= 0 {
+		op = op[:i]
+	}
+	switch op {
+	case "JALR", "JIRL", "JR", "BLR", "BCTRL", "BCTR", "BX", "BLX", "BAL", "CALLIND":
 		return true
 	}
 	return false

@@ -1539,6 +1539,26 @@ func TestTier2ReflectWidens(t *testing.T) {
 	}
 }
 
+func TestTier2GenericInterfaceEscapeHashesMethodBody(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/genericescape"
+	contribs, widened, err := h.tier2Contributions(pkg, "BenchmarkGenericEscape")
+	if err != nil {
+		t.Fatalf("tier2Contributions: %v", err)
+	}
+	if widened {
+		t.Fatalf("generic interface escape widened to Tier-1 (imprecise): %v", contribs)
+	}
+	// Secret is reached only via interface escape (never called → not RTA-reachable);
+	// its instantiated object has no decl node, so the origin body must be hashed.
+	if !contribContains(contribs, "Secret") {
+		t.Fatalf("generic method body reached via interface escape missing from contributions: %v", contribs)
+	}
+}
+
 func TestTier2ConstGroupHashesImplicitContext(t *testing.T) {
 	h, err := New()
 	if err != nil {
@@ -1677,6 +1697,27 @@ func TestASMCallTargetsExpandsParamMacro(t *testing.T) {
 	}
 	if !stringSliceContains(targets, "·helper") {
 		t.Fatalf("targets = %v, want ·helper", targets)
+	}
+}
+
+func TestASMCallTargetsIndirectCallWidens(t *testing.T) {
+	// A ≥3-field indirect-call mnemonic (riscv64 JALR through a loaded Go function
+	// pointer) has no (SB) operand and no `_`, so asmUnknownOpMayHideCall would
+	// treat it as a leaf; it must instead widen (computed) so the pointed-to Go
+	// body cannot change unhashed (§7.3-A′).
+	// The JALR must be the sole computed-call trigger: no (SB) operand on any
+	// other line, else that line would set computed and mask the mnemonic under test.
+	dir := t.TempDir()
+	writeFile(t, dir, "macro.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tJALR RA, 0(T0)\n\tRET\n")
+	_, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	if err != nil {
+		t.Fatalf("asmCallTargets: %v", err)
+	}
+	if !computed {
+		t.Fatalf("computed = false, want true for indirect JALR")
+	}
+	if opaque {
+		t.Fatalf("opaque = true, want false")
 	}
 }
 
@@ -2399,6 +2440,11 @@ func TestHasExternalCgo(t *testing.T) {
 		{name: "so", flags: []string{"/tmp/libx.so"}, want: true},
 		{name: "versioned so", flags: []string{"/tmp/libx.so.1"}, want: true},
 		{name: "internal", flags: []string{"-Iinclude", "-DNAME=1"}, want: false},
+		{name: "wl grouped library", flags: []string{"-Wl,-Bstatic,-lfoo,-Bdynamic"}, want: true},
+		{name: "wl no-as-needed library", flags: []string{"-Wl,--no-as-needed,-lssl,--pop-state"}, want: true},
+		{name: "wl colon library", flags: []string{"-Wl,-Bstatic,-l:libfoo.a"}, want: true},
+		{name: "wl non-library", flags: []string{"-Wl,-rpath,/usr/lib"}, want: false},
+		{name: "xlinker library", flags: []string{"-Xlinker", "-lfoo"}, want: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := hasExternalCgo(tc.flags); got != tc.want {
