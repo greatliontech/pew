@@ -343,3 +343,32 @@ func TestCurrentRejectsMalformedManifestIdentities(t *testing.T) {
 		}
 	}
 }
+
+func TestModuleRelPaths(t *testing.T) {
+	enc, err := encode(manifest{
+		Version: manifestVersion,
+		Env:     []string{"PEW_X"},
+		Paths: []pathID{
+			{Kind: pathRel, Path: "data/fixture.txt"},
+			{Kind: pathRel, Path: "a.txt"},
+			{Kind: pathAbs, Path: "/etc/hosts"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	got, err := ModuleRelPaths(enc)
+	if err != nil {
+		t.Fatalf("ModuleRelPaths: %v", err)
+	}
+	// Only the module-relative (pathRel) inputs; absolute inputs and env excluded.
+	want := map[string]bool{"data/fixture.txt": true, "a.txt": true}
+	if len(got) != len(want) {
+		t.Fatalf("ModuleRelPaths = %v, want the two rel paths only", got)
+	}
+	for _, p := range got {
+		if !want[p] {
+			t.Errorf("ModuleRelPaths returned unexpected %q", p)
+		}
+	}
+}

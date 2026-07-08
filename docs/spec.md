@@ -456,8 +456,13 @@ tree/environment, and compares the digest to `pew-runtime`. A mismatch is `stale
 did not carry this guard.
 
 File inputs under the module directory are stored module-relative so moving a checkout does not make a
-recording stale. External file inputs are stored absolute. Missing files hash as missing, so a file
-appearing/disappearing moves the guard. Opened regular files hash both content and stable `FileInfo`
+recording stale. External file inputs are stored absolute. A module-local input **absent at the run
+commit** — `.gitignore`d, untracked, or created during the run — is not reproducible from that commit,
+so a recording backed by it is not faithful to its `commit` and is marked **dirty** (§5); this bars it
+as a pinned baseline (§10) while leaving it usable for working-tree reuse. Untracked and
+modified-tracked inputs already flip the informational `dirty` flag via git status; this additionally
+covers `.gitignore`d inputs, which git status excludes from the worktree status. Missing files hash as
+missing, so a file appearing/disappearing moves the guard. Opened regular files hash both content and stable `FileInfo`
 metadata; opened directories hash their tree entries, entry content, and stable entry metadata.
 Package-local directories may be hashed as directory trees; directory symlinks are hashed through only
 when their resolved target remains inside the module. Metadata-only `stat` observations are

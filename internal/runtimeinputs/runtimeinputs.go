@@ -414,6 +414,25 @@ func encode(m manifest) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
+// ModuleRelPaths decodes an encoded manifest and returns the module-relative
+// (slash-form) paths of its module-local file/directory inputs. These are the
+// observed inputs whose presence at the recording's commit determines whether the
+// recording is faithful to it (§5, §7.8); external (absolute) inputs and environment
+// variables are excluded (an external input is out of the module's git scope).
+func ModuleRelPaths(encoded string) ([]string, error) {
+	m, err := decode(encoded)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, p := range m.Paths {
+		if p.Kind == pathRel {
+			out = append(out, p.Path)
+		}
+	}
+	return out, nil
+}
+
 func decode(s string) (manifest, error) {
 	b, err := base64.RawURLEncoding.DecodeString(s)
 	if err != nil {

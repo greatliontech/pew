@@ -6,9 +6,59 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	gogit "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	runpkg "github.com/thegrumpylion/pew/internal/run"
+	"github.com/thegrumpylion/pew/internal/runtimeinputs"
 )
+
+// TestRuntimeInputsUncommitted pins the dirty-marking (§5, §7.8, Q3-A): a runtime
+// input under the module but absent at the run commit (e.g. a .gitignore'd fixture,
+// created after commit) makes the recording not reproducible from that commit, so
+// it is marked dirty; a committed input does not.
+func TestRuntimeInputsUncommitted(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "committed.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	commit, err := wt.Commit("c", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An input created after the commit (stands in for a .gitignore'd/untracked fixture).
+	if err := os.WriteFile(filepath.Join(dir, "secret.dat"), []byte("s"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	manifestFor := func(rel string) string {
+		t.Helper()
+		st, err := runtimeinputs.FromTestLog([]byte("# test log\nopen "+rel+"\n"), dir, dir)
+		if err != nil {
+			t.Fatalf("FromTestLog(%s): %v", rel, err)
+		}
+		return st.Manifest
+	}
+
+	if u, err := runtimeInputsUncommitted(dir, commit.String(), manifestFor("committed.txt")); err != nil || u {
+		t.Errorf("committed input: uncommitted=%v err=%v, want false", u, err)
+	}
+	if u, err := runtimeInputsUncommitted(dir, commit.String(), manifestFor("secret.dat")); err != nil || !u {
+		t.Errorf("uncommitted input: uncommitted=%v err=%v, want true", u, err)
+	}
+}
 
 func TestRunRunReturnsErrorOnPackageFailure(t *testing.T) {
 	dir := t.TempDir()

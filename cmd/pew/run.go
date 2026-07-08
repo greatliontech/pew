@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/thegrumpylion/pew/internal/closure"
+	"github.com/thegrumpylion/pew/internal/gitblob"
 	"github.com/thegrumpylion/pew/internal/provenance"
 	"github.com/thegrumpylion/pew/internal/run"
 	"github.com/thegrumpylion/pew/internal/runtimeinputs"
@@ -163,6 +164,13 @@ func runPackage(w io.Writer, h *closure.Hasher, rc runConfig, p pkgMeta) error {
 	if err != nil {
 		return err
 	}
+	if !prov.Dirty {
+		uncommitted, err := runtimeInputsUncommitted(p.Module.Dir, prov.Commit, runtimeState.Manifest)
+		if err != nil {
+			return err
+		}
+		prov.Dirty = uncommitted
+	}
 	results, err := run.Parse(out)
 	if err != nil {
 		return err
@@ -203,6 +211,37 @@ func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {
 		r.Config = append(r.Config, c)
 	}
 	return recs
+}
+
+// runtimeInputsUncommitted reports whether any module-local runtime input in the
+// manifest is absent at commit — ignored via .gitignore, untracked, or created
+// during the run — so a recording backed by it is not reproducible from that commit
+// and must be marked dirty (§5, §7.8, §10). Untracked and modified-tracked inputs
+// already flip the git-status dirty flag; this additionally catches .gitignore'd
+// inputs, which git status excludes from the worktree status. External (absolute)
+// inputs are outside the module's git scope and not considered here.
+func runtimeInputsUncommitted(moduleDir, commit, manifest string) (bool, error) {
+	rels, err := runtimeinputs.ModuleRelPaths(manifest)
+	if err != nil {
+		return false, err
+	}
+	if len(rels) == 0 {
+		return false, nil
+	}
+	repo, err := gitblob.Open(moduleDir)
+	if err != nil {
+		return false, err
+	}
+	for _, rel := range rels {
+		present, err := repo.ExistsAt(commit, filepath.Join(moduleDir, filepath.FromSlash(rel)))
+		if err != nil {
+			return false, err
+		}
+		if !present {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func nonValid(st *store.Store, h *closure.Hasher, pkgPath, pkgRel, moduleDir, label string, benches []string, prov provenance.Provenance) ([]string, error) {
