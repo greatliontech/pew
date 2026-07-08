@@ -388,10 +388,18 @@ re-runs — folds into the CLI surface (§12).
 
 ### 7.5 Escape hatch
 
-A benchmark flagged `unverifiable` for a Class-B dependence the author knows is perf-irrelevant (a
-fixed fixture file, a deterministic seed) can be asserted pure: `pew run --assume-pure <Bench>`
-records a `pure: true` provenance line, after which Class-B detection is suppressed for it. This is
-the **user taking responsibility**, explicit and recorded — pew never silently assumes purity.
+A benchmark flagged `unverifiable` for a dependence the author knows is perf-irrelevant (a fixed
+fixture file, a deterministic seed) can be asserted pure: `pew run --assume-pure <Bench>` records a
+`pure: true` provenance line. It suppresses **all** of `B`'s unverifiability — both the closure's
+Class-B marker (§7.3) *and* the runtime-input manifest's `unverifiable` flag (§7.8), so a benchmark
+that only `stat`s a fixed fixture can reach `valid`. This is a **full "trust me"**, not "the manifest
+keeps guarding": `--assume-pure` also waives the manifest's own blind spots (§7.8) — testlog-invisible
+reads (`os.Root`/`openat`), a pre-stream `syscall.Chdir` that desyncs a relative path — because those
+are exactly the unverifiabilities the author is asserting away. The **hashable** guards are *not*
+waived: the closure hash, the `pew-runtime` digest over whatever inputs the manifest *did* observe,
+and the toolchain/machine/build/runtime-config guards all still apply, so a change to an observed
+input still moves the recording to `stale`. This is the **user taking responsibility**, explicit and
+recorded — pew never silently assumes purity.
 
 ### 7.6 What changes vs what is recomputed
 

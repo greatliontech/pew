@@ -36,11 +36,14 @@ type RuntimeState struct {
 //     buildconfig, runtimeconfig.
 //     commit/dirty are deliberately NOT guards (INV-6: validity is
 //     commit-sha-independent). A missing guard key cannot be validated, so Stale.
-//   - Unverifiable if the guards pass and the runtime manifest contains an
-//     unhashable observed input, the benchmark is marked --impure (pure:false),
-//     or its HEAD closure reaches an unhashable external dependence
-//     (head.Unverifiable) and it is not marked --assume-pure (pure:true).
-//     Absence of proof never collapses to valid (INV-1).
+//   - Unverifiable if the guards pass but validity is unprovable and no purity
+//     override applies: the runtime manifest contains an unhashable observed input
+//     (runtime.Unverifiable), or the HEAD closure reaches an unhashable external
+//     dependence (head.Unverifiable), or the benchmark is marked --impure
+//     (pure:false). --assume-pure (pure:true) suppresses BOTH the manifest and
+//     closure unverifiability — the author takes full responsibility (§7.5) — while
+//     the hashable guards above still applied. Absence of proof never collapses to
+//     valid without that explicit override (INV-1).
 //
 // For a Stale verdict, reason names the first failing guard; for Unverifiable, it
 // is the external-dependence reason (or "impure").
@@ -72,25 +75,30 @@ func Check(cur provenance.Provenance, head closure.Closure, runtime RuntimeState
 			return Stale, g.key
 		}
 	}
-	if runtime.Unverifiable {
-		reason := runtime.Reason
-		if reason == "" {
-			reason = "runtime inputs"
-		}
-		return Unverifiable, reason
-	}
 	switch cfg["pure"] {
 	case "false":
 		// --impure: the author declares external state, so it always re-runs (§7.3).
 		return Unverifiable, "impure"
 	case "true":
-		// --assume-pure: Class-B detection is suppressed (§7.5); fall through to the
-		// guards as if verifiable.
+		// --assume-pure: the author takes full responsibility for all of B's external
+		// dependence (§7.5), suppressing BOTH the runtime manifest's unverifiable flag
+		// and the closure's Class-B marker — including silent-omission modes the
+		// manifest cannot bound (§7.8). The hashable guards above (pew-runtime digest,
+		// closure hash, toolchain/machine/build/runtime config) still applied, so this
+		// is "trust the observed inputs I do capture", not "skip all guards".
 	default:
-		// No purity directive: an unhashable external dependence in HEAD's closure
-		// makes validity unprovable (§7.3 Class B). The runtime-input guard catches
-		// changes to inputs it observed, but it is not itself proof that every
-		// reachable file-I/O path was observed (§7.8).
+		// No purity directive: an unhashable observed input in the runtime manifest,
+		// or an unhashable external dependence in HEAD's closure (§7.3 Class B), makes
+		// validity unprovable. The runtime-input guard catches changes to inputs it
+		// observed, but is not itself proof that every reachable file-I/O path was
+		// observed (§7.8), so it cannot suppress the Class-B marker.
+		if runtime.Unverifiable {
+			reason := runtime.Reason
+			if reason == "" {
+				reason = "runtime inputs"
+			}
+			return Unverifiable, reason
+		}
 		if head.Unverifiable {
 			reason := head.Reason
 			if reason == "" {

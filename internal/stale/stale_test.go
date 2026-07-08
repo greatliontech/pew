@@ -179,3 +179,28 @@ func TestCheckRuntimeUnverifiable(t *testing.T) {
 		t.Errorf("got %v/%q, want runtime unverifiable", v, reason)
 	}
 }
+
+// TestCheckAssumePureSuppressesManifestUnverifiable pins the §7.5 override: a
+// pure:true recording whose runtime manifest carries an unverifiable entry (e.g. a
+// stat-observed fixed fixture) reaches valid — --assume-pure waives BOTH manifest
+// and closure unverifiability. But the hashable guards are NOT waived: a pew-runtime
+// digest mismatch on the inputs the manifest did observe still reports stale.
+func TestCheckAssumePureSuppressesManifestUnverifiable(t *testing.T) {
+	p := prov()
+	rt := RuntimeState{Digest: "rt1", OK: true, Unverifiable: true, Reason: "stat metadata input"}
+	pureRec := append(recordFor(p, "cl1"), benchfmt.Config{Key: "pure", Value: []byte("true")})
+
+	// --assume-pure suppresses the manifest unverifiable flag → valid.
+	if v, reason := Check(p, cl("cl1"), rt, pureRec); v != Valid {
+		t.Errorf("--assume-pure + manifest unverifiable: got %v/%q, want valid", v, reason)
+	}
+	// Without the override, the same manifest entry is unverifiable (INV-1).
+	if v, _ := Check(p, cl("cl1"), rt, recordFor(p, "cl1")); v != Unverifiable {
+		t.Errorf("no override: got %v, want unverifiable", v)
+	}
+	// The hashable pew-runtime digest guard still applies under --assume-pure: a
+	// changed observed input (digest mismatch) is stale, not suppressed.
+	if v, reason := Check(p, cl("cl1"), RuntimeState{Digest: "rt-CHANGED", OK: true, Unverifiable: true}, pureRec); v != Stale || reason != "pew-runtime" {
+		t.Errorf("--assume-pure + changed observed input: got %v/%q, want stale/pew-runtime", v, reason)
+	}
+}

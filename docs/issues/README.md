@@ -6,7 +6,6 @@ close-out convention.
 
 | slug | summary | Lands |
 |------|---------|-------|
-| [assume-pure-runtime-manifest](assume-pure-runtime-manifest.md) | `--assume-pure` cannot override manifest-level unverifiability (spec-amend candidate) | when the purity-override semantics are decided via the spec-amend channel |
 | [batched-package-load](batched-package-load.md) | one shared `packages.Load` across packages instead of per-package whole-program loads | when closure performance is next worked, or multi-package status proves slow |
 | [buildconfig-completeness](buildconfig-completeness.md) | PGO profile content + CLI build-flag pass-throughs in the buildconfig guard (cgo/env half landed) | when PGO benchmarks see real use, or `pew run` grows build-flag flags |
 | [closure-list-cache](closure-list-cache.md) | memoize `go list -deps -test` per package (currently run per benchmark) | when closure performance is next worked, or `pew status` proves slow |
