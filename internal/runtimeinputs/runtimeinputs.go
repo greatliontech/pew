@@ -171,7 +171,7 @@ func Current(encoded, moduleDir string) (State, error) {
 	sum := h.Sum(nil)
 	return State{
 		Manifest:     encoded,
-		Digest:       hex.EncodeToString(sum)[:16],
+		Digest:       hex.EncodeToString(sum)[:32],
 		Unverifiable: unverifiable,
 		Reason:       reason,
 		OK:           true,

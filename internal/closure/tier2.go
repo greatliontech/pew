@@ -1167,7 +1167,7 @@ func (a *tier2Analyzer) addDecl(idx *pkgIndex, label string, node ast.Node) {
 			rel = r
 		}
 	}
-	a.addContribution(fmt.Sprintf("decl:%s:%s:%d:%s=%s", idx.id, filepath.ToSlash(rel), startOff, label, hex.EncodeToString(sum[:])[:16]))
+	a.addContribution(fmt.Sprintf("decl:%s:%s:%d:%s=%s", idx.id, filepath.ToSlash(rel), startOff, label, hex.EncodeToString(sum[:])[:32]))
 }
 
 func declarationNames(node ast.Node) string {

@@ -29,11 +29,11 @@ func TestCapture(t *testing.T) {
 	if !strings.Contains(p.Toolchain, "go1") {
 		t.Errorf("toolchain looks wrong: %q", p.Toolchain)
 	}
-	if len(p.Machine) != 16 {
-		t.Errorf("machine fingerprint: got %q (len %d), want len 16", p.Machine, len(p.Machine))
+	if len(p.Machine) != 32 {
+		t.Errorf("machine fingerprint: got %q (len %d), want len 32", p.Machine, len(p.Machine))
 	}
-	if len(p.BuildConfig) != 16 {
-		t.Errorf("buildconfig: got %q (len %d), want len 16", p.BuildConfig, len(p.BuildConfig))
+	if len(p.BuildConfig) != 32 {
+		t.Errorf("buildconfig: got %q (len %d), want len 32", p.BuildConfig, len(p.BuildConfig))
 	}
 }
 
@@ -64,7 +64,7 @@ func TestFingerprintStableAndSensitive(t *testing.T) {
 	if f1, f2 := a.Fingerprint(), a.Fingerprint(); f1 != f2 {
 		t.Errorf("fingerprint not deterministic: %q vs %q", f1, f2)
 	}
-	if len(a.Fingerprint()) != 16 {
+	if len(a.Fingerprint()) != 32 {
 		t.Errorf("fingerprint len: got %d", len(a.Fingerprint()))
 	}
 	for _, mut := range []func(*MachineFacts){
@@ -143,7 +143,7 @@ func TestBuildConfigStable(t *testing.T) {
 	if a != b {
 		t.Errorf("buildconfig not stable across calls: %q vs %q", a, b)
 	}
-	if len(a) != 16 {
+	if len(a) != 32 {
 		t.Errorf("buildconfig len: got %d", len(a))
 	}
 }

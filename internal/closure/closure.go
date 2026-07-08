@@ -146,7 +146,7 @@ func hashContributions(pkgPath string, contribs []string) (string, error) {
 	}
 	sort.Strings(contribs)
 	sum := sha256.Sum256([]byte(strings.Join(contribs, "\n")))
-	return hex.EncodeToString(sum[:])[:16], nil
+	return hex.EncodeToString(sum[:])[:32], nil
 }
 
 // contribution returns this package's contribution to the closure, or "" if it
@@ -655,7 +655,7 @@ func hashFiles(dir string, files []string) (string, error) {
 		}
 		fmt.Fprintf(hasher, "%s\x00%x\n", f, sha256.Sum256(content))
 	}
-	return hex.EncodeToString(hasher.Sum(nil))[:16], nil
+	return hex.EncodeToString(hasher.Sum(nil))[:32], nil
 }
 
 func hashFile(path string) (string, error) {
@@ -664,7 +664,7 @@ func hashFile(path string) (string, error) {
 		return "", fmt.Errorf("closure: read %s: %w", path, err)
 	}
 	sum := sha256.Sum256(content)
-	return hex.EncodeToString(sum[:])[:16], nil
+	return hex.EncodeToString(sum[:])[:32], nil
 }
 
 func (h *Hasher) list(pkgPath string) ([]listPkg, error) {

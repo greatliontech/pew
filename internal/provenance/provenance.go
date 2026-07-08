@@ -129,5 +129,5 @@ func buildConfig(dir string) (string, error) {
 // fingerprints.
 func digest(s string) string {
 	sum := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(sum[:])[:16]
+	return hex.EncodeToString(sum[:])[:32]
 }

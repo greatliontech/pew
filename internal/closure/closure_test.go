@@ -28,7 +28,7 @@ func TestHashFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(h1) != 16 {
+	if len(h1) != 32 {
 		t.Errorf("hash len: got %d", len(h1))
 	}
 
@@ -792,7 +792,7 @@ func TestMaximalHashReal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("maximalHash: %v", err)
 	}
-	if len(a) != 16 {
+	if len(a) != 32 {
 		t.Errorf("hash len: got %d (%q)", len(a), a)
 	}
 	if b, _ := h.maximalHash(pkg); b != a {
@@ -817,7 +817,7 @@ func TestComputeIncludesInitRegisteredSideEffectPackage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compute: %v", err)
 	}
-	if len(cl.Hash) != 16 {
+	if len(cl.Hash) != 32 {
 		t.Fatalf("hash len: got %d (%q)", len(cl.Hash), cl.Hash)
 	}
 
