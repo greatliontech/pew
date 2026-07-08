@@ -148,6 +148,33 @@ func TestBuildConfigStable(t *testing.T) {
 	}
 }
 
+// TestBuildConfigCapturesBuildAffectingEnv pins that a change to any hashed
+// build-affecting input moves the digest (§7 guard 5) — otherwise a code-generation
+// change could report valid — and that host GOOS/GOARCH, which ride the machine
+// guard (§8), do not move it.
+func TestBuildConfigCapturesBuildAffectingEnv(t *testing.T) {
+	base, err := buildConfig("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Each build-affecting key must move the digest.
+	for _, k := range []string{
+		"CGO_CFLAGS", "CGO_CPPFLAGS", "CGO_CXXFLAGS", "CGO_FFLAGS", "CGO_LDFLAGS",
+		"CC", "CXX", "PKG_CONFIG_PATH", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR",
+	} {
+		t.Run(k, func(t *testing.T) {
+			t.Setenv(k, "pew-buildconfig-test-"+k)
+			got, err := buildConfig("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got == base {
+				t.Fatalf("changing %s did not move the buildconfig digest", k)
+			}
+		})
+	}
+}
+
 // TestGitStateDirty validates commit + dirty semantics against a real repo built
 // with the git binary: clean after commit, dirty with an untracked file.
 func TestGitStateDirty(t *testing.T) {

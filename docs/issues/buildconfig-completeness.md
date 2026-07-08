@@ -1,34 +1,35 @@
-# Buildconfig Guard Completeness
+# Buildconfig Guard Completeness — PGO profile content & CLI build flags
 
-Lands: when changing buildconfig guard inputs or build-flag handling
+Lands: when PGO-driven benchmarks see real use, or when `pew run` grows build-affecting CLI
+pass-throughs (`-tags`/`-gcflags`/`-pgo`)
 
-## Fault
+## Resolved (landed)
 
-`buildconfig` currently hashes a small `go env` subset plus raw `GOFLAGS`. That misses build inputs
-that can change generated code without changing source, toolchain, or machine identity.
+The environment-input half of this gap is closed: `buildconfig` now digests the full codegen
+feature level and cgo toolchain environment (`CGO_*FLAGS`, `CC`/`CXX`, `PKG_CONFIG*`) alongside
+`GOFLAGS`, with host `GOOS`/`GOARCH` deliberately left to the machine guard (§8). The canonical input
+contract is stated at spec §7 guard 5 and pinned by `TestBuildConfigCapturesBuildAffectingEnv`
+(each hashed key moves the digest). The `CGO_CFLAGS=-DFAST=0 → -DFAST=1` false-valid no longer
+reproduces.
 
-Concrete false-valid paths:
+## Remaining fault
 
-- `CGO_CFLAGS=-DFAST=0` at record time, then `CGO_CFLAGS=-DFAST=1` at status time. The benchmark can
-  compile different C paths while the recorded `buildconfig` still matches.
-- `GOFLAGS=-pgo=/tmp/profile.pprof` and the profile file contents change without the flag string
-  changing. The generated Go code can change while the guard stays fixed.
-- `-pgo=auto` / `default.pgo` requires package-aware profile discovery; raw flag hashing is not a
-  content guard.
+Two build-affecting inputs still change generated code without moving the guard:
 
-This violates the §7 buildconfig guard: a code-generation input changed but `valid` can still be
-reported.
+- **PGO profile content.** `GOFLAGS=-pgo=/tmp/profile.pprof` is captured only as the flag *string*;
+  the profile file's *contents* can change while the digest stays fixed. `-pgo=auto` / `default.pgo`
+  needs package-aware profile discovery — raw flag hashing is not a content guard.
+- **CLI build-flag pass-throughs.** If `pew run` grows `-tags`/`-gcflags`/`-pgo` flags (not yet
+  present), those must feed the digest before they are exposed (spec §9), or a flag change produces a
+  false `valid`.
 
-## Reconciliation
+## Design tension to resolve on landing
 
-Define and implement the exact canonical buildconfig input set. At minimum:
-
-- architecture/codegen env: `GOOS`, `GOARCH`, `GOAMD64`, `GOARM`, `GOARM64`, `GO386`, `GOEXPERIMENT`
-- cgo and external compiler/linker env: `CGO_ENABLED`, `CGO_CFLAGS`, `CGO_CPPFLAGS`, `CGO_CXXFLAGS`,
-  `CGO_FFLAGS`, `CGO_LDFLAGS`, `CC`, `CXX`, `PKG_CONFIG`, `PKG_CONFIG_PATH`, `PKG_CONFIG_LIBDIR`,
-  `PKG_CONFIG_SYSROOT_DIR`
-- build flags from `GOFLAGS` and pew CLI pass-throughs that affect compilation
-- PGO profile content, including explicit `-pgo=<path>` and `auto`/`default.pgo` behavior
+`buildconfig` is a **single global per-run** config line (§5), but PGO profiles are **per-main-
+package** (`default.pgo` lives in each package's dir; `go test ./...` can build several). A single
+global digest cannot cleanly represent per-package profiles. Options: fold PGO profile content into
+the per-benchmark `pew-closure` (it is a codegen input for the reached functions, like `-gcflags`),
+or make `buildconfig` per-package. Decide before implementing.
 
 Fail closed for unsupported or unparseable build-affecting inputs rather than emitting a digest that
 can remain stable across different generated code.

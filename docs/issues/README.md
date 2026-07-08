@@ -8,12 +8,11 @@ close-out convention.
 |------|---------|-------|
 | [assume-pure-runtime-manifest](assume-pure-runtime-manifest.md) | `--assume-pure` cannot override manifest-level unverifiability (spec-amend candidate) | when the purity-override semantics are decided via the spec-amend channel |
 | [batched-package-load](batched-package-load.md) | one shared `packages.Load` across packages instead of per-package whole-program loads | when closure performance is next worked, or multi-package status proves slow |
-| [buildconfig-completeness](buildconfig-completeness.md) | exact buildconfig guard inputs, including cgo and PGO content | when changing buildconfig guard inputs or build-flag handling |
+| [buildconfig-completeness](buildconfig-completeness.md) | PGO profile content + CLI build-flag pass-throughs in the buildconfig guard (cgo/env half landed) | when PGO benchmarks see real use, or `pew run` grows build-flag flags |
 | [closure-list-cache](closure-list-cache.md) | memoize `go list -deps -test` per package (currently run per benchmark) | when closure performance is next worked, or `pew status` proves slow |
 | [dirty-runtime-inputs](dirty-runtime-inputs.md) | dirty/pinned-baseline semantics for ignored or untracked runtime inputs | when changing dirty baseline checks or runtime-input baseline semantics |
 | [json-output](json-output.md) | `-json` machine-readable output for `status`/`stat` | when pew is first wired into CI/scripting beyond exit-code gating |
 | [provenance-capture-cache](provenance-capture-cache.md) | capture provenance once per module, not once per package | when status/run wall-clock proves slow, or the capture call sites change |
-| [provenance-comment-codename](provenance-comment-codename.md) | planning codename ("chunk 5") in a kept-current `provenance.go` comment | when `internal/provenance` is next touched |
 | [purity-directives](purity-directives.md) | durable `//pew:pure` / `//pew:external` code directives vs CLI flags | when CLI purity flags prove insufficient |
 | [run-stale-bench-filter](run-stale-bench-filter.md) | `pew run --stale` discards the user's `--bench` pattern | when `pew run` benchmark selection or `--stale` handling is next changed |
 | [runtime-config-env-guard](runtime-config-env-guard.md) | GOGC/GODEBUG/GOMEMLIMIT/GOMAXPROCS outside every guard (spec-amend candidate) | when the guard model is extended via the spec-amend channel, or with `runconditions` |

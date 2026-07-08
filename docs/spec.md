@@ -214,8 +214,16 @@ The five guards:
 2. **Runtime inputs** — recomputed digest from `R.pew-runtime-inputs` == `R.pew-runtime` (§7.8)
 3. **Toolchain** — current `go version` == `R.toolchain`
 4. **Machine** — current fingerprint == `R.machine`
-5. **Build config** — current digest == `R.buildconfig` (build tags, `-gcflags`, cgo on/off, PGO
-   profile hash)
+5. **Build config** — current digest == `R.buildconfig`. The digest covers every build-affecting
+   input that can change generated code without moving the toolchain, machine, or source guards:
+   the codegen **feature level** (`GOAMD64`/`GOARM`/`GOARM64`/`GO386`, `GOEXPERIMENT`), the **cgo
+   toolchain environment** (`CGO_ENABLED`, the `CGO_*FLAGS`, `CC`/`CXX`, the `PKG_CONFIG*`
+   variables), **build flags** (`GOFLAGS` plus any build-affecting CLI pass-through), and **PGO
+   profile content**. Host `GOOS`/`GOARCH` are excluded here — they ride the machine guard (§8), so
+   a host-arch change moves `machine` while a feature-level change moves `buildconfig`; both
+   captured, neither dropped. A build-affecting input pew cannot parse or bound **fails closed** (the
+   recording is refused) rather than digesting to a value that could stay stable across different
+   generated code.
 
 Guards 3–5 are exact-equality on recorded provenance — cheap and unambiguous. Guards 1–2 are derived
 digests over source and observed runtime inputs; the rest of this section defines their soundness.
