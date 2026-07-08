@@ -72,7 +72,7 @@ func TestCheckUnverifiable(t *testing.T) {
 
 func TestCheckRuntimeFileIORemainsUnverifiableWithoutCoverageProof(t *testing.T) {
 	p := prov()
-	head := closure.Closure{Hash: "cl1", Unverifiable: true, Reason: "reaches os.ReadFile (file I/O)", RuntimeFileIOOnly: true}
+	head := closure.Closure{Hash: "cl1", Unverifiable: true, Reason: "reaches os.ReadFile (file I/O)"}
 	if v, reason := Check(p, head, rt("rt1"), recordFor(p, "cl1")); v != Unverifiable || reason != head.Reason {
 		t.Errorf("runtime file I/O without coverage proof: got %v/%q, want unverifiable/%q", v, reason, head.Reason)
 	}
@@ -92,7 +92,7 @@ func TestCheckGuardFailurePrecedesUnverifiable(t *testing.T) {
 	if v, reason := Check(p, closure.Closure{Hash: "cl2", Unverifiable: true}, rt("rt1"), rec); v != Stale || reason != "pew-closure" {
 		t.Errorf("class-B with stale closure: got %v/%q, want stale/pew-closure", v, reason)
 	}
-	runtimeFileIO := closure.Closure{Hash: "cl1", Unverifiable: true, Reason: "reaches os.ReadFile (file I/O)", RuntimeFileIOOnly: true}
+	runtimeFileIO := closure.Closure{Hash: "cl1", Unverifiable: true, Reason: "reaches os.ReadFile (file I/O)"}
 	if v, reason := Check(p, runtimeFileIO, rt("rt2"), rec); v != Stale || reason != "pew-runtime" {
 		t.Errorf("class-B with stale runtime inputs: got %v/%q, want stale/pew-runtime", v, reason)
 	}

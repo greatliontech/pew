@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	"github.com/thegrumpylion/pew/internal/gotool"
-	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/callgraph/rta"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
@@ -148,16 +147,15 @@ func (h *Hasher) Compute(pkgPath, bench string) (Closure, error) {
 	if err != nil {
 		return Closure{}, err
 	}
-	return Closure{Hash: hash, Unverifiable: tr.unverifiable, Reason: tr.reason, RuntimeFileIOOnly: tr.runtimeFileIOOnly}, nil
+	return Closure{Hash: hash, Unverifiable: tr.unverifiable, Reason: tr.reason}, nil
 }
 
 type tier2Result struct {
-	contribs          []string
-	widen             bool
-	widenReason       string
-	unverifiable      bool
-	reason            string
-	runtimeFileIOOnly bool
+	contribs     []string
+	widen        bool
+	widenReason  string
+	unverifiable bool
+	reason       string
 }
 
 func (h *Hasher) tier2Contributions(pkgPath, bench string) ([]string, bool, error) {
@@ -187,19 +185,19 @@ func (h *Hasher) tier2(pkgPath, bench string) (tier2Result, error) {
 		return tier2Result{}, err
 	}
 
-	postRoots := []*ssa.Function{root}
-	roots := append([]*ssa.Function{}, postRoots...)
-	var preRoots []*ssa.Function
+	// RTA is rooted at the benchmark plus TestMain and every package init, so
+	// startup/global side effects a benchmark observes without naming the
+	// registering package are covered (§7.4). File I/O reached anywhere in this
+	// closure is Class-B `unverifiable` regardless of when it runs (§7.3-B, §7.8):
+	// the runtime-input manifest is evidence, never a completeness proof, so the
+	// closure never promotes observed file I/O to `valid`.
+	roots := []*ssa.Function{root}
 	if prog.testMain != nil {
 		roots = append(roots, prog.testMain)
-		preRoots = append(preRoots, prog.testMain)
 	}
 	for _, p := range prog.prog.AllPackages() {
 		if init := p.Func("init"); init != nil {
 			roots = append(roots, init)
-			if idx := a.idxForFunction(init); idx != nil && !idx.std && !idx.testMain {
-				preRoots = append(preRoots, init)
-			}
 		}
 	}
 	res := rta.Analyze(roots, true)
@@ -209,12 +207,6 @@ func (h *Hasher) tier2(pkgPath, bench string) (tier2Result, error) {
 	for fn := range res.Reachable {
 		a.rtaReach[fn] = true
 	}
-	a.markRuntimeCallGraph(res.CallGraph, postRoots, a.postRuntimeReach, false)
-	if len(preRoots) > 0 {
-		a.markRuntimeCallGraph(res.CallGraph, preRoots, a.preRuntimeReach, true)
-	}
-	a.preCWDMayChange = a.reachMayChdir(a.preRuntimeReach)
-	a.cwdMayChange = a.preCWDMayChange || a.reachMayChdir(a.postRuntimeReach)
 	for fn := range res.Reachable {
 		a.addFunction(fn)
 		if idx := a.idxForFunction(fn); idx != nil && idx.std {
@@ -234,65 +226,6 @@ func (h *Hasher) tier2(pkgPath, bench string) (tier2Result, error) {
 		}
 	}
 	return a.result(), nil
-}
-
-func (a *tier2Analyzer) markRuntimeCallGraph(g *callgraph.Graph, roots []*ssa.Function, dst map[*ssa.Function]bool, stopTestingRun bool) {
-	seen := map[*ssa.Function]bool{}
-	stack := append([]*ssa.Function{}, roots...)
-	for len(stack) > 0 {
-		fn := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		if fn == nil || seen[fn] {
-			continue
-		}
-		seen[fn] = true
-		dst[fn] = true
-		if stopTestingRun && isBenchmarkHarnessPath(funcPkgPath(fn)) {
-			continue
-		}
-		idx := a.idxForFunction(fn)
-		callerStd := idx != nil && idx.std
-		node := (*callgraph.Node)(nil)
-		if g != nil {
-			node = g.Nodes[fn]
-		}
-		for _, block := range fn.Blocks {
-			for _, instr := range block.Instrs {
-				call, ok := instr.(ssa.CallInstruction)
-				if !ok {
-					continue
-				}
-				c := call.Common()
-				if c == nil {
-					continue
-				}
-				if callee := c.StaticCallee(); callee != nil {
-					if !(stopTestingRun && isBenchmarkHarnessPath(funcPkgPath(callee))) {
-						stack = append(stack, callee)
-					}
-					continue
-				}
-				if node == nil {
-					continue
-				}
-				for _, edge := range node.Out {
-					if edge == nil || edge.Site != call || edge.Callee == nil || edge.Callee.Func == nil {
-						continue
-					}
-					if stopTestingRun && isBenchmarkHarnessPath(funcPkgPath(edge.Callee.Func)) {
-						continue
-					}
-					if callerStd {
-						calleeIdx := a.idxForFunction(edge.Callee.Func)
-						if calleeIdx == nil || calleeIdx.std || calleeIdx.testMain {
-							continue
-						}
-					}
-					stack = append(stack, edge.Callee.Func)
-				}
-			}
-		}
-	}
 }
 
 type pkgIndex struct {
@@ -326,26 +259,21 @@ type tier2Analyzer struct {
 	objByName        map[string]types.Object
 	objsByLinkTarget map[string][]types.Object
 
-	seenObjects      map[types.Object]bool
-	objectQueue      []types.Object
-	seenTypes        map[string]bool
-	seenDecls        map[string]bool
-	seenPkgs         map[*pkgIndex]bool
-	filePkgs         map[*pkgIndex]bool
-	rtaReach         map[*ssa.Function]bool
-	preRuntimeReach  map[*ssa.Function]bool
-	postRuntimeReach map[*ssa.Function]bool
-	scanned          map[*ssa.Function]bool
-	seenContrib      map[string]bool
-	contribs         []string
+	seenObjects map[types.Object]bool
+	objectQueue []types.Object
+	seenTypes   map[string]bool
+	seenDecls   map[string]bool
+	seenPkgs    map[*pkgIndex]bool
+	filePkgs    map[*pkgIndex]bool
+	rtaReach    map[*ssa.Function]bool
+	scanned     map[*ssa.Function]bool
+	seenContrib map[string]bool
+	contribs    []string
 
-	widen                  bool
-	widenReason            string
-	unverifiable           bool
-	nonRuntimeUnverifiable bool
-	reason                 string
-	preCWDMayChange        bool
-	cwdMayChange           bool
+	widen        bool
+	widenReason  string
+	unverifiable bool
+	reason       string
 }
 
 func newTier2Analyzer(h *Hasher, prog *program, metas []listPkg) *tier2Analyzer {
@@ -364,8 +292,6 @@ func newTier2Analyzer(h *Hasher, prog *program, metas []listPkg) *tier2Analyzer 
 		seenPkgs:         map[*pkgIndex]bool{},
 		filePkgs:         map[*pkgIndex]bool{},
 		rtaReach:         map[*ssa.Function]bool{},
-		preRuntimeReach:  map[*ssa.Function]bool{},
-		postRuntimeReach: map[*ssa.Function]bool{},
 		scanned:          map[*ssa.Function]bool{},
 		seenContrib:      map[string]bool{},
 	}
@@ -624,13 +550,12 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 		return
 	}
 	a.scanned[fn] = true
-	preRuntime := a.preRuntimeReach[fn] && (!a.postRuntimeReach[fn] || !a.runtimeFileIOSameInputProof(fn))
 	suppressNestedFileIO := idx.std && isFileIOReason(classBReasonForFunction(fn))
 	if !idx.std && idx.wasmImport {
-		a.markUnverifiable("reaches go:wasmimport", false)
+		a.markUnverifiable("reaches go:wasmimport")
 	}
 	if idx.cache && hasExternalCgoMeta(idx.meta) {
-		a.markUnverifiable("reaches cgo external library", false)
+		a.markUnverifiable("reaches cgo external library")
 	}
 	if idx.cache {
 		a.scanCacheFunctionRefs(idx, fn)
@@ -657,7 +582,7 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 			if idx.std {
 				fromRTA = false
 			}
-			a.scanInstruction(idx, instr, fromRTA, preRuntime, suppressNestedFileIO)
+			a.scanInstruction(idx, instr, fromRTA, suppressNestedFileIO)
 		}
 	}
 }
@@ -706,16 +631,16 @@ func (a *tier2Analyzer) scanValue(v ssa.Value) {
 	}
 }
 
-func (a *tier2Analyzer) scanInstruction(idx *pkgIndex, instr ssa.Instruction, fromRTA, preRuntime, suppressNestedFileIO bool) {
+func (a *tier2Analyzer) scanInstruction(idx *pkgIndex, instr ssa.Instruction, fromRTA, suppressNestedFileIO bool) {
 	switch x := instr.(type) {
 	case ssa.CallInstruction:
-		a.scanCall(idx, x.Common(), fromRTA, preRuntime, suppressNestedFileIO)
+		a.scanCall(idx, x.Common(), fromRTA, suppressNestedFileIO)
 	case *ssa.MakeInterface:
 		a.addInterfaceMethodSet(x.X.Type())
 	}
 }
 
-func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, c *ssa.CallCommon, fromRTA, preRuntime, suppressNestedFileIO bool) {
+func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, c *ssa.CallCommon, fromRTA, suppressNestedFileIO bool) {
 	if c == nil {
 		return
 	}
@@ -749,7 +674,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, c *ssa.CallCommon, fromRTA
 			return
 		}
 		if !(suppressNestedFileIO && isFileIOReason(reason)) {
-			a.markUnverifiable(reason, preRuntime || (isFileIOReason(reason) && a.preCWDMayChange && !fileIOArgsAreAbsoluteConstants(c)))
+			a.markUnverifiable(reason)
 		}
 	}
 	calleeStd := isStdImportPath(pkgPath)
@@ -859,7 +784,7 @@ func (a *tier2Analyzer) addObject(obj types.Object) {
 	a.addReverseLinknameTargets(obj)
 	if fn, ok := obj.(*types.Func); ok {
 		if reason := classBReason(obj.Pkg().Path(), obj.Name()); reason != "" {
-			a.markUnverifiable(reason, false)
+			a.markUnverifiable(reason)
 		}
 		if ssaFn := a.prog.prog.FuncValue(fn); ssaFn != nil {
 			a.scanFunction(ssaFn)
@@ -951,7 +876,7 @@ func (a *tier2Analyzer) addLinknameTarget(target string) {
 	}
 	pkgPath, name := target[:lastDot], target[lastDot+1:]
 	if reason := classBReason(pkgPath, name); reason != "" {
-		a.markUnverifiable(reason, false)
+		a.markUnverifiable(reason)
 	}
 	obj := a.objByName[pkgPath+"."+name]
 	if obj == nil {
@@ -1053,7 +978,7 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 			continue
 		}
 		if idx.wasmImport {
-			a.markUnverifiable("reaches go:wasmimport", false)
+			a.markUnverifiable("reaches go:wasmimport")
 		}
 		if idx.mutable {
 			for _, n := range idx.imports {
@@ -1061,7 +986,7 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 			}
 		}
 		if hasExternalCgoMeta(idx.meta) {
-			a.markUnverifiable("reaches cgo external library", false)
+			a.markUnverifiable("reaches cgo external library")
 		}
 		if idx.mutable {
 			if hasCgoCallbackBlindspot(idx.meta) {
@@ -1282,20 +1207,19 @@ func (a *tier2Analyzer) requestWiden(reason string) {
 	}
 }
 
-func (a *tier2Analyzer) markUnverifiable(reason string, preRuntime bool) {
-	fileIO := isFileIOReason(reason)
-	if !a.unverifiable || (!fileIO && isFileIOReason(a.reason)) {
+func (a *tier2Analyzer) markUnverifiable(reason string) {
+	// Prefer a non-file-I/O reason when several apply: file I/O is the most common
+	// and least specific external dependence, so a network/plugin/cgo cause is the
+	// more informative one to surface.
+	if !a.unverifiable || (!isFileIOReason(reason) && isFileIOReason(a.reason)) {
 		a.reason = reason
 	}
 	a.unverifiable = true
-	if !fileIO || preRuntime {
-		a.nonRuntimeUnverifiable = true
-	}
 }
 
 func (a *tier2Analyzer) result() tier2Result {
 	sort.Strings(a.contribs)
-	return tier2Result{contribs: a.contribs, widen: a.widen, widenReason: a.widenReason, unverifiable: a.unverifiable, reason: a.reason, runtimeFileIOOnly: a.unverifiable && !a.nonRuntimeUnverifiable}
+	return tier2Result{contribs: a.contribs, widen: a.widen, widenReason: a.widenReason, unverifiable: a.unverifiable, reason: a.reason}
 }
 
 func isFileIOReason(reason string) bool {
@@ -1316,80 +1240,6 @@ func classBReasonForFunction(fn *ssa.Function) string {
 		name = obj.Name()
 	}
 	return classBReason(pkgPath, name)
-}
-
-func (a *tier2Analyzer) reachMayChdir(reach map[*ssa.Function]bool) bool {
-	for fn := range reach {
-		if isCWDChangeFunction(fn) {
-			return true
-		}
-	}
-	return false
-}
-
-func (a *tier2Analyzer) runtimeFileIOSameInputProof(fn *ssa.Function) bool {
-	if fn == nil || fn.Signature == nil || fn.Signature.Recv() != nil || fn.Signature.Params().Len() > 0 {
-		return false
-	}
-	if len(fn.Blocks) != 1 {
-		return false
-	}
-	foundFileIO := false
-	for _, instr := range fn.Blocks[0].Instrs {
-		call, ok := instr.(ssa.CallInstruction)
-		if !ok {
-			continue
-		}
-		c := call.Common()
-		if c == nil {
-			continue
-		}
-		callee := c.StaticCallee()
-		if callee == nil {
-			continue
-		}
-		if !isFileIOReason(classBReasonForFunction(callee)) {
-			continue
-		}
-		foundFileIO = true
-		if !a.fileIOArgsHaveStableIdentity(c) {
-			return false
-		}
-	}
-	return foundFileIO
-}
-
-func (a *tier2Analyzer) fileIOArgsHaveStableIdentity(c *ssa.CallCommon) bool {
-	if c == nil {
-		return false
-	}
-	for _, arg := range c.Args {
-		v, ok := arg.(*ssa.Const)
-		if !ok || arg.Type() == nil || arg.Type().String() != "string" {
-			return false
-		}
-		path := constant.StringVal(v.Value)
-		if path == "" || (a.cwdMayChange && !filepath.IsAbs(path)) {
-			return false
-		}
-	}
-	return len(c.Args) > 0
-}
-
-func fileIOArgsAreAbsoluteConstants(c *ssa.CallCommon) bool {
-	if c == nil {
-		return false
-	}
-	for _, arg := range c.Args {
-		v, ok := arg.(*ssa.Const)
-		if !ok || arg.Type() == nil || arg.Type().String() != "string" {
-			return false
-		}
-		if !filepath.IsAbs(constant.StringVal(v.Value)) {
-			return false
-		}
-	}
-	return len(c.Args) > 0
 }
 
 func osOpenFileMayMutate(callee *ssa.Function, pkgPath, name string, c *ssa.CallCommon) bool {
@@ -1443,21 +1293,6 @@ func syscallOpenMayCreate(pkgPath, name string, c *ssa.CallCommon) bool {
 		return true
 	}
 	return flags&int64(os.O_CREATE) != 0
-}
-
-func isCWDChangeFunction(fn *ssa.Function) bool {
-	if fn == nil {
-		return false
-	}
-	pkgPath := funcPkgPath(fn)
-	name := fn.Name()
-	if obj := fn.Object(); obj != nil {
-		name = obj.Name()
-	}
-	if (pkgPath == "syscall" || pkgPath == "golang.org/x/sys/unix") && name == "Fchdir" {
-		return true
-	}
-	return (pkgPath == "os" || pkgPath == "syscall" || pkgPath == "testing" || pkgPath == "golang.org/x/sys/unix") && name == "Chdir"
 }
 
 func (a *tier2Analyzer) idxForFunction(fn *ssa.Function) *pkgIndex {
