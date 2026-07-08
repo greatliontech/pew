@@ -464,7 +464,7 @@ func TestNonValidUsesLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compute: %v", err)
 	}
-	p := provenance.Provenance{Commit: "c1", Toolchain: "go1.26.4", Machine: "m1", BuildConfig: "b1"}
+	p := provenance.Provenance{Commit: "c1", Toolchain: "go1.26.4", Machine: "m1", BuildConfig: "b1", RuntimeConfig: "rc1"}
 	rt, err := runtimeinputs.FromTestLog([]byte("# test log\n"), ".", ".")
 	if err != nil {
 		t.Fatalf("runtime inputs: %v", err)
@@ -477,6 +477,7 @@ func TestNonValidUsesLabel(t *testing.T) {
 			{Key: "toolchain", Value: []byte(p.Toolchain), File: true},
 			{Key: "machine", Value: []byte(p.Machine), File: true},
 			{Key: "buildconfig", Value: []byte(p.BuildConfig), File: true},
+			{Key: "runtimeconfig", Value: []byte(p.RuntimeConfig), File: true},
 			{Key: "pew-closure", Value: []byte(hash), File: true},
 			{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
 			{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},

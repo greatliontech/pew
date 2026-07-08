@@ -37,14 +37,29 @@ func TestCapture(t *testing.T) {
 	}
 }
 
+// TestRuntimeConfigCapturesRuntimeEnv pins that a change to any Go runtime-config
+// variable moves the runtimeconfig digest (§7 guard 6) — otherwise e.g. GOGC=off
+// could reshape allocation behavior while the recording still reads valid.
+func TestRuntimeConfigCapturesRuntimeEnv(t *testing.T) {
+	base := runtimeConfig()
+	for _, k := range runtimeConfigEnvKeys {
+		t.Run(k, func(t *testing.T) {
+			t.Setenv(k, "pew-runtimeconfig-test-"+k)
+			if got := runtimeConfig(); got == base {
+				t.Fatalf("changing %s did not move the runtimeconfig digest", k)
+			}
+		})
+	}
+}
+
 // TestConfigKeysAndOrder enforces the §5 in-band key set and order, and dirty
 // formatting (part of INV-4).
 func TestConfigKeysAndOrder(t *testing.T) {
-	p := Provenance{Commit: "abc", Toolchain: "go1.26.4", Machine: "m123", BuildConfig: "b456", Dirty: true}
+	p := Provenance{Commit: "abc", Toolchain: "go1.26.4", Machine: "m123", BuildConfig: "b456", RuntimeConfig: "r789", Dirty: true}
 	cfg := p.Config()
 	want := [][2]string{
 		{"commit", "abc"}, {"toolchain", "go1.26.4"}, {"machine", "m123"},
-		{"buildconfig", "b456"}, {"dirty", "true"},
+		{"buildconfig", "b456"}, {"runtimeconfig", "r789"}, {"dirty", "true"},
 	}
 	if len(cfg) != len(want) {
 		t.Fatalf("got %d config lines, want %d", len(cfg), len(want))

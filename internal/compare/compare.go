@@ -42,9 +42,9 @@ import (
 // digest, and dirty flag) still line up for comparison (§10.1). Variant guards
 // are ignored here too so they do not fragment grouping, but are enforced
 // separately by compareGuards.
-const pewIgnore = "commit toolchain machine buildconfig dirty pew-closure pew-runtime pew-runtime-inputs pure"
+const pewIgnore = "commit toolchain machine buildconfig runtimeconfig dirty pew-closure pew-runtime pew-runtime-inputs pure"
 
-var compareGuards = []string{"machine", "toolchain", "buildconfig"}
+var compareGuards = []string{"machine", "toolchain", "buildconfig", "runtimeconfig"}
 
 // Options configure the regression criterion (spec §10.1). Every field is a
 // configurable default; the criterion itself is not a knob.

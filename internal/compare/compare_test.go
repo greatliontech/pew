@@ -20,6 +20,7 @@ func sampleSet(name, machine string, units map[string][]float64) []*benchfmt.Res
 	}
 	cfg["toolchain"] = "go-test"
 	cfg["buildconfig"] = "build-test"
+	cfg["runtimeconfig"] = "runtime-test"
 	return benchResults(name, cfg, units)
 }
 
@@ -174,8 +175,8 @@ func sign(x float64) int {
 func TestDistinctPackagesNotMerged(t *testing.T) {
 	// Same benchmark name, two packages. Package a regresses (1000→1100); package
 	// b is flat (1000→1000). A merge would average them and hide a's regression.
-	cfgA := map[string]string{"pkg": "example.com/a", "machine": "m1", "toolchain": "go-test", "buildconfig": "build-test"}
-	cfgB := map[string]string{"pkg": "example.com/b", "machine": "m1", "toolchain": "go-test", "buildconfig": "build-test"}
+	cfgA := map[string]string{"pkg": "example.com/a", "machine": "m1", "toolchain": "go-test", "buildconfig": "build-test", "runtimeconfig": "runtime-test"}
+	cfgB := map[string]string{"pkg": "example.com/b", "machine": "m1", "toolchain": "go-test", "buildconfig": "build-test", "runtimeconfig": "runtime-test"}
 	base := append(
 		benchResults("BenchmarkParse-8", cfgA, map[string][]float64{"sec/op": seq(1000, 8)}),
 		benchResults("BenchmarkParse-8", cfgB, map[string][]float64{"sec/op": seq(1000, 8)})...,
@@ -227,6 +228,7 @@ func TestPewRuntimeKeysDoNotFragmentComparison(t *testing.T) {
 		"machine":            "m1",
 		"toolchain":          "go-test",
 		"buildconfig":        "build-test",
+		"runtimeconfig":      "runtime-test",
 		"pew-runtime":        "old-runtime",
 		"pew-runtime-inputs": "old-manifest",
 	}
@@ -235,6 +237,7 @@ func TestPewRuntimeKeysDoNotFragmentComparison(t *testing.T) {
 		"machine":            "m1",
 		"toolchain":          "go-test",
 		"buildconfig":        "build-test",
+		"runtimeconfig":      "runtime-test",
 		"pew-runtime":        "new-runtime",
 		"pew-runtime-inputs": "new-manifest",
 	}
@@ -264,6 +267,29 @@ func TestPewRuntimeKeysDoNotFragmentComparison(t *testing.T) {
 
 // TestMachineGuard encodes the §8/§10 invariant: differing machine fingerprints
 // are never compared silently — surfaced as a note, with no comparison row.
+// TestRuntimeConfigGuard: two recordings differing only in runtimeconfig (e.g.
+// GOGC=off vs default) must not be compared silently — §7 guard 6 / §10 add
+// runtimeconfig to the required-equal comparison guards.
+func TestRuntimeConfigGuard(t *testing.T) {
+	cfg := func(rc string) map[string]string {
+		return map[string]string{"machine": "m1", "toolchain": "go-test", "buildconfig": "build-test", "runtimeconfig": rc}
+	}
+	base := benchResults("BenchmarkX-8", cfg("rcA"), map[string][]float64{"sec/op": seq(1000, 8)})
+	newer := benchResults("BenchmarkX-8", cfg("rcB"), map[string][]float64{"sec/op": seq(1100, 8)})
+	res := Compare(base, newer, DefaultOptions())
+	if len(res.Tables) != 0 {
+		t.Errorf("compared across runtimeconfig: got %d unit tables, want 0", len(res.Tables))
+	}
+	if len(res.Notes) != 1 || !strings.Contains(res.Notes[0], "runtimeconfig mismatch") {
+		t.Errorf("notes = %v, want one runtimeconfig-mismatch note", res.Notes)
+	}
+	// Same runtimeconfig → it compares (and regresses).
+	same := Compare(base, benchResults("BenchmarkX-8", cfg("rcA"), map[string][]float64{"sec/op": seq(1100, 8)}), DefaultOptions())
+	if len(same.Tables) == 0 {
+		t.Fatal("same-runtimeconfig comparison produced no tables")
+	}
+}
+
 func TestMachineGuard(t *testing.T) {
 	base := sampleSet("BenchmarkX-8", "machineA", map[string][]float64{"sec/op": seq(1000, 8)})
 	newer := sampleSet("BenchmarkX-8", "machineB", map[string][]float64{"sec/op": seq(1100, 8)})
@@ -321,8 +347,8 @@ func TestVariantGuards(t *testing.T) {
 // guard refuses rather than silently folding them — the §8/§10 contract holds
 // unconditionally, not just for the single-machine-per-file in-spec case.
 func TestMixedMachineWithinSide(t *testing.T) {
-	cfgA := map[string]string{"pkg": "p", "machine": "machineA", "toolchain": "go-test", "buildconfig": "build-test"}
-	cfgB := map[string]string{"pkg": "p", "machine": "machineB", "toolchain": "go-test", "buildconfig": "build-test"}
+	cfgA := map[string]string{"pkg": "p", "machine": "machineA", "toolchain": "go-test", "buildconfig": "build-test", "runtimeconfig": "runtime-test"}
+	cfgB := map[string]string{"pkg": "p", "machine": "machineB", "toolchain": "go-test", "buildconfig": "build-test", "runtimeconfig": "runtime-test"}
 	// Base side mixes machineA and machineB for the same benchmark; pkg is equal so
 	// they fall in one group (machine is projected away from grouping).
 	base := append(
@@ -433,6 +459,7 @@ func withUnit(name, machine, unit string, vals []float64) []*benchfmt.Result {
 				{Key: "machine", Value: []byte(machine), File: true},
 				{Key: "toolchain", Value: []byte("go-test"), File: true},
 				{Key: "buildconfig", Value: []byte("build-test"), File: true},
+				{Key: "runtimeconfig", Value: []byte("runtime-test"), File: true},
 			},
 		})
 	}

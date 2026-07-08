@@ -15,7 +15,6 @@ close-out convention.
 | [provenance-capture-cache](provenance-capture-cache.md) | capture provenance once per module, not once per package | when status/run wall-clock proves slow, or the capture call sites change |
 | [purity-directives](purity-directives.md) | durable `//pew:pure` / `//pew:external` code directives vs CLI flags | when CLI purity flags prove insufficient |
 | [run-stale-bench-filter](run-stale-bench-filter.md) | `pew run --stale` discards the user's `--bench` pattern | when `pew run` benchmark selection or `--stale` handling is next changed |
-| [runtime-config-env-guard](runtime-config-env-guard.md) | GOGC/GODEBUG/GOMEMLIMIT/GOMAXPROCS outside every guard (spec-amend candidate) | when the guard model is extended via the spec-amend channel, or with `runconditions` |
 | [stat-blob-reread](stat-blob-reread.md) | `pew stat` parses every historical recording blob twice | when stat inventory or side-reading code is next changed |
 | [stat-explain](stat-explain.md) | implement the spec-reserved `pew stat --explain` guard/input view | when guard-failure opacity bites in real use |
 | [status-label-flag](status-label-flag.md) | `--label` on `pew status` so labeled recordings get verdicts | when labeled-variant recordings see real use, or the status CLI is next extended |

@@ -24,11 +24,12 @@ import (
 // other three are exact-equality staleness guards (§7). pew-closure and
 // pew-runtime are added separately by their guard builders.
 type Provenance struct {
-	Commit      string // SHA of the code measured (not the recording's git commit, §6.1)
-	Dirty       bool   // working tree had uncommitted changes at run
-	Toolchain   string // `go version` identity (toolchain guard)
-	Machine     string // machine fingerprint, §8 (machine guard)
-	BuildConfig string // build-settings digest (buildconfig guard)
+	Commit        string // SHA of the code measured (not the recording's git commit, §6.1)
+	Dirty         bool   // working tree had uncommitted changes at run
+	Toolchain     string // `go version` identity (toolchain guard)
+	Machine       string // machine fingerprint, §8 (machine guard)
+	BuildConfig   string // build-settings digest (buildconfig guard)
+	RuntimeConfig string // Go runtime-config env digest (runtimeconfig guard, §7 guard 6)
 }
 
 // Config returns the in-band provenance lines in spec §5 order. File is set so
@@ -40,6 +41,7 @@ func (p Provenance) Config() []benchfmt.Config {
 		{Key: "toolchain", Value: []byte(p.Toolchain), File: true},
 		{Key: "machine", Value: []byte(p.Machine), File: true},
 		{Key: "buildconfig", Value: []byte(p.BuildConfig), File: true},
+		{Key: "runtimeconfig", Value: []byte(p.RuntimeConfig), File: true},
 		{Key: "dirty", Value: []byte(strconv.FormatBool(p.Dirty)), File: true},
 	}
 }
@@ -67,12 +69,32 @@ func Capture(moduleDir string) (Provenance, error) {
 		return Provenance{}, err
 	}
 	return Provenance{
-		Commit:      commit,
-		Dirty:       dirty,
-		Toolchain:   tc,
-		Machine:     facts.Fingerprint(),
-		BuildConfig: bc,
+		Commit:        commit,
+		Dirty:         dirty,
+		Toolchain:     tc,
+		Machine:       facts.Fingerprint(),
+		BuildConfig:   bc,
+		RuntimeConfig: runtimeConfig(),
 	}, nil
+}
+
+// runtimeConfigEnvKeys are the Go runtime-configuration environment variables the
+// benchmark process inherits. The runtime reads them during init, before the testlog
+// stream starts, so they are invisible to the runtime-input guard (§7.8); they are
+// transient run conditions, so excluded from the machine fingerprint (§8). A change
+// (e.g. GOGC=off) moves allocation/scheduling behavior with no other guard moving, so
+// they form their own guard (§7 guard 6). Only explicitly-set values are captured: an
+// unset GOMAXPROCS defaults to the machine CPU count, already covered by §8.
+var runtimeConfigEnvKeys = []string{"GOGC", "GODEBUG", "GOMEMLIMIT", "GOMAXPROCS"}
+
+// runtimeConfig digests the runtime-config environment (fixed key order; values not
+// stored in clear text, §7.8).
+func runtimeConfig() string {
+	var b strings.Builder
+	for _, k := range runtimeConfigEnvKeys {
+		fmt.Fprintf(&b, "%s=%s\n", k, os.Getenv(k))
+	}
+	return digest(b.String())
 }
 
 func gitState(dir string) (commit string, dirty bool, err error) {

@@ -87,6 +87,7 @@ global config lines):
 | `toolchain`          | `go version` output (compiler/runtime identity)               | yes              |
 | `machine`            | machine fingerprint id (§8)                                   | yes              |
 | `buildconfig`        | digest of build tags + relevant GOFLAGS/gcflags + cgo + PGO  | yes              |
+| `runtimeconfig`      | digest of Go runtime-config env (GOGC/GODEBUG/GOMEMLIMIT/GOMAXPROCS), §7 | yes  |
 | `dirty`              | `true` if the working tree had uncommitted changes at run    | yes              |
 | `pew-runtime`        | digest of observed runtime inputs (§7.8)                     | derived          |
 | `pew-runtime-inputs` | encoded manifest of observed runtime input names/paths (§7.8) | yes              |
@@ -114,12 +115,12 @@ benchmark — collapsing pew back to "re-run everything every commit" and render
 analysis dead weight.
 
 - **Identity** — *which* recording is this? The full provenance tuple
-  `(benchmark, commit, toolchain, machine, buildconfig)`. Labels the in-band provenance and lets a
-  fresh run recognize whether it is the *same point* as a prior recording (same tuple) or a new one.
-  The per-commit history of identities lives in git (§6.1), not an in-file log.
+  `(benchmark, commit, toolchain, machine, buildconfig, runtimeconfig)`. Labels the in-band
+  provenance and lets a fresh run recognize whether it is the *same point* as a prior recording (same
+  tuple) or a new one. The per-commit history of identities lives in git (§6.1), not an in-file log.
 - **Validity** — is a stored measurement still usable for HEAD *without re-running*? The predicate
-  of §7: `closure ∧ runtime-inputs ∧ toolchain ∧ machine ∧ buildconfig`, each compared
-  HEAD/current-vs-record.
+  of §7: `closure ∧ runtime-inputs ∧ toolchain ∧ machine ∧ buildconfig ∧ runtimeconfig`, each
+  compared HEAD/current-vs-record.
 
 The two keys differ in which facts answer each question: commit identifies the recording point, while
 closure and observed runtime inputs prove reuse validity:
@@ -132,6 +133,7 @@ closure and observed runtime inputs prove reuse validity:
 | toolchain    |           ✓             |             ✓             |
 | machine      |           ✓             |             ✓             |
 | buildconfig  |           ✓             |             ✓             |
+| runtimeconfig |          ✓             |             ✓             |
 
 Identity **pins** code by commit; validity **tests** code by closure plus observed runtime inputs. The
 commit is a coarse "some code somewhere changed" signal — correct for *naming a point in history*,
@@ -199,16 +201,16 @@ A stored result `R` for benchmark `B` gets one of **three verdicts** for HEAD, a
 rule is **`valid` requires proof**. `unrecorded` is a `status` inventory state for a missing stored
 result, not a verdict about an existing result.
 
-- **valid** (reuse `R`) — all five guards below provably hold over a soundly over-approximated
+- **valid** (reuse `R`) — all six guards below provably hold over a soundly over-approximated
    closure.
-- **stale** (re-run) — some guard demonstrably fails: closure, runtime input, toolchain, machine, or
-   build config changed.
+- **stale** (re-run) — some guard demonstrably fails: closure, runtime input, toolchain, machine,
+   build config, or runtime config changed.
 - **unverifiable** (re-run, reason recorded) — guards would pass, but `B`'s closure reaches an
   external dependence pew cannot hash (Class B, §7.3), so validity can be neither proven nor
   refuted. Operationally a re-run, but distinct from `stale`: the user can assert purity to override
   (§7.5). Absence of proof never collapses to `valid` (INV-1).
 
-The five guards:
+The six guards:
 
 1. **Closure** — `closure-hash(B, HEAD) == closure-hash(B, R.commit)`
 2. **Runtime inputs** — recomputed digest from `R.pew-runtime-inputs` == `R.pew-runtime` (§7.8)
@@ -224,8 +226,16 @@ The five guards:
    captured, neither dropped. A build-affecting input pew cannot parse or bound **fails closed** (the
    recording is refused) rather than digesting to a value that could stay stable across different
    generated code.
+6. **Runtime config** — current digest == `R.runtimeconfig`. A digest of the Go runtime-configuration
+   environment the benchmark process inherits — `GOGC`, `GODEBUG`, `GOMEMLIMIT`, `GOMAXPROCS` — read
+   by the runtime during init, *before* the testlog stream starts, so they are invisible to the
+   runtime-input guard (§7.8) and are transient, so deliberately excluded from the machine fingerprint
+   (§8). A change (e.g. `GOGC=off`, a `GODEBUG` setting) can materially move allocation/scheduling
+   behavior with no other guard moving, so it is captured here as a distinct guard. Values are digested,
+   not stored in clear text (§7.8). Only variables explicitly set in the environment are captured — an
+   unset `GOMAXPROCS` defaults to the machine's CPU count, already covered by the machine guard (§8).
 
-Guards 3–5 are exact-equality on recorded provenance — cheap and unambiguous. Guards 1–2 are derived
+Guards 3–6 are exact-equality on recorded provenance — cheap and unambiguous. Guards 1–2 are derived
 digests over source and observed runtime inputs; the rest of this section defines their soundness.
 
 ### 7.1 What the closure covers
@@ -569,8 +579,8 @@ flags real-but-trivial changes; a floor without significance flags noise.
   them is opt-in.
 - Comparison projects *away* pew's own provenance keys (`commit`, `pew-closure`, …) so differing
   metadata doesn't fragment the benchstat grouping, and separately requires non-empty equal
-  `machine`, `toolchain`, and `buildconfig` — never comparing across machine fingerprints,
-  toolchains, or build variants silently (§6, §8).
+  `machine`, `toolchain`, `buildconfig`, and `runtimeconfig` — never comparing across machine
+  fingerprints, toolchains, build variants, or runtime-configuration variants silently (§6, §8).
 
 Every tunable across pew — α, threshold, `--count`, `--benchtime`, pinning, strictness, gating
 metrics — is **configurable with the stated values as defaults**; the correctness guards (§7) are
@@ -644,7 +654,7 @@ Recorded at the spec because no code exists yet. Each promotes to an enforced te
 check when code able to violate it is first written (per project conventions). The chunk-start
 triage gate resolves these `Lands:` conditions.
 
-- **INV-1 — Closure soundness (`valid` requires proof).** pew reports `valid` only when all five
+- **INV-1 — Closure soundness (`valid` requires proof).** pew reports `valid` only when all six
   guards (§7) provably hold over a closure that is a *superset* of the source able to affect `B`'s
   performance. Every blind spot is **resolved** to a precise edge, **widened** to the maximal non-std
   closure, or **downgraded** to `unverifiable` — never silently dropped, never narrowing the covered
@@ -653,7 +663,7 @@ triage gate resolves these `Lands:` conditions.
   hash is unchanged, and `B` is reported `valid` → silent regression behind a stale baseline (the
   core failure pew exists to prevent). *Kind:* entailed. *Lands:* when closure analysis is first
   implemented.
-- **INV-2 — Validity verdict.** `B` is `valid` for HEAD iff *all five* guards hold **and** its
+- **INV-2 — Validity verdict.** `B` is `valid` for HEAD iff *all six* guards hold **and** its
   closure reaches no unhashable external dependence (Class B, §7.3); any guard failing ⇒ `stale`;
   guards holding but a Class-B dependence present ⇒ `unverifiable`. *Violation:* e.g. toolchain
   changed but reported valid, or a benchmark reading an external file reported valid after the file
@@ -663,8 +673,8 @@ triage gate resolves these `Lands:` conditions.
   that `benchfmt` rejects → ecosystem lock-in, G5 broken. *Kind:* clause-explicit (§5, G5).
   *Lands:* when the storage writer is implemented.
 - **INV-4 — Provenance completeness.** Every stored result carries the provenance and manifests
-  required to evaluate all five guards (commit, runtime-input manifest, toolchain, machine,
-  buildconfig). *Violation:* a result missing `commit` or `pew-runtime-inputs` → closure/runtime
+  required to evaluate all six guards (commit, runtime-input manifest, toolchain, machine,
+  buildconfig, runtimeconfig). *Violation:* a result missing `commit` or `pew-runtime-inputs` → closure/runtime
   guard unevaluable → validity undecidable → must conservatively re-run, defeating G1/G2. *Kind:*
   entailed. *Lands:* when the storage writer is implemented.
 - **INV-5 — Derived state is never authoritative.** Persisted closure hashes are a memoization keyed

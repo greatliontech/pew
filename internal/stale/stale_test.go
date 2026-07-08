@@ -20,7 +20,7 @@ func cfg(pairs ...string) []benchfmt.Config {
 func cl(hash string) closure.Closure { return closure.Closure{Hash: hash} }
 
 func prov() provenance.Provenance {
-	return provenance.Provenance{Commit: "c1", Toolchain: "go1.26.4", Machine: "m1", BuildConfig: "b1"}
+	return provenance.Provenance{Commit: "c1", Toolchain: "go1.26.4", Machine: "m1", BuildConfig: "b1", RuntimeConfig: "rc1"}
 }
 
 func rt(hash string) RuntimeState { return RuntimeState{Digest: hash, OK: true} }
@@ -28,7 +28,8 @@ func rt(hash string) RuntimeState { return RuntimeState{Digest: hash, OK: true} 
 func recordFor(p provenance.Provenance, hash string) []benchfmt.Config {
 	return cfg(
 		"commit", p.Commit, "toolchain", p.Toolchain, "machine", p.Machine,
-		"buildconfig", p.BuildConfig, "pew-closure", hash, "pew-runtime", "rt1",
+		"buildconfig", p.BuildConfig, "runtimeconfig", p.RuntimeConfig,
+		"pew-closure", hash, "pew-runtime", "rt1",
 		"pew-runtime-inputs", "manifest1", "dirty", "false",
 	)
 }
@@ -113,13 +114,31 @@ func TestCheckStalePerGuard(t *testing.T) {
 	}{
 		{p, "cl2", "rt1", "pew-closure"},
 		{p, "cl1", "rt2", "pew-runtime"},
-		{provenance.Provenance{Commit: "c1", Toolchain: "go1.27", Machine: "m1", BuildConfig: "b1"}, "cl1", "rt1", "toolchain"},
-		{provenance.Provenance{Commit: "c1", Toolchain: "go1.26.4", Machine: "m2", BuildConfig: "b1"}, "cl1", "rt1", "machine"},
-		{provenance.Provenance{Commit: "c1", Toolchain: "go1.26.4", Machine: "m1", BuildConfig: "b2"}, "cl1", "rt1", "buildconfig"},
+		{provenance.Provenance{Commit: "c1", Toolchain: "go1.27", Machine: "m1", BuildConfig: "b1", RuntimeConfig: "rc1"}, "cl1", "rt1", "toolchain"},
+		{provenance.Provenance{Commit: "c1", Toolchain: "go1.26.4", Machine: "m2", BuildConfig: "b1", RuntimeConfig: "rc1"}, "cl1", "rt1", "machine"},
+		{provenance.Provenance{Commit: "c1", Toolchain: "go1.26.4", Machine: "m1", BuildConfig: "b2", RuntimeConfig: "rc1"}, "cl1", "rt1", "buildconfig"},
+		{provenance.Provenance{Commit: "c1", Toolchain: "go1.26.4", Machine: "m1", BuildConfig: "b1", RuntimeConfig: "rc2"}, "cl1", "rt1", "runtimeconfig"},
 	} {
 		if v, reason := Check(tc.mutP, cl(tc.mutCl), rt(tc.mutRT), base); v != Stale || reason != tc.reason {
 			t.Errorf("guard %s: got %v/%q, want stale/%s", tc.reason, v, reason, tc.reason)
 		}
+	}
+}
+
+// TestCheckMissingRuntimeConfigStale enforces INV-4: a recording that predates a
+// guard (here runtimeconfig) lacks its key, cannot be validated, and is stale — never
+// falsely valid.
+func TestCheckMissingRuntimeConfigStale(t *testing.T) {
+	p := prov()
+	rec := recordFor(p, "cl1")
+	pruned := rec[:0]
+	for _, c := range rec {
+		if c.Key != "runtimeconfig" {
+			pruned = append(pruned, c)
+		}
+	}
+	if v, reason := Check(p, cl("cl1"), rt("rt1"), pruned); v != Stale || reason != "runtimeconfig" {
+		t.Errorf("missing runtimeconfig: got %v/%q, want stale/runtimeconfig", v, reason)
 	}
 }
 

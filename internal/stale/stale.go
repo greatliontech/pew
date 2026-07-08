@@ -33,7 +33,7 @@ type RuntimeState struct {
 //
 //   - Unrecorded if there is no config.
 //   - Stale if any guard fails: closure, runtime inputs, toolchain, machine,
-//     buildconfig.
+//     buildconfig, runtimeconfig.
 //     commit/dirty are deliberately NOT guards (INV-6: validity is
 //     commit-sha-independent). A missing guard key cannot be validated, so Stale.
 //   - Unverifiable if the guards pass and the runtime manifest contains an
@@ -66,6 +66,7 @@ func Check(cur provenance.Provenance, head closure.Closure, runtime RuntimeState
 		{"toolchain", cur.Toolchain},
 		{"machine", cur.Machine},
 		{"buildconfig", cur.BuildConfig},
+		{"runtimeconfig", cur.RuntimeConfig},
 	} {
 		if got, ok := cfg[g.key]; !ok || got != g.want {
 			return Stale, g.key
