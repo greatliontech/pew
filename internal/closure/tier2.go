@@ -49,17 +49,92 @@ func (h *Hasher) loadCached(pkgPath string) (*program, error) {
 	return p, nil
 }
 
-// load builds whole-program SSA for pkgPath's test binary: all-dependency syntax
-// (stdlib bodies included, §7.4) with generics instantiated, so RTA can traverse
-// real edges through std and dispatch generic instantiations concretely. A load
-// error is fatal — analyzing a partial program could miss reachable code and
-// report a stale result valid (INV-1).
+// loadConfig is the shared packages.Config for both the single-package load and
+// the batched Prime: all-dependency syntax (stdlib bodies included, §7.4) with the
+// ForTest linkage needed to distinguish a package's test-binary variants.
+func loadConfig() *packages.Config {
+	return &packages.Config{Mode: packages.LoadAllSyntax | packages.NeedForTest, Tests: true}
+}
+
+// load builds whole-program SSA for pkgPath's test binary from a single-package
+// packages.Load. It is the fallback path (and the exact behavior Prime reproduces
+// per package); Prime shares one Load across many packages but each still gets its
+// own program from only its own roots. A load error is fatal — analyzing a partial
+// program could miss reachable code and report a stale result valid (INV-1).
 func load(pkgPath string) (*program, error) {
-	cfg := &packages.Config{Mode: packages.LoadAllSyntax | packages.NeedForTest, Tests: true}
-	roots, err := packages.Load(cfg, pkgPath)
+	roots, err := packages.Load(loadConfig(), pkgPath)
 	if err != nil {
 		return nil, fmt.Errorf("closure: load %s: %w", pkgPath, err)
 	}
+	return buildProgram(pkgPath, roots)
+}
+
+// Prime warms the per-package SSA cache for pkgPaths with one shared
+// packages.Load, so the stdlib and shared dependencies are parsed and
+// type-checked once for the whole set rather than once per package (§7.4 — the
+// dominant residual cost of a multi-package `pew status`). Each package still gets
+// its own ssa.Program built from only its own test-binary roots (rootsForBinary),
+// so the analysis — including the per-binary init-root set RTA depends on (see the
+// roots loop in tier2) — is byte-identical to the single-package load; Prime
+// shares only the parse/type-check front-end, never the SSA program.
+//
+// It is best-effort: a batch-load failure, or a package whose closure fails to
+// build, leaves that package uncached, and its first Compute falls back to a
+// single load — preserving both per-package error isolation and the exact
+// single-load result. Already-cached packages are skipped. Equivalence to the
+// per-package load is pinned by TestBatchLoadMatchesPerPackage.
+func (h *Hasher) Prime(pkgPaths []string) {
+	var need []string
+	seen := map[string]bool{}
+	for _, p := range pkgPaths {
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		if _, ok := h.progs[p]; !ok {
+			need = append(need, p)
+		}
+	}
+	if len(need) == 0 {
+		return
+	}
+	roots, err := packages.Load(loadConfig(), need...)
+	if err != nil {
+		return // fall back to lazy single loads; the error resurfaces there
+	}
+	for _, p := range need {
+		prog, err := buildProgram(p, rootsForBinary(roots, p))
+		if err != nil {
+			continue // leave uncached; loadCached single-loads and surfaces the error
+		}
+		h.progs[p] = prog
+	}
+}
+
+// rootsForBinary selects, from a batched packages.Load result, exactly the root
+// packages a single packages.Load(pkgPath) with Tests returns: the package and its
+// in-package/external test variants (ForTest==pkgPath) plus the generated
+// test-main (PkgPath==pkgPath+".test"). Feeding exactly these to
+// ssautil.AllPackages reproduces the per-package program's package set, so RTA's
+// per-binary init roots (tier2) are unchanged. Selecting too few would shrink that
+// set and under-cover the closure (INV-1) — this must match the single-load root
+// set exactly, which TestBatchLoadMatchesPerPackage pins over real fixtures.
+func rootsForBinary(all []*packages.Package, pkgPath string) []*packages.Package {
+	var rs []*packages.Package
+	for _, p := range all {
+		if p.PkgPath == pkgPath || p.ForTest == pkgPath || p.PkgPath == pkgPath+".test" {
+			rs = append(rs, p)
+		}
+	}
+	return rs
+}
+
+// buildProgram builds whole-program SSA for one package's test binary from its
+// root packages (generics instantiated, so RTA traverses real edges through std
+// and dispatches generic instantiations concretely). A load error is fatal — a
+// partial program could miss reachable code and report a stale result valid
+// (INV-1).
+func buildProgram(pkgPath string, roots []*packages.Package) (*program, error) {
 	var errs []string
 	var rootErrs []string
 	var all []*packages.Package

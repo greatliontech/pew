@@ -90,6 +90,7 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 		return err
 	}
 	pc := provenance.NewCache()
+	h.Prime(benchmarkCandidatePaths(pkgs))
 	var failures []string
 	for _, p := range pkgs {
 		if p.Module.Dir == "" {

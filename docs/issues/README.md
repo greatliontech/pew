@@ -6,7 +6,6 @@ close-out convention.
 
 | slug | summary | Lands |
 |------|---------|-------|
-| [batched-package-load](batched-package-load.md) | one shared `packages.Load` across packages instead of per-package whole-program loads | when closure performance is next worked, or multi-package status proves slow |
 | [buildconfig-completeness](buildconfig-completeness.md) | PGO profile content + CLI build-flag pass-throughs in the buildconfig guard (cgo/env half landed) | when PGO benchmarks see real use, or `pew run` grows build-flag flags |
 | [json-output](json-output.md) | `-json` machine-readable output for `status`/`stat` | when pew is first wired into CI/scripting beyond exit-code gating |
 | [purity-directives](purity-directives.md) | durable `//pew:pure` / `//pew:external` code directives vs CLI flags | when CLI purity flags prove insufficient |

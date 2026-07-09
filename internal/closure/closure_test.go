@@ -7,6 +7,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -883,6 +884,141 @@ func TestMaximalHashReal(t *testing.T) {
 	}
 	if b, _ := h.maximalHash(pkg); b != a {
 		t.Errorf("hash not deterministic: %q vs %q", a, b)
+	}
+}
+
+// TestBatchLoadMatchesPerPackage is the equivalence guard for Prime: a batched
+// shared packages.Load must yield, for every benchmark, byte-identical Compute
+// output (hash, unverifiable, reason) to the per-package single load. This is what
+// makes Prime a sound optimization rather than a behavior change — an under-scoped
+// rootsForBinary would shrink a program's package set, drop a registering init
+// from RTA's roots, and under-cover the closure (false-valid, INV-1); that shows
+// up here as a hash mismatch. The fixtures span the soundness-sensitive paths:
+// cross-package init-side-effect registration, init file I/O, an external test
+// package, a TestMain root, and reflection.
+func TestBatchLoadMatchesPerPackage(t *testing.T) {
+	const base = "github.com/thegrumpylion/pew/internal/closure/fixtures/"
+	pkgs := []string{
+		base + "initregistry/bench",
+		base + "initfile",
+		base + "external",
+		base + "externalbench", // benchmark lives in the external (package X_test) test package
+		base + "rootcollision/bench", // imports rootcollision/dep, also primed (cross-prime-import shape)
+		base + "rootcollision/dep",
+		base + "testmainroot",
+		base + "reflectexternal",
+		base + "initdynamic",
+	}
+
+	primed, err := New()
+	if err != nil {
+		t.Fatalf("New (primed): %v", err)
+	}
+	primed.Prime(pkgs)
+
+	compared := 0
+	for _, pkg := range pkgs {
+		// Assert the batch actually cached this package: otherwise Compute would
+		// fall back to a single load and the comparison would be single-vs-single —
+		// a vacuous pass that hides an under-scoped rootsForBinary.
+		if _, ok := primed.progs[pkg]; !ok {
+			t.Fatalf("Prime did not cache %s; batch path not exercised (test would be vacuous)", pkg)
+		}
+
+		// Discover the benchmark names via an independent single-load hasher; the
+		// discovery machinery is not what is under test — the hash equivalence is.
+		single, err := New()
+		if err != nil {
+			t.Fatalf("New (single) for %s: %v", pkg, err)
+		}
+		prog, err := single.loadCached(pkg)
+		if err != nil {
+			t.Fatalf("single load %s: %v", pkg, err)
+		}
+		var benches []string
+		for name := range prog.roots {
+			benches = append(benches, name)
+		}
+		sort.Strings(benches)
+		if len(benches) == 0 {
+			t.Fatalf("%s has no benchmarks; fixture cannot exercise the comparison", pkg)
+		}
+
+		for _, b := range benches {
+			want, errWant := single.Compute(pkg, b)
+			got, errGot := primed.Compute(pkg, b)
+			if (errWant == nil) != (errGot == nil) {
+				t.Errorf("%s.%s: single err=%v, primed err=%v", pkg, b, errWant, errGot)
+				continue
+			}
+			if errWant != nil {
+				continue
+			}
+			if got != want {
+				t.Errorf("%s.%s: primed Compute %+v != single %+v", pkg, b, got, want)
+			}
+			compared++
+		}
+	}
+	if compared == 0 {
+		t.Fatal("no benchmarks compared; test is vacuous")
+	}
+	t.Logf("compared %d benchmark(s) batch-vs-single across %d packages", compared, len(pkgs))
+}
+
+// TestRootsForBinaryMatchesSingleLoad pins rootsForBinary's contract structurally:
+// the roots it selects for a package out of a batched packages.Load must be
+// exactly the roots a single packages.Load(pkg) returns. This is the
+// by-construction basis for Prime's equivalence — a selection that is too narrow
+// would build a smaller program (a dropped test-main or test variant) and
+// under-cover the closure. Unlike the hash-level equivalence test, this observes
+// the full root set, so it catches a dropped clause even when that root is
+// behaviorally inert for the fixtures at hand.
+func TestRootsForBinaryMatchesSingleLoad(t *testing.T) {
+	const base = "github.com/thegrumpylion/pew/internal/closure/fixtures/"
+	pkgs := []string{
+		base + "initregistry/bench",
+		base + "external",
+		base + "externalbench", // exercises the ForTest clause: a distinct package X_test root
+		base + "rootcollision/bench", // primed alongside its own dependency rootcollision/dep
+		base + "rootcollision/dep",
+		base + "testmainroot",
+		base + "initfile",
+	}
+	batch, err := packages.Load(loadConfig(), pkgs...)
+	if err != nil {
+		t.Fatalf("batch load: %v", err)
+	}
+	idSet := func(ps []*packages.Package) map[string]bool {
+		m := map[string]bool{}
+		for _, p := range ps {
+			m[p.ID] = true
+		}
+		return m
+	}
+	for _, pkg := range pkgs {
+		single, err := packages.Load(loadConfig(), pkg)
+		if err != nil {
+			t.Fatalf("single load %s: %v", pkg, err)
+		}
+		want := idSet(single)
+		got := idSet(rootsForBinary(batch, pkg))
+		if len(want) == 0 {
+			t.Fatalf("%s: single load returned no roots", pkg)
+		}
+		if len(got) != len(want) {
+			t.Errorf("%s: rootsForBinary selected %d roots, single load returned %d", pkg, len(got), len(want))
+		}
+		for id := range want {
+			if !got[id] {
+				t.Errorf("%s: rootsForBinary missing root %q that single load returned", pkg, id)
+			}
+		}
+		for id := range got {
+			if !want[id] {
+				t.Errorf("%s: rootsForBinary selected extra root %q not in single load", pkg, id)
+			}
+		}
 	}
 }
 

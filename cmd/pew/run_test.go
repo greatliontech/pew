@@ -60,6 +60,35 @@ func TestRuntimeInputsUncommitted(t *testing.T) {
 	}
 }
 
+// TestBenchmarkCandidatePaths pins the Prime batch filter: only in-module packages
+// with test files are candidates (they are the only packages status/run can
+// Compute, since selectedBenchmarks reads TestGoFiles/XTestGoFiles). Priming a
+// non-test or out-of-module package would build whole-program SSA the loop never
+// uses — the waste the filter exists to avoid.
+func TestBenchmarkCandidatePaths(t *testing.T) {
+	mk := func(path, moduleDir string, testFiles, xtestFiles []string) pkgMeta {
+		p := pkgMeta{ImportPath: path, TestGoFiles: testFiles, XTestGoFiles: xtestFiles}
+		p.Module.Dir = moduleDir
+		return p
+	}
+	pkgs := []pkgMeta{
+		mk("ex/withtest", "/m", []string{"a_test.go"}, nil),      // in-module, in-package test → candidate
+		mk("ex/withxtest", "/m", nil, []string{"x_test.go"}),     // in-module, external test → candidate
+		mk("ex/notest", "/m", nil, nil),                          // in-module, no test files → excluded
+		mk("ex/nomodule", "", []string{"a_test.go"}, nil),        // not in a module → excluded
+	}
+	got := benchmarkCandidatePaths(pkgs)
+	want := []string{"ex/withtest", "ex/withxtest"}
+	if len(got) != len(want) {
+		t.Fatalf("benchmarkCandidatePaths = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("candidate[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestRunRunReturnsErrorOnPackageFailure(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/runfail\n\ngo 1.25\n"), 0o644); err != nil {

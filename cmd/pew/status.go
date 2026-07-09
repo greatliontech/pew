@@ -49,6 +49,25 @@ type pkgMeta struct {
 	}
 }
 
+// benchmarkCandidatePaths returns the import paths of in-module packages that have
+// test files — the only packages status/run can Compute, since selectedBenchmarks
+// reads benchmarks solely from TestGoFiles/XTestGoFiles. This is the batch handed
+// to Hasher.Prime: priming a package builds its whole-program SSA up front, so
+// priming a package the loop never Computes (no test files ⇒ no selected
+// benchmark) is pure waste that would defeat the batch's purpose on a
+// sparse-recording tree. A test-bearing package with no recording is still primed
+// (a small residual, bounded by the benchmark-bearing package count), because
+// whether it has a recording is not known here without reading the store.
+func benchmarkCandidatePaths(pkgs []pkgMeta) []string {
+	var paths []string
+	for _, p := range pkgs {
+		if p.Module.Dir != "" && (len(p.TestGoFiles) > 0 || len(p.XTestGoFiles) > 0) {
+			paths = append(paths, p.ImportPath)
+		}
+	}
+	return paths
+}
+
 func runStatus(w io.Writer, benchDir string, staleOnly bool, patterns []string) error {
 	pkgs, err := resolvePackages(patterns)
 	if err != nil {
@@ -59,6 +78,7 @@ func runStatus(w io.Writer, benchDir string, staleOnly bool, patterns []string) 
 		return err
 	}
 	pc := provenance.NewCache()
+	h.Prime(benchmarkCandidatePaths(pkgs))
 	for _, p := range pkgs {
 		if p.Module.Dir == "" {
 			continue // not in a module (e.g. a stdlib pattern) — nothing to record
