@@ -9,14 +9,23 @@ import (
 	"path/filepath"
 	"strings"
 
+	gofresh "github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gofresh/guard"
 	"github.com/spf13/cobra"
-	"github.com/thegrumpylion/pew/internal/closure"
 	"github.com/thegrumpylion/pew/internal/gotool"
-	"github.com/thegrumpylion/pew/internal/provenance"
-	"github.com/thegrumpylion/pew/internal/runtimeinputs"
-	"github.com/thegrumpylion/pew/internal/stale"
 	"github.com/thegrumpylion/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
+)
+
+// verdict is a benchmark's status row: gofresh's freshness verdict plus the
+// store-level "unrecorded".
+type verdict string
+
+const (
+	verdictValid        = verdict(gofresh.Valid)
+	verdictStale        = verdict(gofresh.Stale)
+	verdictUnverifiable = verdict(gofresh.Unverifiable)
+	verdictUnrecorded   = verdict("unrecorded")
 )
 
 func newStatusCmd() *cobra.Command {
@@ -68,41 +77,57 @@ func benchmarkCandidatePaths(pkgs []pkgMeta) []string {
 	return paths
 }
 
+// newEngine builds the shared gofresh engine for a command invocation, primed for
+// the benchmark-candidate packages and honoring //gofresh:pure directives found in
+// them (the durable, in-code purity channel; the recorded per-benchmark pure flag
+// is the invocation channel, applied in applyPurity).
+func newEngine(pkgs []pkgMeta) (*gofresh.Engine, error) {
+	candidates := benchmarkCandidatePaths(pkgs)
+	var opts []gofresh.Option
+	if len(candidates) > 0 {
+		pred, err := gofresh.ScanPureDirectives(candidates...)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, gofresh.WithAssumePure(pred))
+	}
+	e, err := gofresh.New(opts...)
+	if err != nil {
+		return nil, err
+	}
+	e.Prime(candidates)
+	return e, nil
+}
+
 func runStatus(w io.Writer, benchDir string, staleOnly bool, patterns []string) error {
 	pkgs, err := resolvePackages(patterns)
 	if err != nil {
 		return err
 	}
-	h, err := closure.New()
+	e, err := newEngine(pkgs)
 	if err != nil {
 		return err
 	}
-	pc := provenance.NewCache()
-	h.Prime(benchmarkCandidatePaths(pkgs))
 	for _, p := range pkgs {
 		if p.Module.Dir == "" {
 			continue // not in a module (e.g. a stdlib pattern) — nothing to record
 		}
 		// A per-package failure (e.g. a sibling that does not compile) is reported
 		// as a row and does not abort status of the rest of the tree.
-		if err := statusPackage(w, h, pc, benchDir, staleOnly, p); err != nil {
+		if err := statusPackage(w, e, benchDir, staleOnly, p); err != nil {
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
 		}
 	}
 	return nil
 }
 
-func statusPackage(w io.Writer, h *closure.Hasher, pc *provenance.Cache, benchDir string, staleOnly bool, p pkgMeta) error {
+func statusPackage(w io.Writer, e *gofresh.Engine, benchDir string, staleOnly bool, p pkgMeta) error {
 	benches, err := selectedBenchmarks(p)
 	if err != nil {
 		return err
 	}
 	if len(benches) == 0 {
 		return nil
-	}
-	prov, err := pc.Capture(p.Module.Dir)
-	if err != nil {
-		return err
 	}
 	dir := benchDir
 	if dir == "" {
@@ -111,14 +136,14 @@ func statusPackage(w io.Writer, h *closure.Hasher, pc *provenance.Cache, benchDi
 	st := store.New(dir)
 	pkgRel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, p.Module.Path), "/")
 	for _, b := range benches {
-		verdict, reason, err := checkOne(st, h, p.ImportPath, pkgRel, p.Module.Dir, b, "", prov)
+		v, reason, err := checkOne(st, e, p.ImportPath, pkgRel, p.Module.Dir, b, "")
 		if err != nil {
 			return err
 		}
-		if staleOnly && verdict == stale.Valid {
+		if staleOnly && v == verdictValid {
 			continue
 		}
-		line := fmt.Sprintf("%-12s %s.%s", verdict, p.ImportPath, b)
+		line := fmt.Sprintf("%-12s %s.%s", v, p.ImportPath, b)
 		if reason != "" {
 			line += "  (" + reason + ")"
 		}
@@ -128,44 +153,66 @@ func statusPackage(w io.Writer, h *closure.Hasher, pc *provenance.Cache, benchDi
 }
 
 // checkOne is the per-benchmark validity verdict shared by status, run --stale,
-// and stat's working-tree staleness warning. The HEAD closure is computed only
-// when a recording exists (the SSA load is the dominant cost, §7.4; an unrecorded
-// benchmark needs no analysis). The Tier-2 closure is per benchmark, so it is
-// computed here in the per-benchmark loop, not once per package.
-func checkOne(st *store.Store, h *closure.Hasher, pkgPath, pkgRel, moduleDir, bench, label string, prov provenance.Provenance) (stale.Verdict, string, error) {
+// and stat's working-tree staleness warning. The engine recomputes the current
+// closure and guards (the SSA load is the dominant cost; an unrecorded benchmark
+// needs no analysis, so the store is read first).
+func checkOne(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, bench, label string) (verdict, string, error) {
 	recs, err := st.Read(pkgRel, bench, label)
 	switch {
 	case errors.Is(err, store.ErrNotRecorded):
-		return stale.Unrecorded, "", nil
+		return verdictUnrecorded, "", nil
 	case err != nil:
 		return "", "", err
-	default:
-		cl, err := h.Compute(pkgPath, bench)
-		if err != nil {
-			return "", "", err
-		}
-		runtimeState := currentRuntimeState(recs[0].Config, moduleDir)
-		v, reason := stale.Check(prov, cl, runtimeState, recs[0].Config)
-		return v, reason, nil
 	}
+	fp, pure := fingerprintFromConfig(recs[0].Config)
+	v, err := e.Check(fp, gofresh.Subject{Package: pkgPath, Symbol: bench}, moduleDir, gofresh.Measurement)
+	if err != nil {
+		return "", "", err
+	}
+	v = applyPurity(v, pure)
+	return verdict(v.Status), v.Reason, nil
 }
 
-func currentRuntimeState(cfg []benchfmt.Config, moduleDir string) stale.RuntimeState {
-	manifest := ""
+// fingerprintFromConfig reads the recorded fingerprint out of a recording's config
+// lines (spec §5: pew owns the serialization, gofresh owns the semantics), plus the
+// recorded per-benchmark purity flag ("" when none).
+func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string) {
+	m := make(map[string]string, len(cfg))
 	for _, c := range cfg {
-		if c.Key == "pew-runtime-inputs" {
-			manifest = string(c.Value)
-			break
+		m[c.Key] = string(c.Value)
+	}
+	return gofresh.Fingerprint{
+		Closure: m["pew-closure"],
+		Guards: guard.Guards{
+			Toolchain:     m["toolchain"],
+			BuildConfig:   m["buildconfig"],
+			Machine:       m["machine"],
+			RuntimeConfig: m["runtimeconfig"],
+		},
+		RuntimeInputs: m["pew-runtime-inputs"],
+		RuntimeDigest: m["pew-runtime"],
+	}, m["pure"]
+}
+
+// applyPurity folds the recorded per-benchmark purity flag into the engine verdict
+// (spec §7.3, §7.5). --impure (pure:false) declares external state: the benchmark
+// always re-runs unless a guard already staled it, so any non-stale verdict becomes
+// unverifiable "impure". --assume-pure (pure:true) is the author suppressing the
+// remaining unverifiability after every hashable guard held, so unverifiable
+// becomes valid. The in-code //gofresh:pure directive channel is applied inside the
+// engine itself (newEngine).
+func applyPurity(v gofresh.Verdict, pure string) gofresh.Verdict {
+	switch pure {
+	case "false":
+		if v.Status != gofresh.Stale {
+			return gofresh.Verdict{Status: gofresh.Unverifiable, Reason: "impure"}
+		}
+	case "true":
+		if v.Status == gofresh.Unverifiable {
+			return gofresh.Verdict{Status: gofresh.Valid}
 		}
 	}
-	if manifest == "" {
-		return stale.RuntimeState{}
-	}
-	cur, err := runtimeinputs.Current(manifest, moduleDir)
-	if err != nil {
-		return stale.RuntimeState{}
-	}
-	return stale.RuntimeState{Digest: cur.Digest, Unverifiable: cur.Unverifiable, Reason: cur.Reason, OK: cur.OK}
+	return v
 }
 
 func resolvePackages(patterns []string) ([]pkgMeta, error) {

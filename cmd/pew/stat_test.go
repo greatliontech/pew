@@ -11,11 +11,10 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/thegrumpylion/pew/internal/closure"
+	gofresh "github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/thegrumpylion/pew/internal/compare"
 	"github.com/thegrumpylion/pew/internal/gitblob"
-	"github.com/thegrumpylion/pew/internal/provenance"
-	"github.com/thegrumpylion/pew/internal/runtimeinputs"
 	"github.com/thegrumpylion/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
 )
@@ -454,30 +453,31 @@ func TestIsDirty(t *testing.T) {
 }
 
 func TestNonValidUsesLabel(t *testing.T) {
-	h, err := closure.New()
+	e, err := gofresh.New()
 	if err != nil {
-		t.Fatalf("New closure hasher: %v", err)
+		t.Fatalf("New engine: %v", err)
 	}
-	const pkg = "github.com/thegrumpylion/pew/internal/closure/fixtures/initregistry/bench"
+	const pkg = "github.com/thegrumpylion/pew/internal/fixtures/bench"
 	const bench = "BenchmarkDecode"
-	cl, err := h.Compute(pkg, bench)
+	fp, err := e.Capture(gofresh.Subject{Package: pkg, Symbol: bench}, ".")
 	if err != nil {
-		t.Fatalf("Compute: %v", err)
+		t.Fatalf("Capture: %v", err)
 	}
-	p := provenance.Provenance{Commit: "c1", Toolchain: "go1.26.4", Machine: "m1", BuildConfig: "b1", RuntimeConfig: "rc1"}
-	rt, err := runtimeinputs.FromTestLog([]byte("# test log\n"), ".", ".")
+	rt, err := runtimeinput.FromTestLog([]byte("# test log\n"), ".", ".")
 	if err != nil {
 		t.Fatalf("runtime inputs: %v", err)
 	}
 	st := store.New(t.TempDir())
 	write := func(label, hash string) {
 		t.Helper()
+		// The recorded guards must be the values the engine recomputes at check
+		// time, so the closure hash alone decides the verdict.
 		cfg := []benchfmt.Config{
-			{Key: "commit", Value: []byte(p.Commit), File: true},
-			{Key: "toolchain", Value: []byte(p.Toolchain), File: true},
-			{Key: "machine", Value: []byte(p.Machine), File: true},
-			{Key: "buildconfig", Value: []byte(p.BuildConfig), File: true},
-			{Key: "runtimeconfig", Value: []byte(p.RuntimeConfig), File: true},
+			{Key: "commit", Value: []byte("c1"), File: true},
+			{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
+			{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
+			{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
+			{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
 			{Key: "pew-closure", Value: []byte(hash), File: true},
 			{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
 			{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
@@ -488,21 +488,79 @@ func TestNonValidUsesLabel(t *testing.T) {
 			t.Fatalf("Write(%q): %v", label, err)
 		}
 	}
-	write("", cl.Hash)
-	write("x", cl.Hash+"-stale")
+	write("", fp.Closure)
+	write("x", fp.Closure+"-stale")
 
-	need, err := nonValid(st, h, pkg, "", ".", "x", []string{bench}, p)
+	need, err := nonValid(st, e, pkg, "", ".", "x", []string{bench})
 	if err != nil {
 		t.Fatalf("nonValid labeled: %v", err)
 	}
 	if len(need) != 1 || need[0] != bench {
 		t.Fatalf("labeled nonValid = %v, want [%s]", need, bench)
 	}
-	need, err = nonValid(st, h, pkg, "", ".", "", []string{bench}, p)
+	need, err = nonValid(st, e, pkg, "", ".", "", []string{bench})
 	if err != nil {
 		t.Fatalf("nonValid unlabeled: %v", err)
 	}
 	if len(need) != 0 {
 		t.Fatalf("unlabeled nonValid = %v, want none", need)
+	}
+}
+
+// TestCheckOneAppliesMeasurementGuards pins that a benchmark verdict is checked
+// under the measurement-guard policy: a recording whose machine guard differs from
+// the current machine is stale, which only a Measurement-kind check catches (a
+// code-result check ignores the machine guard).
+func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
+	e, err := gofresh.New()
+	if err != nil {
+		t.Fatalf("New engine: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/fixtures/bench"
+	const bench = "BenchmarkDecode"
+	fp, err := e.Capture(gofresh.Subject{Package: pkg, Symbol: bench}, ".")
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	st := store.New(t.TempDir())
+	cfg := []benchfmt.Config{
+		{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
+		{Key: "machine", Value: []byte("some-other-machine"), File: true},
+		{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
+		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
+		{Key: "pew-closure", Value: []byte(fp.Closure), File: true},
+	}
+	recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
+	if err := st.Write("", bench, "", recs); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	v, reason, err := checkOne(st, e, pkg, "", ".", bench, "")
+	if err != nil {
+		t.Fatalf("checkOne: %v", err)
+	}
+	if v != verdictStale || reason != "machine" {
+		t.Errorf("checkOne = {%s %q}, want {stale machine}", v, reason)
+	}
+
+	// End to end through checkOne, a recording flagged --impure (pure: false) whose
+	// guards all hold is unverifiable "impure": it always re-runs (§7.3).
+	impCfg := []benchfmt.Config{
+		{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
+		{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
+		{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
+		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
+		{Key: "pew-closure", Value: []byte(fp.Closure), File: true},
+		{Key: "pure", Value: []byte("false"), File: true},
+	}
+	impRecs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: impCfg}}
+	if err := st.Write("", bench, "imp", impRecs); err != nil {
+		t.Fatalf("Write imp: %v", err)
+	}
+	v, reason, err = checkOne(st, e, pkg, "", ".", bench, "imp")
+	if err != nil {
+		t.Fatalf("checkOne imp: %v", err)
+	}
+	if v != verdictUnverifiable || reason != "impure" {
+		t.Errorf("checkOne imp = {%s %q}, want {unverifiable impure}", v, reason)
 	}
 }

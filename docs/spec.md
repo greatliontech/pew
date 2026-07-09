@@ -221,9 +221,10 @@ The six guards:
    the codegen **feature level** (`GOAMD64`/`GOARM`/`GOARM64`/`GO386`, `GOEXPERIMENT`), the **cgo
    toolchain environment** (`CGO_ENABLED`, the `CGO_*FLAGS`, `CC`/`CXX`, the `PKG_CONFIG*`
    variables), **build flags** (`GOFLAGS` plus any build-affecting CLI pass-through), and **PGO
-   profile content**. Host `GOOS`/`GOARCH` are excluded here — they ride the machine guard (§8), so
-   a host-arch change moves `machine` while a feature-level change moves `buildconfig`; both
-   captured, neither dropped. A build-affecting input pew cannot parse or bound **fails closed** (the
+   profile content**, and the **target platform** `GOOS`/`GOARCH`. The target platform lives here —
+   not in the machine fingerprint (§8) — because it is code-determining: a cross-compile changes the
+   binary and thus any result, so it must be checked even by a consumer that applies only the code
+   guards. A build-affecting input pew cannot parse or bound **fails closed** (the
    recording is refused) rather than digesting to a value that could stay stable across different
    generated code.
 6. **Runtime config** — current digest == `R.runtimeconfig`. A digest of the Go runtime-configuration
@@ -401,6 +402,14 @@ and the toolchain/machine/build/runtime-config guards all still apply, so a chan
 input still moves the recording to `stale`. This is the **user taking responsibility**, explicit and
 recorded — pew never silently assumes purity.
 
+The assertion has two channels with the same semantics. The **CLI flag** (`--assume-pure <Bench>`)
+is per-invocation, recorded as the `pure: true` line. The **durable directive** `//gofresh:pure` on
+the benchmark declaration travels with the code — written once, reviewed in code review, honored by
+every consumer of the shared gofresh engine (gofresh `REQ-purity-directive`) — and needs no
+provenance line since the source itself is the record. Precedence: `--impure` (§7.3) beats both —
+it is an explicit declaration of external state, applied after the engine verdict, so it forces a
+re-run even for a directive-pure benchmark.
+
 ### 7.6 What changes vs what is recomputed
 
 - `closure-hash(B, R.commit)` is **recorded at run time** (working tree present, cheap, reliable)
@@ -451,9 +460,12 @@ Recorded data:
 - `pew-runtime` — a digest over the manifest's current values/content at record time.
 
 At status time, pew decodes `pew-runtime-inputs`, re-hashes those same inputs in the current working
-tree/environment, and compares the digest to `pew-runtime`. A mismatch is `stale` with reason
-`pew-runtime`. Missing runtime-input metadata is stale: validity requires proof, and old recordings
-did not carry this guard.
+tree/environment, and compares the digest to `pew-runtime`. A mismatch — including a manifest that
+can no longer be decoded or re-evaluated — is `stale` with reason `runtimeinputs` (an unevaluable
+guard is absence of proof, never an error and never `valid`). Every `pew run` records the manifest;
+a run that observed nothing records an *empty* manifest, distinct from no manifest at all. A
+recording carrying no manifest is therefore read as the recorded assertion that the run observed no
+runtime inputs (gofresh `REQ-inputs-absent-asserted`), the guard holding vacuously.
 
 File inputs under the module directory are stored module-relative so moving a checkout does not make a
 recording stale. External file inputs are stored absolute. A module-local input **absent at the run
@@ -501,10 +513,10 @@ whose change plausibly shifts timing**, and *nothing transient* (or it fires spu
 - **OS + kernel version** — in deliberately: a kernel bump can move scheduler/syscall/mitigation
   costs, so reusing pre-bump numbers would be a quiet guard hole. The cost (rerun after a kernel
   update) is the price of soundness, like the toolchain guard.
-- **GOARCH** — the host architecture. The codegen *feature level* (GOAMD64/GOARM/…) is
-  build-determined, so it lives in the **buildconfig** digest (§5), not the fingerprint: a
-  feature-level change moves the buildconfig guard, a host-arch change moves the machine guard; both captured, neither
-  dropped.
+The architecture is deliberately *not* a machine fact: the target platform `GOOS`/`GOARCH` and
+the codegen feature level (GOAMD64/GOARM/…) are build-determined, so they live in the
+**buildconfig** digest (§5, §7 guard 5) — code-determining inputs must hold even for a consumer
+that checks only code guards.
 
 The hash of these is the `machine` config line; a mismatch makes every result from the old
 fingerprint stale. The fingerprint reflects **host** topology (cores/RAM as the OS sees the
@@ -637,8 +649,8 @@ Four commands; names follow the `go test` / benchstat idiom.
     `valid` ones (the reuse-don't-rerun win; shares the `status` closure-analysis path).
   - hygiene: `--count` (10), `--benchtime` (1s), `--pin`, `--strict` (§9)
   - storage: `--bench-dir <dir>` (default `<module>/benchmarks`), `--label <name>` (§6);
-    purity overrides: `--assume-pure <bench>` (§7.5), `--impure <bench>` (§7.3) — a durable
-    code-directive alternative is deferred (`docs/issues/purity-directives.md`).
+    purity overrides: `--assume-pure <bench>` (§7.5), `--impure <bench>` (§7.3). The pure
+    assertion also has a durable in-code form, `//gofresh:pure` (§7.5); the impure one does not.
 - **`pew status [packages]`** — per-benchmark verdict: `valid` / `stale ⟨reason⟩` /
   `unverifiable ⟨reason⟩` / `unrecorded`. `--stale` filters to non-valid (scriptable; feeds
   `run --stale`). Supports `--bench-dir <dir>`.
@@ -686,9 +698,12 @@ triage gate resolves these `Lands:` conditions.
   that `benchfmt` rejects → ecosystem lock-in, G5 broken. *Kind:* clause-explicit (§5, G5).
   *Lands:* when the storage writer is implemented.
 - **INV-4 — Provenance completeness.** Every stored result carries the provenance and manifests
-  required to evaluate all six guards (commit, runtime-input manifest, toolchain, machine,
-  buildconfig, runtimeconfig). *Violation:* a result missing `commit` or `pew-runtime-inputs` → closure/runtime
-  guard unevaluable → validity undecidable → must conservatively re-run, defeating G1/G2. *Kind:*
+  required to evaluate all six guards: `pew run` always writes the commit, the runtime-input
+  manifest (empty when the run observed nothing, §7.8), and the four environment guard lines.
+  *Violation:* a result missing `commit` or a guard value → the guard is unevaluable → validity
+  undecidable → must conservatively re-run, defeating G1/G2. (A recording carrying *no* manifest at
+  all is the recorded assertion of no observed inputs, §7.8 — not a completeness violation; a
+  recorded `pew-runtime` digest without its manifest is corruption, and stale.) *Kind:*
   entailed. *Lands:* when the storage writer is implemented.
 - **INV-5 — Derived state is never authoritative.** Persisted closure hashes are a memoization keyed
   *only* by immutable inputs `(commit, toolchain, buildconfig)`; they are never the source of truth

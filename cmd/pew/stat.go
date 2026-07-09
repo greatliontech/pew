@@ -10,13 +10,11 @@ import (
 	"sort"
 	"strings"
 
+	gofresh "github.com/greatliontech/gofresh"
 	"github.com/spf13/cobra"
-	"github.com/thegrumpylion/pew/internal/closure"
 	"github.com/thegrumpylion/pew/internal/compare"
 	"github.com/thegrumpylion/pew/internal/gitblob"
 	"github.com/thegrumpylion/pew/internal/gotool"
-	"github.com/thegrumpylion/pew/internal/provenance"
-	"github.com/thegrumpylion/pew/internal/stale"
 	"github.com/thegrumpylion/pew/internal/store"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/perf/benchfmt"
@@ -182,12 +180,14 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 
 	// When the new side is the working-tree recording (auto/pinned), a recording
 	// that is stale for HEAD does not reflect current code, so its "new" numbers
-	// are misleading — warn (don't block), pointing at `pew run`. The closure
-	// hasher is only needed for that check, so it is built only then. In A/B mode
-	// both sides are historical recordings and no staleness check applies.
-	var hasher *closure.Hasher
+	// are misleading — warn (don't block), pointing at `pew run`. The engine is
+	// only needed for that check, so it is built only then — via newEngine, so
+	// stat honors //gofresh:pure directives exactly as status and run do (§7.5:
+	// every consumer of the shared engine). In A/B mode both sides are historical
+	// recordings and no staleness check applies.
+	var engine *gofresh.Engine
 	if bl.newRef == "" {
-		if hasher, err = closure.New(); err != nil {
+		if engine, err = newEngine(pkgs); err != nil {
 			return err
 		}
 	}
@@ -196,18 +196,7 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 		if err := addStatInventory(m, bl, sc.label); err != nil {
 			return err
 		}
-		// Provenance for the working-tree staleness check (the closure is per
-		// benchmark, computed in the loop). Best-effort: a failure warns but never
-		// blocks the comparison.
-		var prov provenance.Provenance
-		checkStale := false
-		if bl.newRef == "" {
-			if pv, e := provenance.Capture(m.moduleDir); e != nil {
-				fmt.Fprintf(errw, "pew: warning: %s: cannot check working-tree staleness: %v\n", m.modulePath, e)
-			} else {
-				prov, checkStale = pv, true
-			}
-		}
+		checkStale := bl.newRef == ""
 
 		for _, key := range sortedStatKeys(m.keys) {
 			baseRecs, baseOK, err := readSide(m.store, m.repo, bl.baseRef, key.pkgRel, key.bench, key.label)
@@ -239,14 +228,19 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 				cur, ok := m.current[key]
 				if !ok {
 					fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s has no current benchmark declaration; comparison may not reflect HEAD — re-run `pew run`\n", key.pkgRel, key.bench)
-				} else if cl, e := hasher.Compute(cur.importPath, key.bench); e != nil {
-					fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, e)
-				} else if v, reason := stale.Check(prov, cl, currentRuntimeState(newRecs[0].Config, cur.moduleDir), newRecs[0].Config); v != stale.Valid {
-					msg := string(v)
-					if reason != "" {
-						msg += " (" + reason + ")"
+				} else {
+					// Best-effort: a check failure warns but never blocks the comparison.
+					fp, pure := fingerprintFromConfig(newRecs[0].Config)
+					subj := gofresh.Subject{Package: cur.importPath, Symbol: key.bench}
+					if v, e := engine.Check(fp, subj, cur.moduleDir, gofresh.Measurement); e != nil {
+						fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, e)
+					} else if v = applyPurity(v, pure); v.Status != gofresh.Valid {
+						msg := string(v.Status)
+						if v.Reason != "" {
+							msg += " (" + v.Reason + ")"
+						}
+						fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is %s; comparison may not reflect HEAD — re-run `pew run`\n", cur.importPath, key.bench, msg)
 					}
-					fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is %s; comparison may not reflect HEAD — re-run `pew run`\n", cur.importPath, key.bench, msg)
 				}
 			}
 			baseAll = append(baseAll, baseRecs...)

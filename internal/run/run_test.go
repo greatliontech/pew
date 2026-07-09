@@ -5,8 +5,36 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/greatliontech/gofresh/guard"
 	"golang.org/x/perf/benchfmt"
 )
+
+// TestProvenanceConfigKeysAndOrder pins the in-band provenance lines (spec §5):
+// keys, order, and serializability.
+func TestProvenanceConfigKeysAndOrder(t *testing.T) {
+	cfgs := ProvenanceConfig("c1", true, guard.Guards{
+		Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc",
+	})
+	want := []struct{ key, value string }{
+		{"commit", "c1"},
+		{"toolchain", "tc"},
+		{"machine", "m"},
+		{"buildconfig", "bc"},
+		{"runtimeconfig", "rc"},
+		{"dirty", "true"},
+	}
+	if len(cfgs) != len(want) {
+		t.Fatalf("got %d config lines, want %d", len(cfgs), len(want))
+	}
+	for i, w := range want {
+		if cfgs[i].Key != w.key || string(cfgs[i].Value) != w.value {
+			t.Errorf("config[%d] = %s: %s, want %s: %s", i, cfgs[i].Key, cfgs[i].Value, w.key, w.value)
+		}
+		if !cfgs[i].File {
+			t.Errorf("%s config must have File:true", cfgs[i].Key)
+		}
+	}
+}
 
 func TestBenchName(t *testing.T) {
 	for in, want := range map[string]string{

@@ -8,13 +8,11 @@ import (
 	"sort"
 	"strings"
 
+	gofresh "github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/spf13/cobra"
-	"github.com/thegrumpylion/pew/internal/closure"
 	"github.com/thegrumpylion/pew/internal/gitblob"
-	"github.com/thegrumpylion/pew/internal/provenance"
 	"github.com/thegrumpylion/pew/internal/run"
-	"github.com/thegrumpylion/pew/internal/runtimeinputs"
-	"github.com/thegrumpylion/pew/internal/stale"
 	"github.com/thegrumpylion/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
 )
@@ -85,12 +83,11 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 			return fmt.Errorf("run: refusing to run under noisy conditions (--strict)")
 		}
 	}
-	h, err := closure.New()
+	e, err := newEngine(pkgs)
 	if err != nil {
 		return err
 	}
-	pc := provenance.NewCache()
-	h.Prime(benchmarkCandidatePaths(pkgs))
+	gc := newGitStateCache()
 	var failures []string
 	for _, p := range pkgs {
 		if p.Module.Dir == "" {
@@ -98,7 +95,7 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 		}
 		// Like status, a per-package failure (e.g. one that does not build) is
 		// reported and does not abort the rest of the tree.
-		if err := runPackage(w, h, pc, rc, p); err != nil {
+		if err := runPackage(w, e, gc, rc, p); err != nil {
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
 			failures = append(failures, p.ImportPath)
 		}
@@ -109,7 +106,33 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 	return nil
 }
 
-func runPackage(w io.Writer, h *closure.Hasher, pc *provenance.Cache, rc runConfig, p pkgMeta) error {
+// gitStateCache memoizes gitblob.State per module dir for one invocation — the
+// worktree status is the documented slow path on large repos (§11), and a
+// multi-package command walks packages of the same module sequentially.
+type gitStateCache struct {
+	entries map[string]gitStateResult
+}
+
+type gitStateResult struct {
+	commit string
+	dirty  bool
+	err    error
+}
+
+func newGitStateCache() *gitStateCache {
+	return &gitStateCache{entries: map[string]gitStateResult{}}
+}
+
+func (c *gitStateCache) state(moduleDir string) (string, bool, error) {
+	if r, ok := c.entries[moduleDir]; ok {
+		return r.commit, r.dirty, r.err
+	}
+	commit, dirty, err := gitblob.State(moduleDir)
+	c.entries[moduleDir] = gitStateResult{commit: commit, dirty: dirty, err: err}
+	return commit, dirty, err
+}
+
+func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig, p pkgMeta) error {
 	benches, err := selectedBenchmarks(p)
 	if err != nil {
 		return err
@@ -117,7 +140,7 @@ func runPackage(w io.Writer, h *closure.Hasher, pc *provenance.Cache, rc runConf
 	if len(benches) == 0 {
 		return nil
 	}
-	prov, err := pc.Capture(p.Module.Dir)
+	commit, dirty, err := gc.state(p.Module.Dir)
 	if err != nil {
 		return err
 	}
@@ -130,7 +153,7 @@ func runPackage(w io.Writer, h *closure.Hasher, pc *provenance.Cache, rc runConf
 
 	opts := rc.opts
 	if rc.staleOnly {
-		need, err := nonValid(st, h, p.ImportPath, pkgRel, p.Module.Dir, rc.label, benches, prov)
+		need, err := nonValid(st, e, p.ImportPath, pkgRel, p.Module.Dir, rc.label, benches)
 		if err != nil {
 			return err
 		}
@@ -139,6 +162,14 @@ func runPackage(w io.Writer, h *closure.Hasher, pc *provenance.Cache, rc runConf
 			return nil
 		}
 		opts.Bench = "^(" + strings.Join(need, "|") + ")$"
+	}
+
+	// Capture before the run executes: the recording's guard lines must describe
+	// the environment that produced the numbers, and the engine memoizes guards
+	// per module, so the per-benchmark Captures below reuse these pre-run values
+	// even if the toolchain or build env moves mid-run.
+	if _, err := e.Capture(gofresh.Subject{Package: p.ImportPath, Symbol: benches[0]}, p.Module.Dir); err != nil {
+		return err
 	}
 
 	// A benchmark failure makes `go test` exit non-zero and discards the whole
@@ -162,16 +193,16 @@ func runPackage(w io.Writer, h *closure.Hasher, pc *provenance.Cache, rc runConf
 	if err != nil {
 		return err
 	}
-	runtimeState, err := runtimeinputs.FromTestLog(testlogBytes, p.Module.Dir, filepath.Join(p.Module.Dir, filepath.FromSlash(pkgRel)))
+	runtimeState, err := runtimeinput.FromTestLog(testlogBytes, p.Module.Dir, filepath.Join(p.Module.Dir, filepath.FromSlash(pkgRel)))
 	if err != nil {
 		return err
 	}
-	if !prov.Dirty {
-		uncommitted, err := runtimeInputsUncommitted(p.Module.Dir, prov.Commit, runtimeState.Manifest)
+	if !dirty {
+		uncommitted, err := runtimeInputsUncommitted(p.Module.Dir, commit, runtimeState.Manifest)
 		if err != nil {
 			return err
 		}
-		prov.Dirty = uncommitted
+		dirty = uncommitted
 	}
 	results, err := run.Parse(out)
 	if err != nil {
@@ -179,14 +210,18 @@ func runPackage(w io.Writer, h *closure.Hasher, pc *provenance.Cache, rc runConf
 	}
 
 	written := []string{}
-	// Provenance is uniform per package; the closure hash is per benchmark (Tier-2,
-	// §7.1), so it is computed and appended per benchmark below.
-	for name, recs := range run.Demux(results, prov.Config()) {
-		cl, err := h.Compute(p.ImportPath, name)
+	// The guard values are uniform per module (memoized inside the engine); the
+	// closure hash is per benchmark (Tier-2, §7.1). Capture returns both, so the
+	// provenance lines are appended per benchmark from its fingerprint.
+	for name, recs := range run.Demux(results, nil) {
+		fp, err := e.Capture(gofresh.Subject{Package: p.ImportPath, Symbol: name}, p.Module.Dir)
 		if err != nil {
 			return err
 		}
-		recs = withConfig(recs, run.ClosureConfig(cl.Hash))
+		for _, cfg := range run.ProvenanceConfig(commit, dirty, fp.Guards) {
+			recs = withConfig(recs, cfg)
+		}
+		recs = withConfig(recs, run.ClosureConfig(fp.Closure))
 		for _, cfg := range run.RuntimeConfig(runtimeState.Digest, runtimeState.Manifest) {
 			recs = withConfig(recs, cfg)
 		}
@@ -215,6 +250,17 @@ func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {
 	return recs
 }
 
+// moduleInspector adapts gitblob's absolute-path ExistsAt to gofresh's
+// module-relative CommitInspector.
+type moduleInspector struct {
+	repo      *gitblob.Repo
+	moduleDir string
+}
+
+func (m moduleInspector) ExistsAt(commit, moduleRelPath string) (bool, error) {
+	return m.repo.ExistsAt(commit, filepath.Join(m.moduleDir, filepath.FromSlash(moduleRelPath)))
+}
+
 // runtimeInputsUncommitted reports whether any module-local runtime input in the
 // manifest is absent at commit — ignored via .gitignore, untracked, or created
 // during the run — so a recording backed by it is not reproducible from that commit
@@ -223,37 +269,21 @@ func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {
 // inputs, which git status excludes from the worktree status. External (absolute)
 // inputs are outside the module's git scope and not considered here.
 func runtimeInputsUncommitted(moduleDir, commit, manifest string) (bool, error) {
-	rels, err := runtimeinputs.ModuleRelPaths(manifest)
-	if err != nil {
-		return false, err
-	}
-	if len(rels) == 0 {
-		return false, nil
-	}
 	repo, err := gitblob.Open(moduleDir)
 	if err != nil {
 		return false, err
 	}
-	for _, rel := range rels {
-		present, err := repo.ExistsAt(commit, filepath.Join(moduleDir, filepath.FromSlash(rel)))
-		if err != nil {
-			return false, err
-		}
-		if !present {
-			return true, nil
-		}
-	}
-	return false, nil
+	return runtimeinput.Uncommitted(manifest, commit, moduleInspector{repo: repo, moduleDir: moduleDir})
 }
 
-func nonValid(st *store.Store, h *closure.Hasher, pkgPath, pkgRel, moduleDir, label string, benches []string, prov provenance.Provenance) ([]string, error) {
+func nonValid(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, label string, benches []string) ([]string, error) {
 	var need []string
 	for _, b := range benches {
-		v, _, err := checkOne(st, h, pkgPath, pkgRel, moduleDir, b, label, prov)
+		v, _, err := checkOne(st, e, pkgPath, pkgRel, moduleDir, b, label)
 		if err != nil {
 			return nil, err
 		}
-		if v != stale.Valid {
+		if v != verdictValid {
 			need = append(need, b)
 		}
 	}

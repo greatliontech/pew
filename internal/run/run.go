@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/greatliontech/gofresh/guard"
 	"golang.org/x/perf/benchfmt"
 )
 
@@ -81,6 +82,21 @@ func BenchName(resultName string) string {
 		base = base[:i] // drop the "-<gomaxprocs>" suffix (the only '-' in a func name)
 	}
 	return "Benchmark" + base
+}
+
+// ProvenanceConfig returns the in-band provenance lines in spec §5 order: the
+// measured commit and dirty flag from pew's git layer, and the gofresh guard
+// values. File:true so benchfmt.Writer emits them as `key: value` lines (it omits
+// File==false config as internal).
+func ProvenanceConfig(commit string, dirty bool, g guard.Guards) []benchfmt.Config {
+	return []benchfmt.Config{
+		{Key: "commit", Value: []byte(commit), File: true},
+		{Key: "toolchain", Value: []byte(g.Toolchain), File: true},
+		{Key: "machine", Value: []byte(g.Machine), File: true},
+		{Key: "buildconfig", Value: []byte(g.BuildConfig), File: true},
+		{Key: "runtimeconfig", Value: []byte(g.RuntimeConfig), File: true},
+		{Key: "dirty", Value: []byte(strconv.FormatBool(dirty)), File: true},
+	}
 }
 
 // ClosureConfig is the recorded closure-hash line. File:true so benchfmt.Writer

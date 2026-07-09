@@ -10,8 +10,8 @@ import (
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/greatliontech/gofresh/runtimeinput"
 	runpkg "github.com/thegrumpylion/pew/internal/run"
-	"github.com/thegrumpylion/pew/internal/runtimeinputs"
 )
 
 // TestRuntimeInputsUncommitted pins the dirty-marking (§5, §7.8, Q3-A): a runtime
@@ -45,7 +45,7 @@ func TestRuntimeInputsUncommitted(t *testing.T) {
 
 	manifestFor := func(rel string) string {
 		t.Helper()
-		st, err := runtimeinputs.FromTestLog([]byte("# test log\nopen "+rel+"\n"), dir, dir)
+		st, err := runtimeinput.FromTestLog([]byte("# test log\nopen "+rel+"\n"), dir, dir)
 		if err != nil {
 			t.Fatalf("FromTestLog(%s): %v", rel, err)
 		}
@@ -72,10 +72,10 @@ func TestBenchmarkCandidatePaths(t *testing.T) {
 		return p
 	}
 	pkgs := []pkgMeta{
-		mk("ex/withtest", "/m", []string{"a_test.go"}, nil),      // in-module, in-package test → candidate
-		mk("ex/withxtest", "/m", nil, []string{"x_test.go"}),     // in-module, external test → candidate
-		mk("ex/notest", "/m", nil, nil),                          // in-module, no test files → excluded
-		mk("ex/nomodule", "", []string{"a_test.go"}, nil),        // not in a module → excluded
+		mk("ex/withtest", "/m", []string{"a_test.go"}, nil),  // in-module, in-package test → candidate
+		mk("ex/withxtest", "/m", nil, []string{"x_test.go"}), // in-module, external test → candidate
+		mk("ex/notest", "/m", nil, nil),                      // in-module, no test files → excluded
+		mk("ex/nomodule", "", []string{"a_test.go"}, nil),    // not in a module → excluded
 	}
 	got := benchmarkCandidatePaths(pkgs)
 	want := []string{"ex/withtest", "ex/withxtest"}

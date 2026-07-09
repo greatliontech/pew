@@ -21,7 +21,9 @@ Two build-affecting inputs still change generated code without moving the guard:
   needs package-aware profile discovery — raw flag hashing is not a content guard.
 - **CLI build-flag pass-throughs.** If `pew run` grows `-tags`/`-gcflags`/`-pgo` flags (not yet
   present), those must feed the digest before they are exposed (spec §9), or a flag change produces a
-  false `valid`.
+  false `valid`. The mechanism now exists upstream: gofresh's `WithBuildInputs` folds caller-supplied
+  invocation inputs (flag strings, PGO content digests) into the buildconfig guard; pew passes none
+  because it exposes none.
 
 ## Design tension to resolve on landing
 
