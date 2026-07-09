@@ -89,6 +89,7 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 	if err != nil {
 		return err
 	}
+	pc := provenance.NewCache()
 	var failures []string
 	for _, p := range pkgs {
 		if p.Module.Dir == "" {
@@ -96,7 +97,7 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 		}
 		// Like status, a per-package failure (e.g. one that does not build) is
 		// reported and does not abort the rest of the tree.
-		if err := runPackage(w, h, rc, p); err != nil {
+		if err := runPackage(w, h, pc, rc, p); err != nil {
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
 			failures = append(failures, p.ImportPath)
 		}
@@ -107,7 +108,7 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 	return nil
 }
 
-func runPackage(w io.Writer, h *closure.Hasher, rc runConfig, p pkgMeta) error {
+func runPackage(w io.Writer, h *closure.Hasher, pc *provenance.Cache, rc runConfig, p pkgMeta) error {
 	benches, err := selectedBenchmarks(p)
 	if err != nil {
 		return err
@@ -115,7 +116,7 @@ func runPackage(w io.Writer, h *closure.Hasher, rc runConfig, p pkgMeta) error {
 	if len(benches) == 0 {
 		return nil
 	}
-	prov, err := provenance.Capture(p.Module.Dir)
+	prov, err := pc.Capture(p.Module.Dir)
 	if err != nil {
 		return err
 	}

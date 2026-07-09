@@ -78,6 +78,41 @@ func Capture(moduleDir string) (Provenance, error) {
 	}, nil
 }
 
+// Cache memoizes Capture by module dir for the life of one command invocation.
+// Every fact Capture gathers is per-module or per-machine — the git worktree
+// status (the documented slow path on large repos, §11), the `go version` and
+// `go env` subprocesses, and the machine facts — so a multi-package command
+// (`pew status ./...`) over a single module captures once instead of once per
+// package. Errors are memoized too: a module that fails to capture fails
+// identically for the rest of the invocation.
+//
+// A Cache is not safe for concurrent use; pew's commands walk packages
+// sequentially. A working tree can change between packages within one invocation
+// only via a concurrent external writer, which the direct per-package calls did
+// not defend against either — so memoizing changes no observable behavior.
+type Cache struct {
+	entries map[string]captureResult
+}
+
+type captureResult struct {
+	prov Provenance
+	err  error
+}
+
+// NewCache returns an empty capture cache for one command invocation.
+func NewCache() *Cache { return &Cache{entries: map[string]captureResult{}} }
+
+// Capture returns the provenance for moduleDir, computing it once and reusing the
+// result (or error) on subsequent calls with the same dir.
+func (c *Cache) Capture(moduleDir string) (Provenance, error) {
+	if r, ok := c.entries[moduleDir]; ok {
+		return r.prov, r.err
+	}
+	prov, err := Capture(moduleDir)
+	c.entries[moduleDir] = captureResult{prov: prov, err: err}
+	return prov, err
+}
+
 // runtimeConfigEnvKeys are the Go runtime-configuration environment variables the
 // benchmark process inherits. The runtime reads them during init, before the testlog
 // stream starts, so they are invisible to the runtime-input guard (§7.8); they are

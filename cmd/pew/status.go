@@ -58,20 +58,21 @@ func runStatus(w io.Writer, benchDir string, staleOnly bool, patterns []string) 
 	if err != nil {
 		return err
 	}
+	pc := provenance.NewCache()
 	for _, p := range pkgs {
 		if p.Module.Dir == "" {
 			continue // not in a module (e.g. a stdlib pattern) — nothing to record
 		}
 		// A per-package failure (e.g. a sibling that does not compile) is reported
 		// as a row and does not abort status of the rest of the tree.
-		if err := statusPackage(w, h, benchDir, staleOnly, p); err != nil {
+		if err := statusPackage(w, h, pc, benchDir, staleOnly, p); err != nil {
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
 		}
 	}
 	return nil
 }
 
-func statusPackage(w io.Writer, h *closure.Hasher, benchDir string, staleOnly bool, p pkgMeta) error {
+func statusPackage(w io.Writer, h *closure.Hasher, pc *provenance.Cache, benchDir string, staleOnly bool, p pkgMeta) error {
 	benches, err := selectedBenchmarks(p)
 	if err != nil {
 		return err
@@ -79,7 +80,7 @@ func statusPackage(w io.Writer, h *closure.Hasher, benchDir string, staleOnly bo
 	if len(benches) == 0 {
 		return nil
 	}
-	prov, err := provenance.Capture(p.Module.Dir)
+	prov, err := pc.Capture(p.Module.Dir)
 	if err != nil {
 		return err
 	}

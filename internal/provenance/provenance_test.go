@@ -220,6 +220,68 @@ func TestBuildConfigExcludesHostArch(t *testing.T) {
 
 // TestGitStateDirty validates commit + dirty semantics against a real repo built
 // with the git binary: clean after commit, dirty with an untracked file.
+// TestCaptureCacheMemoizes pins the per-invocation capture cache: a second call
+// for the same module dir returns the first result even after the working tree
+// changes underneath it — proving the second call reused the memo rather than
+// re-running the git/toolchain work. A fresh direct Capture is checked to observe
+// the changed state, so the cache's returned (stale) value is a real memo, not a
+// coincidence.
+func TestCaptureCacheMemoizes(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not available")
+	}
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init")
+	git("config", "user.email", "t@example.com")
+	git("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-m", "init")
+
+	pc := NewCache()
+	first, err := pc.Capture(dir)
+	if err != nil {
+		t.Fatalf("Capture (first): %v", err)
+	}
+	if first.Dirty {
+		t.Fatal("freshly-committed repo captured dirty")
+	}
+
+	// Change the working tree: a fresh direct capture now sees it dirty.
+	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := Capture(dir)
+	if err != nil {
+		t.Fatalf("direct Capture after change: %v", err)
+	}
+	if !fresh.Dirty {
+		t.Fatal("working-tree change not observed by a fresh Capture; test cannot distinguish memo")
+	}
+
+	// The cache must return the original (clean) value — proving it did not recompute.
+	second, err := pc.Capture(dir)
+	if err != nil {
+		t.Fatalf("Capture (second): %v", err)
+	}
+	if second != first {
+		t.Errorf("cache recomputed: second=%+v != first=%+v", second, first)
+	}
+	if second.Dirty {
+		t.Error("cache returned a recomputed dirty value; want the memoized clean one")
+	}
+}
+
 func TestGitStateDirty(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git binary not available")
