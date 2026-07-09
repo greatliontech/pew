@@ -41,7 +41,8 @@ type Closure struct {
 // (the dominant cost, §7.4) so repeated per-benchmark Compute calls amortize it.
 type Hasher struct {
 	modCache string
-	progs    map[string]*program // by package import path
+	progs    map[string]*program  // by package import path
+	lists    map[string][]listPkg // parsed `go list -deps -test`, by package import path
 }
 
 func New() (*Hasher, error) {
@@ -53,7 +54,7 @@ func New() (*Hasher, error) {
 	if mc == "" {
 		return nil, errors.New("closure: empty GOMODCACHE")
 	}
-	return &Hasher{modCache: filepath.Clean(mc), progs: map[string]*program{}}, nil
+	return &Hasher{modCache: filepath.Clean(mc), progs: map[string]*program{}, lists: map[string][]listPkg{}}, nil
 }
 
 type listPkg struct {
@@ -710,12 +711,27 @@ func hashFile(path string) (string, error) {
 	return hex.EncodeToString(sum[:])[:32], nil
 }
 
+// list runs `go list -json -deps -test` for pkgPath and returns the parsed
+// dependency graph. The result is memoized per package path for the life of the
+// Hasher: every per-benchmark Compute call in a package (and the maximalHash
+// widen path) needs the identical listing, and its inputs are immutable within a
+// single process run, so one subprocess+decode is amortized across them (same
+// lifetime and rationale as the SSA program cache). Callers treat the slice as
+// read-only, so sharing one backing array across them is safe.
 func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
+	if pkgs, ok := h.lists[pkgPath]; ok {
+		return pkgs, nil
+	}
 	out, err := gotool.Run("list", "-json", "-deps", "-test", pkgPath)
 	if err != nil {
 		return nil, err
 	}
-	return parseList(bytes.NewReader(out))
+	pkgs, err := parseList(bytes.NewReader(out))
+	if err != nil {
+		return nil, err
+	}
+	h.lists[pkgPath] = pkgs
+	return pkgs, nil
 }
 
 func parseList(r io.Reader) ([]listPkg, error) {

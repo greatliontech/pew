@@ -8,7 +8,6 @@ close-out convention.
 |------|---------|-------|
 | [batched-package-load](batched-package-load.md) | one shared `packages.Load` across packages instead of per-package whole-program loads | when closure performance is next worked, or multi-package status proves slow |
 | [buildconfig-completeness](buildconfig-completeness.md) | PGO profile content + CLI build-flag pass-throughs in the buildconfig guard (cgo/env half landed) | when PGO benchmarks see real use, or `pew run` grows build-flag flags |
-| [closure-list-cache](closure-list-cache.md) | memoize `go list -deps -test` per package (currently run per benchmark) | when closure performance is next worked, or `pew status` proves slow |
 | [json-output](json-output.md) | `-json` machine-readable output for `status`/`stat` | when pew is first wired into CI/scripting beyond exit-code gating |
 | [provenance-capture-cache](provenance-capture-cache.md) | capture provenance once per module, not once per package | when status/run wall-clock proves slow, or the capture call sites change |
 | [purity-directives](purity-directives.md) | durable `//pew:pure` / `//pew:external` code directives vs CLI flags | when CLI purity flags prove insufficient |

@@ -886,6 +886,37 @@ func TestMaximalHashReal(t *testing.T) {
 	}
 }
 
+// TestListMemoizes pins the per-package listing cache: two calls for the same
+// package path return the identical backing slice (proving the second reused the
+// memo rather than re-running the `go list` subprocess), and the content is the
+// same. The efficiency claim is that N benchmarks in a package pay one listing;
+// the observable proxy is memo identity.
+func TestListMemoizes(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/thegrumpylion/pew/internal/store"
+	first, err := h.list(pkg)
+	if err != nil {
+		t.Fatalf("list (first): %v", err)
+	}
+	if len(first) == 0 {
+		t.Fatal("list returned no packages")
+	}
+	second, err := h.list(pkg)
+	if err != nil {
+		t.Fatalf("list (second): %v", err)
+	}
+	if len(second) != len(first) {
+		t.Fatalf("second listing len %d != first %d", len(second), len(first))
+	}
+	// Same backing array ⇒ the second call hit the memo, not a fresh subprocess.
+	if &first[0] != &second[0] {
+		t.Error("list did not memoize: second call returned a distinct slice")
+	}
+}
+
 // TestComputeIncludesInitRegisteredSideEffectPackage pins INV-1 for registry
 // patterns: a side-effect import's init can register an implementation that the
 // benchmark later observes through package-level state and interface dispatch.
