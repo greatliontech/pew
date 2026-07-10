@@ -11,9 +11,9 @@ import (
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/pew/internal/gotool"
+	"github.com/greatliontech/pew/internal/store"
 	"github.com/spf13/cobra"
-	"github.com/thegrumpylion/pew/internal/gotool"
-	"github.com/thegrumpylion/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
 )
 

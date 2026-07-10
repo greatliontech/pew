@@ -3,7 +3,6 @@ package gitblob
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -12,30 +11,35 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
-// Open against the pew repository itself, then read a committed file at HEAD.
-// This exercises the real go-git read path (ref resolution → commit → blob)
-// without constructing a throwaway repo.
+// ReadAt returns the committed blob, not divergent worktree content.
 func TestReadAtHEAD(t *testing.T) {
-	wd, err := filepath.Abs(".")
-	if err != nil {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "recording.txt")
+	if err := os.WriteFile(path, []byte("committed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	repo, err := Open(wd)
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	commitAll(t, raw)
+	if err := os.WriteFile(path, []byte("working tree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := Open(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 
-	// go.mod is committed at the repo root and stable across history.
-	abs := filepath.Join(repo.root, "go.mod")
-	content, ok, err := repo.ReadAt("HEAD", abs)
+	content, ok, err := repo.ReadAt("HEAD", path)
 	if err != nil {
-		t.Fatalf("ReadAt go.mod@HEAD: %v", err)
+		t.Fatalf("ReadAt recording.txt@HEAD: %v", err)
 	}
 	if !ok {
-		t.Fatal("go.mod not found at HEAD")
+		t.Fatal("recording.txt not found at HEAD")
 	}
-	if !strings.Contains(string(content), "module github.com/thegrumpylion/pew") {
-		t.Errorf("go.mod@HEAD missing module line:\n%s", content)
+	if got, want := string(content), "committed\n"; got != want {
+		t.Errorf("recording.txt@HEAD = %q, want %q", got, want)
 	}
 }
 

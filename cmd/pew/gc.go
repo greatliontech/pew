@@ -13,9 +13,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/greatliontech/pew/internal/gotool"
+	"github.com/greatliontech/pew/internal/store"
 	"github.com/spf13/cobra"
-	"github.com/thegrumpylion/pew/internal/gotool"
-	"github.com/thegrumpylion/pew/internal/store"
 )
 
 func newGCCmd() *cobra.Command {

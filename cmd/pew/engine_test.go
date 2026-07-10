@@ -12,7 +12,7 @@ import (
 // build their engine here): a directive-pure benchmark whose closure reaches file
 // I/O checks valid, where an engine without the directive scan reports unverifiable.
 func TestNewEngineHonorsDirectives(t *testing.T) {
-	const pkg = "github.com/thegrumpylion/pew/internal/fixtures/purebench"
+	const pkg = "github.com/greatliontech/pew/internal/fixtures/purebench"
 	const bench = "BenchmarkPureRead"
 	var p pkgMeta
 	p.ImportPath = pkg

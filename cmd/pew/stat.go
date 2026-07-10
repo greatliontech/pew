@@ -11,11 +11,11 @@ import (
 	"strings"
 
 	gofresh "github.com/greatliontech/gofresh"
+	"github.com/greatliontech/pew/internal/compare"
+	"github.com/greatliontech/pew/internal/gitblob"
+	"github.com/greatliontech/pew/internal/gotool"
+	"github.com/greatliontech/pew/internal/store"
 	"github.com/spf13/cobra"
-	"github.com/thegrumpylion/pew/internal/compare"
-	"github.com/thegrumpylion/pew/internal/gitblob"
-	"github.com/thegrumpylion/pew/internal/gotool"
-	"github.com/thegrumpylion/pew/internal/store"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/perf/benchfmt"
 )

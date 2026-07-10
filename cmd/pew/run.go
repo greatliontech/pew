@@ -10,10 +10,10 @@ import (
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/pew/internal/gitblob"
+	"github.com/greatliontech/pew/internal/run"
+	"github.com/greatliontech/pew/internal/store"
 	"github.com/spf13/cobra"
-	"github.com/thegrumpylion/pew/internal/gitblob"
-	"github.com/thegrumpylion/pew/internal/run"
-	"github.com/thegrumpylion/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
 )
 

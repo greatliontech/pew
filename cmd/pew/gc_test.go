@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thegrumpylion/pew/internal/store"
+	"github.com/greatliontech/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
 )
 

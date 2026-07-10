@@ -13,9 +13,9 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
-	"github.com/thegrumpylion/pew/internal/compare"
-	"github.com/thegrumpylion/pew/internal/gitblob"
-	"github.com/thegrumpylion/pew/internal/store"
+	"github.com/greatliontech/pew/internal/compare"
+	"github.com/greatliontech/pew/internal/gitblob"
+	"github.com/greatliontech/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
 )
 
@@ -457,7 +457,7 @@ func TestNonValidUsesLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New engine: %v", err)
 	}
-	const pkg = "github.com/thegrumpylion/pew/internal/fixtures/bench"
+	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
 	const bench = "BenchmarkDecode"
 	fp, err := e.Capture(gofresh.Subject{Package: pkg, Symbol: bench}, ".")
 	if err != nil {
@@ -516,7 +516,7 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New engine: %v", err)
 	}
-	const pkg = "github.com/thegrumpylion/pew/internal/fixtures/bench"
+	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
 	const bench = "BenchmarkDecode"
 	fp, err := e.Capture(gofresh.Subject{Package: pkg, Symbol: bench}, ".")
 	if err != nil {
