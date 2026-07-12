@@ -39,6 +39,34 @@ func TestStateDirty(t *testing.T) {
 	if dirty {
 		t.Error("freshly-committed repo reported dirty")
 	}
+	clean, err := Snapshot(dir)
+	if err != nil {
+		t.Fatalf("Snapshot clean: %v", err)
+	}
+	benchDir := filepath.Join(dir, "benchmarks")
+	if err := os.Mkdir(benchDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(benchDir, "BenchmarkX.txt"), []byte("result"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withRecording, err := Snapshot(dir)
+	if err != nil {
+		t.Fatalf("Snapshot with recording: %v", err)
+	}
+	if clean.Equal(withRecording) {
+		t.Fatal("recording write did not change exact repository state")
+	}
+	recordingPath := filepath.Join(benchDir, "BenchmarkX.txt")
+	if !clean.EqualExceptPaths(withRecording, []string{recordingPath}) {
+		t.Fatal("recording-file change was not excluded")
+	}
+	if clean.EqualExceptPaths(withRecording, []string{filepath.Join(benchDir, "other.txt")}) {
+		t.Fatal("unlisted recording-root change was excluded")
+	}
+	if err := os.RemoveAll(benchDir); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("y"), 0o644); err != nil {
 		t.Fatal(err)
@@ -47,5 +75,19 @@ func TestStateDirty(t *testing.T) {
 		t.Fatalf("State after change: %v", err)
 	} else if !dirty {
 		t.Error("repo with an untracked file reported clean")
+	}
+	firstDirty, err := Snapshot(dir)
+	if err != nil {
+		t.Fatalf("Snapshot dirty: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("z"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	secondDirty, err := Snapshot(dir)
+	if err != nil {
+		t.Fatalf("Snapshot changed dirty: %v", err)
+	}
+	if firstDirty.Equal(secondDirty) {
+		t.Fatal("different dirty contents produced equal repository states")
 	}
 }

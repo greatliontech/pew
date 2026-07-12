@@ -86,6 +86,74 @@ func sameResults(t *testing.T, a, b []*benchfmt.Result) {
 	}
 }
 
+func TestWriteBatchPreflightPreservesPriorRecordings(t *testing.T) {
+	s := New(t.TempDir())
+	oldA := parse(t, "BenchmarkA 1 1 ns/op\n")
+	newA := parse(t, "BenchmarkA 1 2 ns/op\n")
+	newB := parse(t, "BenchmarkB 1 3 ns/op\n")
+	if err := s.Write("p", "BenchmarkA", "", oldA); err != nil {
+		t.Fatal(err)
+	}
+	bPath, err := s.Path("p", "BenchmarkB", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(bPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err = s.WriteBatch([]WriteRequest{
+		{PkgRel: "p", Bench: "BenchmarkA", Results: newA},
+		{PkgRel: "p", Bench: "BenchmarkB", Results: newB},
+	})
+	if err == nil {
+		t.Fatal("WriteBatch accepted a non-file destination")
+	}
+	got, err := s.Read("p", "BenchmarkA", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameResults(t, got, oldA)
+}
+
+func TestWriteBatchRejectsDuplicateDestination(t *testing.T) {
+	s := New(t.TempDir())
+	err := s.WriteBatch([]WriteRequest{
+		{PkgRel: "p", Bench: "BenchmarkA", Results: parse(t, "BenchmarkA 1 1 ns/op\n")},
+		{PkgRel: "p", Bench: "BenchmarkA", Results: parse(t, "BenchmarkA 1 2 ns/op\n")},
+	})
+	if err == nil {
+		t.Fatal("WriteBatch accepted duplicate destinations")
+	}
+}
+
+func TestWriteBatchCommitFailureRestoresPriorRecordings(t *testing.T) {
+	s := New(t.TempDir())
+	oldA := parse(t, "BenchmarkA 1 1 ns/op\n")
+	if err := s.Write("p", "BenchmarkA", "", oldA); err != nil {
+		t.Fatal(err)
+	}
+	bPath, err := s.Path("p", "BenchmarkB", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.writeBatch([]WriteRequest{
+		{PkgRel: "p", Bench: "BenchmarkA", Results: parse(t, "BenchmarkA 1 2 ns/op\n")},
+		{PkgRel: "p", Bench: "BenchmarkB", Results: parse(t, "BenchmarkB 1 3 ns/op\n")},
+	}, func() {
+		if err := os.Mkdir(bPath, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if err == nil {
+		t.Fatal("WriteBatch succeeded despite an install failure")
+	}
+	got, err := s.Read("p", "BenchmarkA", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameResults(t, got, oldA)
+}
+
 // TestRoundTrip: write parsed results, read them back, and confirm the recording
 // is parseable (INV-3) and stable across a second round-trip.
 func TestRoundTrip(t *testing.T) {

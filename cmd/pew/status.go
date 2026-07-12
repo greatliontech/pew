@@ -58,45 +58,10 @@ type pkgMeta struct {
 	}
 }
 
-// benchmarkCandidatePaths returns the import paths of in-module packages that have
-// test files — the only packages status/run can Compute, since selectedBenchmarks
-// reads benchmarks solely from TestGoFiles/XTestGoFiles. This is the batch handed
-// to Hasher.Prime: priming a package builds its whole-program SSA up front, so
-// priming a package the loop never Computes (no test files ⇒ no selected
-// benchmark) is pure waste that would defeat the batch's purpose on a
-// sparse-recording tree. A test-bearing package with no recording is still primed
-// (a small residual, bounded by the benchmark-bearing package count), because
-// whether it has a recording is not known here without reading the store.
-func benchmarkCandidatePaths(pkgs []pkgMeta) []string {
-	var paths []string
-	for _, p := range pkgs {
-		if p.Module.Dir != "" && (len(p.TestGoFiles) > 0 || len(p.XTestGoFiles) > 0) {
-			paths = append(paths, p.ImportPath)
-		}
-	}
-	return paths
-}
-
-// newEngine builds the shared gofresh engine for a command invocation, primed for
-// the benchmark-candidate packages and honoring //gofresh:pure directives found in
-// them (the durable, in-code purity channel; the recorded per-benchmark pure flag
-// is the invocation channel, applied in applyPurity).
-func newEngine(pkgs []pkgMeta) (*gofresh.Engine, error) {
-	candidates := benchmarkCandidatePaths(pkgs)
-	var opts []gofresh.Option
-	if len(candidates) > 0 {
-		pred, err := gofresh.ScanPureDirectives(candidates...)
-		if err != nil {
-			return nil, err
-		}
-		opts = append(opts, gofresh.WithAssumePure(pred))
-	}
-	e, err := gofresh.New(opts...)
-	if err != nil {
-		return nil, err
-	}
-	e.Prime(candidates)
-	return e, nil
+// newEngine roots one immutable Gofresh configuration at a module. Views discover
+// purity directives from their own selected source.
+func newEngine(moduleDir string) (*gofresh.Engine, error) {
+	return gofresh.New(gofresh.WithDir(moduleDir))
 }
 
 func runStatus(w io.Writer, benchDir string, staleOnly bool, patterns []string) error {
@@ -104,13 +69,13 @@ func runStatus(w io.Writer, benchDir string, staleOnly bool, patterns []string) 
 	if err != nil {
 		return err
 	}
-	e, err := newEngine(pkgs)
-	if err != nil {
-		return err
-	}
 	for _, p := range pkgs {
 		if p.Module.Dir == "" {
 			continue // not in a module (e.g. a stdlib pattern) — nothing to record
+		}
+		e, err := newEngine(p.Module.Dir)
+		if err != nil {
+			return err
 		}
 		// A per-package failure (e.g. a sibling that does not compile) is reported
 		// as a row and does not abort status of the rest of the tree.
@@ -165,7 +130,7 @@ func checkOne(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, be
 		return "", "", err
 	}
 	fp, pure := fingerprintFromConfig(recs[0].Config)
-	v, err := e.Check(fp, gofresh.Subject{Package: pkgPath, Symbol: bench}, moduleDir, gofresh.Measurement)
+	v, err := e.Check(fp, gofresh.Subject{Package: pkgPath, Symbol: bench}, moduleDir)
 	if err != nil {
 		return "", "", err
 	}
@@ -182,15 +147,17 @@ func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string) 
 		m[c.Key] = string(c.Value)
 	}
 	return gofresh.Fingerprint{
-		Closure: m["pew-closure"],
+		MaximalClosure: m["pew-closure"],
 		Guards: guard.Guards{
 			Toolchain:     m["toolchain"],
 			BuildConfig:   m["buildconfig"],
 			Machine:       m["machine"],
 			RuntimeConfig: m["runtimeconfig"],
 		},
-		RuntimeInputs: m["pew-runtime-inputs"],
-		RuntimeDigest: m["pew-runtime"],
+		PurityAssertion: m["pew-purity"],
+		RuntimeInputs:   m["pew-runtime-inputs"],
+		RuntimeDigest:   m["pew-runtime"],
+		ResultKind:      gofresh.Measurement,
 	}, m["pure"]
 }
 

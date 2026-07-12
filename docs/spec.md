@@ -91,6 +91,10 @@ global config lines):
 | `dirty`              | `true` if the working tree had uncommitted changes at run    | yes              |
 | `pew-runtime`        | digest of observed runtime inputs (§7.8)                     | derived          |
 | `pew-runtime-inputs` | encoded manifest of observed runtime input names/paths (§7.8) | yes              |
+| `pew-purity`         | attributable Gofresh purity evidence used for this fingerprint | yes            |
+
+`pew-purity` is benchmark-specific despite the surrounding uniform provenance keys and is omitted
+when capture used no purity assertion; omission is the canonical no-attribution encoding.
 
 **The closure hash rides in-band** as a namespaced `pew-closure` config line (no sidecar index). It
 is *derived*, not provenance (recomputable from commit + toolchain + build-config), so it is never
@@ -300,6 +304,9 @@ reach in-tree source, also fails closed.
 blind spot escalates to (§7.3). Tier 2 + the resolution rules are pure precision: they shrink the
 set only where shrinking is provably safe. INV-1 therefore holds *by construction* — the worst case
 is always the maximal source set, never less.
+Pew records this maximal closure by default. Declaration refinement is admissible only as an explicit
+precision policy after it demonstrates bounded completion and useful false-stale recovery; a recording
+never infers or silently selects it from benchmark cost.
 
 ### 7.3 Blind spots — resolve, widen, or downgrade
 
@@ -405,8 +412,10 @@ recorded — pew never silently assumes purity.
 The assertion has two channels with the same semantics. The **CLI flag** (`--assume-pure <Bench>`)
 is per-invocation, recorded as the `pure: true` line. The **durable directive** `//gofresh:pure` on
 the benchmark declaration travels with the code — written once, reviewed in code review, honored by
-every consumer of the shared gofresh engine (gofresh `REQ-purity-directive`) — and needs no
-provenance line since the source itself is the record. Precedence: `--impure` (§7.3) beats both —
+every consumer of the shared gofresh engine (gofresh `REQ-purity-directive`). The exact Gofresh
+attribution used by capture is recorded as `pew-purity`; source equality can prove it unchanged, but
+an old recording with no attribution re-runs rather than acquiring historical evidence. Precedence:
+`--impure` (§7.3) beats both —
 it is an explicit declaration of external state, applied after the engine verdict, so it forces a
 re-run even for a directive-pure benchmark.
 
@@ -468,12 +477,12 @@ recording carrying no manifest is therefore read as the recorded assertion that 
 runtime inputs (gofresh `REQ-inputs-absent-asserted`), the guard holding vacuously.
 
 File inputs under the module directory are stored module-relative so moving a checkout does not make a
-recording stale. External file inputs are stored absolute. A module-local input **absent at the run
-commit** — `.gitignore`d, untracked, or created during the run — is not reproducible from that commit,
-so a recording backed by it is not faithful to its `commit` and is marked **dirty** (§5); this bars it
-as a pinned baseline (§10) while leaving it usable for working-tree reuse. Untracked and
-modified-tracked inputs already flip the informational `dirty` flag via git status; this additionally
-covers `.gitignore`d inputs, which git status excludes from the worktree status. Missing files hash as
+recording stale. External file inputs are stored absolute. A module-local input whose current
+Git-representable state is not reproducible from the run commit makes the recording **dirty** (§5):
+the comparison covers absence, regular-file content and executable mode, symlink target, and directory
+membership/member state. This bars it as a pinned baseline (§10) while leaving it usable for
+working-tree reuse and covers ignored/untracked inputs and targets reached through committed symlinks,
+not only ordinary git-status changes. Missing files hash as
 missing, so a file appearing/disappearing moves the guard. Opened regular files hash both content and stable `FileInfo`
 metadata; opened directories hash their tree entries, entry content, and stable entry metadata.
 Package-local directories may be hashed as directory trees; directory symlinks are hashed through only
@@ -569,6 +578,20 @@ provenance is captured atomically with the run:
   and thermal throttling via exposed CPU `thermal_throttle/*_throttle_count` counters.
 - Records provenance (§5) and computes the run-commit closure hash (§7), recorded in-band as
   `pew-closure` (§5), plus observed runtime inputs (`pew-runtime*`, §7.8), at run time.
+- Captures one measurement view and every benchmark fingerprint before execution, then validates that
+  view and revalidates the completed runtime-input state before writing any result. Source, guard,
+  purity, runtime, commit, or worktree-state drift aborts the package write. Every destination is
+  staged before replacement and every returned commit failure restores the prior complete set, so one
+  package run is one producer transaction across ordinary filesystem errors. Each file is individually
+  temp-and-rename safe; sudden process death during a multi-file commit may leave a recording absent,
+  which safely forces regeneration rather than exposing a torn recording.
+- The caller excludes source, runtime-input, and repository mutation during final validation and commit.
+  Pew double-checks the view, completed runtime state, HEAD, and dirty state immediately before the
+  write batch; as with Gofresh producer views, an externally allowed change-and-restore interval cannot
+  be proven absent.
+- A package write is refused when any recording destination overlaps a selected maximal-source path
+  or an observed runtime-input path, including a destination nested beneath an observed directory,
+  because storage must not invalidate the completed source or runtime evidence it is about to persist.
 
 ## 10. Comparison & regression
 
@@ -627,8 +650,8 @@ go-git keeps pew self-contained (`go install` works with no external binary beyo
   pew is a pure git *reader* (HEAD, commit metadata, ref resolution, blob reads for
   baselines, file-scoped log for trends — §6.1, §9). Every `git show <ref>:<path>` /
   `git log -- <path>` in this spec is performed via go-git's object API, **never** by shelling to a
-  `git` binary. *Tradeoff accepted:* go-git's `Worktree.Status()` (used only for the informational
-  `dirty` flag, §5) is slower than the binary on large repos and, on its weak cases
+  `git` binary. *Tradeoff accepted:* go-git's `Worktree.Status()` (used for the informational
+  `dirty` flag, §5, and to pin repository state across producer validation, §9) is slower than the binary on large repos and, on its weak cases
   (`.gitattributes` filters), errs toward **false-dirty** — the safe direction (a falsely-dirty
   result is only barred from being a pinned baseline, never silently trusted). The
   correctness-bearing "is this result faithful to commit C?" does **not** rely on Status(): it is
@@ -673,11 +696,7 @@ defaults → `--count=10`/`--benchtime=1s`, pinning opt-in, quiesce=warn+`--stri
 Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred explorations live in
 `docs/issues/`.
 
-## 13. Project invariants (spec-tier)
-
-Recorded at the spec because no code exists yet. Each promotes to an enforced test / type / asserted
-check when code able to violate it is first written (per project conventions). The chunk-start
-triage gate resolves these `Lands:` conditions.
+## 13. Project invariants
 
 - **INV-1 — Closure soundness (`valid` requires proof).** pew reports `valid` only when all six
   guards (§7) provably hold over a closure that is a *superset* of the source able to affect `B`'s
@@ -686,17 +705,15 @@ triage gate resolves these `Lands:` conditions.
   set; absence of proof yields `unverifiable`, never `valid`. *Violation (strongest):* a reachable
   `const`/type/embed `B` depends on changes while `B`'s call graph is byte-identical, the closure
   hash is unchanged, and `B` is reported `valid` → silent regression behind a stale baseline (the
-  core failure pew exists to prevent). *Kind:* entailed. *Lands:* when closure analysis is first
-  implemented.
+  core failure pew exists to prevent). *Kind:* entailed.
 - **INV-2 — Validity verdict.** `B` is `valid` for HEAD iff *all six* guards hold **and** its
   closure reaches no unhashable external dependence (Class B, §7.3); any guard failing ⇒ `stale`;
   guards holding but a Class-B dependence present ⇒ `unverifiable`. *Violation:* e.g. toolchain
   changed but reported valid, or a benchmark reading an external file reported valid after the file
-  changed. *Kind:* clause-explicit (§7). *Lands:* when the staleness check is implemented.
+  changed. *Kind:* clause-explicit (§7).
 - **INV-3 — Artifact format compatibility.** Every stored `.txt` is a well-formed Go
   benchmark-format file parseable by `benchfmt` and plain `benchstat`. *Violation:* a written file
   that `benchfmt` rejects → ecosystem lock-in, G5 broken. *Kind:* clause-explicit (§5, G5).
-  *Lands:* when the storage writer is implemented.
 - **INV-4 — Provenance completeness.** Every stored result carries the provenance and manifests
   required to evaluate all six guards: `pew run` always writes the commit, the runtime-input
   manifest (empty when the run observed nothing, §7.8), and the four environment guard lines.
@@ -704,30 +721,28 @@ triage gate resolves these `Lands:` conditions.
   undecidable → must conservatively re-run, defeating G1/G2. (A recording carrying *no* manifest at
   all is the recorded assertion of no observed inputs, §7.8 — not a completeness violation; a
   recorded `pew-runtime` digest without its manifest is corruption, and stale.) *Kind:*
-  entailed. *Lands:* when the storage writer is implemented.
+  entailed.
 - **INV-5 — Derived state is never authoritative.** Persisted closure hashes are a memoization keyed
   *only* by immutable inputs `(commit, toolchain, buildconfig)`; they are never the source of truth
   for provenance and recomputing/discarding them never changes a validity verdict. *Violation:* a
   validity check trusts a cached hash that disagrees with recomputation from source → INV-1 bypassed
-  via a stale cache. *Kind:* entailed. *Lands:* when the closure cache is implemented.
+  via a stale cache. *Kind:* entailed.
 - **INV-6 — Validity is commit-sha-independent.** The validity predicate (§7) depends only on
-  `closure ∧ runtime-inputs ∧ toolchain ∧ machine ∧ buildconfig`; it never reads the raw commit sha. *Violation:*
+  `closure ∧ runtime-inputs ∧ toolchain ∧ machine ∧ buildconfig ∧ runtimeconfig`; it never reads the raw commit sha. *Violation:*
   two records identical in closure/toolchain/machine/buildconfig but differing in commit sha get
   different validity verdicts → every commit invalidates every benchmark → G2 (avoid wasted runs)
   defeated and the closure analysis rendered moot (the §5.1 trap). *Kind:* entailed. *Anchor test:*
-  two records differing only in commit sha ⇒ both valid. *Lands:* when the staleness check is
-  implemented.
+  two records differing only in commit sha ⇒ both valid.
 - **INV-7 — Closure includes non-call dependencies.** The closure covers not only call-reachable
   functions but the `const`/type/package-var declarations they reference, the `init`/var-init of
   contributing packages, and `go:embed`-ed files (§7.1). *Violation:* flipping a referenced
   `const BufSize` (4096→8192), changing a referenced struct's field layout, or editing an embedded
   data file leaves the hash unchanged → `B` reported `valid` while its behavior moved. *Kind:*
   entailed. *Anchor tests:* const-flip, struct-field change, embed-file edit ⇒ each reports stale.
-  *Lands:* when closure analysis is first implemented.
 - **INV-8 — Mutable-local deps are hashed by content.** Any reachable dependency whose resolved
   source is *not* under `GOMODCACHE` (local `replace => ./path`, `go.work use`, `vendor/`) is hashed
   by its source content, never pinned by `(module, version)` (§7.7). *Violation:* `B` reaches a
   locally-replaced dep; the dep's reachable source changes; `go.mod`/`go.sum` untouched; version-
   pinning → hash unchanged → `B` reported `valid` while its dependency moved → false-`valid`.
   *Kind:* entailed. *Anchor test:* edit a locally-replaced dep's reachable code without touching
-  `go.mod` ⇒ `B` reports stale. *Lands:* when closure analysis handles dependencies.
+  `go.mod` ⇒ `B` reports stale.

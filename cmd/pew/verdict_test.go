@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gofresh/guard"
 	"golang.org/x/perf/benchfmt"
 )
 
@@ -51,10 +52,11 @@ func TestFingerprintFromConfig(t *testing.T) {
 		{Key: "pew-closure", Value: []byte("cl")},
 		{Key: "pew-runtime", Value: []byte("rd")},
 		{Key: "pew-runtime-inputs", Value: []byte("manifest")},
+		{Key: "pew-purity", Value: []byte("source directive")},
 		{Key: "pure", Value: []byte("true")},
 	}
 	fp, pure := fingerprintFromConfig(cfg)
-	if fp.Closure != "cl" || fp.RuntimeInputs != "manifest" || fp.RuntimeDigest != "rd" {
+	if fp.MaximalClosure != "cl" || fp.RuntimeInputs != "manifest" || fp.RuntimeDigest != "rd" || fp.PurityAssertion != "source directive" || fp.ResultKind != gofresh.Measurement {
 		t.Errorf("fingerprint closure/runtime fields = %+v", fp)
 	}
 	g := fp.Guards
@@ -66,7 +68,7 @@ func TestFingerprintFromConfig(t *testing.T) {
 	}
 
 	fp, pure = fingerprintFromConfig(nil)
-	if fp != (gofresh.Fingerprint{}) || pure != "" {
-		t.Errorf("empty config: fp=%+v pure=%q, want zero values", fp, pure)
+	if fp.ResultKind != gofresh.Measurement || fp.MaximalClosure != "" || fp.Guards != (guard.Guards{}) || pure != "" {
+		t.Errorf("empty config: fp=%+v pure=%q, want empty measurement", fp, pure)
 	}
 }

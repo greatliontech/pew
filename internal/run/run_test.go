@@ -61,6 +61,9 @@ func TestRecordedConfigSerializable(t *testing.T) {
 	if !PureConfig("true").File {
 		t.Error("pure config must have File:true")
 	}
+	if cfg := GofreshPurityConfig("source directive"); !cfg.File || cfg.Key != "pew-purity" || string(cfg.Value) != "source directive" {
+		t.Errorf("gofresh purity config = %+v", cfg)
+	}
 	for _, cfg := range RuntimeConfig("rt1", "manifest1") {
 		if !cfg.File {
 			t.Errorf("%s config must have File:true", cfg.Key)

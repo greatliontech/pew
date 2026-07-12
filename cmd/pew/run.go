@@ -5,7 +5,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	gofresh "github.com/greatliontech/gofresh"
@@ -83,20 +85,27 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 			return fmt.Errorf("run: refusing to run under noisy conditions (--strict)")
 		}
 	}
-	e, err := newEngine(pkgs)
-	if err != nil {
-		return err
-	}
 	gc := newGitStateCache()
+	for _, p := range pkgs {
+		if p.Module.Dir == "" {
+			continue
+		}
+		_, _ = gc.state(p.Module.Dir)
+	}
 	var failures []string
 	for _, p := range pkgs {
 		if p.Module.Dir == "" {
 			continue
 		}
+		e, err := newEngine(p.Module.Dir)
+		if err != nil {
+			return err
+		}
 		// Like status, a per-package failure (e.g. one that does not build) is
 		// reported and does not abort the rest of the tree.
-		if err := runPackage(w, e, gc, rc, p); err != nil {
-			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
+		runErr := runPackage(w, e, gc, rc, p)
+		if runErr != nil {
+			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, runErr)
 			failures = append(failures, p.ImportPath)
 		}
 	}
@@ -106,30 +115,50 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 	return nil
 }
 
-// gitStateCache memoizes gitblob.State per module dir for one invocation — the
-// worktree status is the documented slow path on large repos (§11), and a
-// multi-package command walks packages of the same module sequentially.
+// gitStateCache pins each module's command-entry state. Later package runs can
+// exclude recording writes made by earlier packages without changing the
+// provenance recorded for the command.
 type gitStateCache struct {
 	entries map[string]gitStateResult
+	written map[string]map[string]bool
 }
 
 type gitStateResult struct {
-	commit string
-	dirty  bool
-	err    error
+	state gitblob.RepositoryState
+	err   error
 }
 
 func newGitStateCache() *gitStateCache {
-	return &gitStateCache{entries: map[string]gitStateResult{}}
+	return &gitStateCache{
+		entries: map[string]gitStateResult{},
+		written: map[string]map[string]bool{},
+	}
 }
 
-func (c *gitStateCache) state(moduleDir string) (string, bool, error) {
+func (c *gitStateCache) state(moduleDir string) (gitblob.RepositoryState, error) {
 	if r, ok := c.entries[moduleDir]; ok {
-		return r.commit, r.dirty, r.err
+		return r.state, r.err
 	}
-	commit, dirty, err := gitblob.State(moduleDir)
-	c.entries[moduleDir] = gitStateResult{commit: commit, dirty: dirty, err: err}
-	return commit, dirty, err
+	state, err := gitblob.Snapshot(moduleDir)
+	c.entries[moduleDir] = gitStateResult{state: state, err: err}
+	return state, err
+}
+
+func (c *gitStateCache) writtenPaths(repoRoot string) []string {
+	paths := make([]string, 0, len(c.written[repoRoot]))
+	for path := range c.written[repoRoot] {
+		paths = append(paths, path)
+	}
+	return paths
+}
+
+func (c *gitStateCache) recordWrites(repoRoot string, paths []string) {
+	if c.written[repoRoot] == nil {
+		c.written[repoRoot] = map[string]bool{}
+	}
+	for _, path := range paths {
+		c.written[repoRoot][path] = true
+	}
 }
 
 func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig, p pkgMeta) error {
@@ -140,36 +169,69 @@ func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig,
 	if len(benches) == 0 {
 		return nil
 	}
-	commit, dirty, err := gc.state(p.Module.Dir)
+	runBenches, err := matchingBenchmarks(benches, rc.opts.Bench)
 	if err != nil {
 		return err
+	}
+	if len(runBenches) == 0 {
+		return nil
 	}
 	dir := rc.benchDir
 	if dir == "" {
 		dir = filepath.Join(p.Module.Dir, "benchmarks")
 	}
+	dir, err = filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
 	st := store.New(dir)
 	pkgRel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, p.Module.Path), "/")
+	baseline, err := gc.state(p.Module.Dir)
+	if err != nil {
+		return err
+	}
+	commit, initialDirty := baseline.Commit, baseline.Dirty
 
 	opts := rc.opts
 	if rc.staleOnly {
-		need, err := nonValid(st, e, p.ImportPath, pkgRel, p.Module.Dir, rc.label, benches)
+		need, err := nonValid(st, e, p.ImportPath, pkgRel, p.Module.Dir, rc.label, runBenches)
 		if err != nil {
 			return err
 		}
+		need = requiredBenchmarks(runBenches, need, rc.impure)
 		if len(need) == 0 {
 			fmt.Fprintf(w, "%s: all benchmarks valid, nothing to run\n", p.ImportPath)
 			return nil
 		}
-		opts.Bench = "^(" + strings.Join(need, "|") + ")$"
+		opts.Bench, err = restrictBenchmarkPattern(opts.Bench, need)
+		if err != nil {
+			return err
+		}
+		runBenches = need
+	}
+	startState, err := gitblob.Snapshot(p.Module.Dir)
+	if err != nil {
+		return err
+	}
+	if !baseline.EqualExceptPaths(startState, gc.writtenPaths(baseline.Root())) {
+		return fmt.Errorf("repository state moved before benchmark run")
 	}
 
-	// Capture before the run executes: the recording's guard lines must describe
-	// the environment that produced the numbers, and the engine memoizes guards
-	// per module, so the per-benchmark Captures below reuse these pre-run values
-	// even if the toolchain or build env moves mid-run.
-	if _, err := e.Capture(gofresh.Subject{Package: p.ImportPath, Symbol: benches[0]}, p.Module.Dir); err != nil {
+	subjects := make([]gofresh.Subject, 0, len(runBenches))
+	for _, name := range runBenches {
+		subjects = append(subjects, gofresh.Subject{Package: p.ImportPath, Symbol: name})
+	}
+	view, err := e.NewViewFor(subjects, p.Module.Dir, gofresh.Measurement)
+	if err != nil {
 		return err
+	}
+	fingerprints := make(map[string]gofresh.Fingerprint, len(subjects))
+	for _, subject := range subjects {
+		fp, err := view.Capture(subject)
+		if err != nil {
+			return err
+		}
+		fingerprints[subject.Symbol] = fp
 	}
 
 	// A benchmark failure makes `go test` exit non-zero and discards the whole
@@ -197,33 +259,59 @@ func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig,
 	if err != nil {
 		return err
 	}
-	if !dirty {
-		uncommitted, err := runtimeInputsUncommitted(p.Module.Dir, commit, runtimeState.Manifest)
-		if err != nil {
-			return err
-		}
-		dirty = uncommitted
-	}
 	results, err := run.Parse(out)
 	if err != nil {
 		return err
 	}
 
-	written := []string{}
-	// The guard values are uniform per module (memoized inside the engine); the
-	// closure hash is per benchmark (Tier-2, §7.1). Capture returns both, so the
-	// provenance lines are appended per benchmark from its fingerprint.
-	for name, recs := range run.Demux(results, nil) {
-		fp, err := e.Capture(gofresh.Subject{Package: p.ImportPath, Symbol: name}, p.Module.Dir)
+	groups := run.Demux(results, nil)
+	if err := requireBenchmarkGroups(runBenches, groups); err != nil {
+		return err
+	}
+	if err := view.Validate(); err != nil {
+		return err
+	}
+	runtimeState, err = runtimeinput.Merge(p.Module.Dir, runtimeState)
+	if err != nil {
+		return err
+	}
+	dirty := initialDirty
+	if !dirty {
+		dirty, err = sourceInputsDirty(p.Module.Dir, commit, view.SourceFiles())
 		if err != nil {
 			return err
+		}
+	}
+	if !dirty {
+		dirty, err = runtimeInputsDirty(p.Module.Dir, commit, runtimeState)
+		if err != nil {
+			return err
+		}
+	}
+	finalState, err := gitblob.Snapshot(p.Module.Dir)
+	if err != nil {
+		return err
+	}
+	if !startState.Equal(finalState) {
+		return fmt.Errorf("repository state moved during benchmark run")
+	}
+
+	written := []string{}
+	var writes []store.WriteRequest
+	for name, recs := range groups {
+		fp, ok := fingerprints[name]
+		if !ok {
+			return fmt.Errorf("benchmark %s was not captured in the producer view", name)
 		}
 		for _, cfg := range run.ProvenanceConfig(commit, dirty, fp.Guards) {
 			recs = withConfig(recs, cfg)
 		}
-		recs = withConfig(recs, run.ClosureConfig(fp.Closure))
+		recs = withConfig(recs, run.ClosureConfig(fp.MaximalClosure))
 		for _, cfg := range run.RuntimeConfig(runtimeState.Digest, runtimeState.Manifest) {
 			recs = withConfig(recs, cfg)
+		}
+		if fp.PurityAssertion != "" {
+			recs = withConfig(recs, run.GofreshPurityConfig(fp.PurityAssertion))
 		}
 		// Purity flags are per-benchmark (spec §7.5): apply only to the named ones.
 		if rc.pure[name] {
@@ -231,16 +319,196 @@ func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig,
 		} else if rc.impure[name] {
 			recs = withConfig(recs, run.PureConfig("false"))
 		}
-		if err := st.Write(pkgRel, name, rc.label, recs); err != nil {
-			return err
-		}
+		writes = append(writes, store.WriteRequest{PkgRel: pkgRel, Bench: name, Label: rc.label, Results: recs})
 		written = append(written, name)
 	}
+	sort.Slice(writes, func(i, j int) bool { return writes[i].Bench < writes[j].Bench })
+	recordingPaths := make([]string, 0, len(writes))
+	for _, write := range writes {
+		path, err := st.Path(write.PkgRel, write.Bench, write.Label)
+		if err != nil {
+			return err
+		}
+		recordingPaths = append(recordingPaths, path)
+	}
+	if err := rejectRecordingDestinations(runtimeState, p.Module.Dir, view.SourceFiles(), recordingPaths); err != nil {
+		return err
+	}
+	if err := view.Validate(); err != nil {
+		return err
+	}
+	if _, err := runtimeinput.Merge(p.Module.Dir, runtimeState); err != nil {
+		return err
+	}
+	stateAtWrite, err := gitblob.Snapshot(p.Module.Dir)
+	if err != nil {
+		return err
+	}
+	if !finalState.Equal(stateAtWrite) {
+		return fmt.Errorf("repository state moved during benchmark validation")
+	}
+	if err := st.WriteBatch(writes); err != nil {
+		return err
+	}
+	gc.recordWrites(baseline.Root(), recordingPaths)
 	sort.Strings(written)
 	for _, name := range written {
 		fmt.Fprintf(w, "recorded     %s.%s\n", p.ImportPath, name)
 	}
 	return nil
+}
+
+func requireBenchmarkGroups(names []string, groups map[string][]*benchfmt.Result) error {
+	for _, name := range names {
+		if len(groups[name]) == 0 {
+			return fmt.Errorf("benchmark %s produced no result", name)
+		}
+	}
+	return nil
+}
+
+func matchingBenchmarks(names []string, pattern string) ([]string, error) {
+	alternatives, err := splitBenchmarkPattern(pattern)
+	if err != nil {
+		return nil, err
+	}
+	first := make([]*regexp.Regexp, 0, len(alternatives))
+	for _, alternative := range alternatives {
+		first = append(first, regexp.MustCompile(alternative[0]))
+	}
+	var matched []string
+	for _, name := range names {
+		for _, re := range first {
+			if re.MatchString(name) {
+				matched = append(matched, name)
+				break
+			}
+		}
+	}
+	return matched, nil
+}
+
+func restrictBenchmarkPattern(pattern string, names []string) (string, error) {
+	alternatives, err := splitBenchmarkPattern(pattern)
+	if err != nil {
+		return "", err
+	}
+	var restricted []string
+	for _, alternative := range alternatives {
+		re := regexp.MustCompile(alternative[0])
+		var matched []string
+		for _, name := range names {
+			if re.MatchString(name) {
+				matched = append(matched, regexp.QuoteMeta(name))
+			}
+		}
+		if len(matched) == 0 {
+			continue
+		}
+		alternative[0] = "^(?:" + strings.Join(matched, "|") + ")$"
+		restricted = append(restricted, strings.Join(alternative, "/"))
+	}
+	return strings.Join(restricted, "|"), nil
+}
+
+// splitBenchmarkPattern mirrors testing's slash- and alternation-aware matcher.
+func splitBenchmarkPattern(pattern string) ([][]string, error) {
+	var alternatives [][]string
+	var parts []string
+	start, brackets, parens := 0, 0, 0
+	for i := 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '[':
+			brackets++
+		case ']':
+			if brackets > 0 {
+				brackets--
+			}
+		case '(':
+			if brackets == 0 {
+				parens++
+			}
+		case ')':
+			if brackets == 0 {
+				parens--
+			}
+		case '\\':
+			i++
+		case '/', '|':
+			if brackets != 0 || parens != 0 {
+				continue
+			}
+			parts = append(parts, pattern[start:i])
+			start = i + 1
+			if pattern[i] == '|' {
+				alternatives = append(alternatives, parts)
+				parts = nil
+			}
+		}
+	}
+	parts = append(parts, pattern[start:])
+	alternatives = append(alternatives, parts)
+	for _, alternative := range alternatives {
+		for i, part := range alternative {
+			part = rewriteBenchmarkPattern(part)
+			alternative[i] = part
+			if _, err := regexp.Compile(part); err != nil {
+				return nil, fmt.Errorf("invalid benchmark pattern %q: %w", pattern, err)
+			}
+		}
+	}
+	return alternatives, nil
+}
+
+func rewriteBenchmarkPattern(pattern string) string {
+	var rewritten []byte
+	for _, r := range pattern {
+		switch {
+		case benchmarkPatternSpace(r):
+			rewritten = append(rewritten, '_')
+		case !strconv.IsPrint(r):
+			quoted := strconv.QuoteRune(r)
+			rewritten = append(rewritten, quoted[1:len(quoted)-1]...)
+		default:
+			rewritten = append(rewritten, string(r)...)
+		}
+	}
+	return string(rewritten)
+}
+
+func benchmarkPatternSpace(r rune) bool {
+	if r < 0x2000 {
+		switch r {
+		case '\t', '\n', '\v', '\f', '\r', ' ', 0x85, 0xa0, 0x1680:
+			return true
+		}
+		return false
+	}
+	if r <= 0x200a {
+		return true
+	}
+	switch r {
+	case 0x2028, 0x2029, 0x202f, 0x205f, 0x3000:
+		return true
+	}
+	return false
+}
+
+func requiredBenchmarks(all, stale []string, impure map[string]bool) []string {
+	selected := make(map[string]bool, len(stale)+len(impure))
+	for _, name := range stale {
+		selected[name] = true
+	}
+	for name := range impure {
+		selected[name] = true
+	}
+	result := make([]string, 0, len(selected))
+	for _, name := range all {
+		if selected[name] {
+			result = append(result, name)
+		}
+	}
+	return result
 }
 
 func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {
@@ -250,30 +518,25 @@ func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {
 	return recs
 }
 
-// moduleInspector adapts gitblob's absolute-path ExistsAt to gofresh's
+// moduleInspector adapts gitblob's absolute-path reproducibility check to Gofresh's
 // module-relative CommitInspector.
 type moduleInspector struct {
 	repo      *gitblob.Repo
 	moduleDir string
 }
 
-func (m moduleInspector) ExistsAt(commit, moduleRelPath string) (bool, error) {
-	return m.repo.ExistsAt(commit, filepath.Join(m.moduleDir, filepath.FromSlash(moduleRelPath)))
+func (m moduleInspector) ReproducibleAt(commit, moduleRelPath string) (bool, error) {
+	return m.repo.ReproducibleAtWithin(commit, filepath.Join(m.moduleDir, filepath.FromSlash(moduleRelPath)), m.moduleDir)
 }
 
-// runtimeInputsUncommitted reports whether any module-local runtime input in the
-// manifest is absent at commit — ignored via .gitignore, untracked, or created
-// during the run — so a recording backed by it is not reproducible from that commit
-// and must be marked dirty (§5, §7.8, §10). Untracked and modified-tracked inputs
-// already flip the git-status dirty flag; this additionally catches .gitignore'd
-// inputs, which git status excludes from the worktree status. External (absolute)
-// inputs are outside the module's git scope and not considered here.
-func runtimeInputsUncommitted(moduleDir, commit, manifest string) (bool, error) {
+// runtimeInputsDirty reports whether any module-local runtime input state is not
+// reproducible from commit (§5, §7.8, §10).
+func runtimeInputsDirty(moduleDir, commit string, state runtimeinput.State) (bool, error) {
 	repo, err := gitblob.Open(moduleDir)
 	if err != nil {
 		return false, err
 	}
-	return runtimeinput.Uncommitted(manifest, commit, moduleInspector{repo: repo, moduleDir: moduleDir})
+	return runtimeinput.Dirty(state, moduleDir, commit, moduleInspector{repo: repo, moduleDir: moduleDir})
 }
 
 func nonValid(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, label string, benches []string) ([]string, error) {

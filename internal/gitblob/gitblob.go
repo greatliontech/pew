@@ -78,42 +78,6 @@ func (r *Repo) ReadAt(ref, absPath string) (content []byte, ok bool, err error) 
 	return []byte(s), true, nil
 }
 
-// ExistsAt reports whether absPath is present in ref's tree — as a file (blob) or a
-// directory (subtree). It decides whether a runtime input is reproducible from a
-// commit: a module-local input absent at the recording's commit (ignored, untracked,
-// or created during the run) is not faithfully described by that commit, so the
-// recording is marked dirty (§5, §7.8). A missing path is (false, nil); a bad ref is
-// an error.
-func (r *Repo) ExistsAt(ref, absPath string) (bool, error) {
-	rel, err := r.relPath(absPath)
-	if err != nil {
-		return false, err
-	}
-	rel = filepath.ToSlash(rel)
-	if rel == "." || rel == "" {
-		return true, nil // the worktree root is the tree itself
-	}
-	h, err := r.repo.ResolveRevision(plumbing.Revision(ref))
-	if err != nil {
-		return false, fmt.Errorf("gitblob: resolve ref %q: %w", ref, err)
-	}
-	commit, err := r.repo.CommitObject(*h)
-	if err != nil {
-		return false, fmt.Errorf("gitblob: commit %s: %w", h, err)
-	}
-	tree, err := commit.Tree()
-	if err != nil {
-		return false, fmt.Errorf("gitblob: tree %s: %w", h, err)
-	}
-	if _, err := tree.FindEntry(rel); err != nil {
-		if errors.Is(err, object.ErrEntryNotFound) || errors.Is(err, object.ErrDirectoryNotFound) {
-			return false, nil
-		}
-		return false, fmt.Errorf("gitblob: find %s@%s: %w", rel, ref, err)
-	}
-	return true, nil
-}
-
 // ListAt returns the absolute worktree paths of files committed under absDir at
 // ref. A missing directory is an expected empty result; a bad ref is an error.
 func (r *Repo) ListAt(ref, absDir string) ([]string, error) {

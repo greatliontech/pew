@@ -459,7 +459,7 @@ func TestNonValidUsesLabel(t *testing.T) {
 	}
 	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
 	const bench = "BenchmarkDecode"
-	fp, err := e.Capture(gofresh.Subject{Package: pkg, Symbol: bench}, ".")
+	fp, err := e.CaptureFor(gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
@@ -481,6 +481,7 @@ func TestNonValidUsesLabel(t *testing.T) {
 			{Key: "pew-closure", Value: []byte(hash), File: true},
 			{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
 			{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
+			{Key: "pew-purity", Value: []byte(fp.PurityAssertion), File: true},
 			{Key: "dirty", Value: []byte("false"), File: true},
 		}
 		recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
@@ -488,8 +489,8 @@ func TestNonValidUsesLabel(t *testing.T) {
 			t.Fatalf("Write(%q): %v", label, err)
 		}
 	}
-	write("", fp.Closure)
-	write("x", fp.Closure+"-stale")
+	write("", fp.MaximalClosure)
+	write("x", fp.MaximalClosure+"-stale")
 
 	need, err := nonValid(st, e, pkg, "", ".", "x", []string{bench})
 	if err != nil {
@@ -518,7 +519,7 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 	}
 	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
 	const bench = "BenchmarkDecode"
-	fp, err := e.Capture(gofresh.Subject{Package: pkg, Symbol: bench}, ".")
+	fp, err := e.CaptureFor(gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
@@ -528,7 +529,7 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 		{Key: "machine", Value: []byte("some-other-machine"), File: true},
 		{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
 		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
-		{Key: "pew-closure", Value: []byte(fp.Closure), File: true},
+		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
 	}
 	recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
 	if err := st.Write("", bench, "", recs); err != nil {
@@ -549,7 +550,7 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 		{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
 		{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
 		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
-		{Key: "pew-closure", Value: []byte(fp.Closure), File: true},
+		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
 		{Key: "pure", Value: []byte("false"), File: true},
 	}
 	impRecs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: impCfg}}

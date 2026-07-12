@@ -105,6 +105,11 @@ func ClosureConfig(hash string) benchfmt.Config {
 	return benchfmt.Config{Key: "pew-closure", Value: []byte(hash), File: true}
 }
 
+// GofreshPurityConfig records the attributable purity evidence used by capture.
+func GofreshPurityConfig(attribution string) benchfmt.Config {
+	return benchfmt.Config{Key: "pew-purity", Value: []byte(attribution), File: true}
+}
+
 // PureConfig is the recorded purity flag ("true" for --assume-pure, "false" for
 // --impure). File:true so it serializes.
 func PureConfig(v string) benchfmt.Config {

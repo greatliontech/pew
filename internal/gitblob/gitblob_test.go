@@ -118,54 +118,6 @@ func TestRelPathOutsideRepo(t *testing.T) {
 	}
 }
 
-func TestExistsAt(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "data"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "data", "fixture.txt"), []byte("y"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := gogit.PlainInit(dir, false)
-	if err != nil {
-		t.Fatalf("git init: %v", err)
-	}
-	ref := commitAll(t, raw)
-	// Created after the commit → present on disk, absent from the tree.
-	if err := os.WriteFile(filepath.Join(dir, "uncommitted.dat"), []byte("z"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	repo, err := Open(dir)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	for _, tc := range []struct {
-		name, path string
-		want       bool
-	}{
-		{"tracked file", "tracked.txt", true},
-		{"tracked directory", "data", true},
-		{"tracked nested file", "data/fixture.txt", true},
-		{"uncommitted file", "uncommitted.dat", false},
-		{"missing path", "nope.txt", false},
-		{"missing under dir", "data/nope.txt", false},
-	} {
-		got, err := repo.ExistsAt(ref.String(), filepath.Join(dir, filepath.FromSlash(tc.path)))
-		if err != nil {
-			t.Fatalf("%s: ExistsAt: %v", tc.name, err)
-		}
-		if got != tc.want {
-			t.Errorf("%s: ExistsAt = %v, want %v", tc.name, got, tc.want)
-		}
-	}
-	if _, err := repo.ExistsAt("no-such-ref", filepath.Join(dir, "tracked.txt")); err == nil {
-		t.Error("ExistsAt with a bad ref: want error, got nil")
-	}
-}
-
 func openRepo(t *testing.T) *Repo {
 	t.Helper()
 	wd, err := filepath.Abs(".")

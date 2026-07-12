@@ -26,6 +26,14 @@ type Store struct {
 	Root string
 }
 
+// WriteRequest is one recording in an atomic package write.
+type WriteRequest struct {
+	PkgRel  string
+	Bench   string
+	Label   string
+	Results []*benchfmt.Result
+}
+
 // Recording is one benchmark recording present in a Store.
 type Recording struct {
 	PkgRel string
@@ -109,29 +117,170 @@ func (s *Store) Write(pkgRel, bench, label string, results []*benchfmt.Result) e
 	if err := s.ensureDir(dir); err != nil {
 		return err
 	}
-
 	var buf bytes.Buffer
 	w := benchfmt.NewWriter(&buf)
-	for _, r := range results {
-		if err := w.Write(r); err != nil {
+	for _, result := range results {
+		if err := w.Write(result); err != nil {
 			return fmt.Errorf("store: encode %s: %w", bench, err)
 		}
 	}
-
-	tmp, err := os.CreateTemp(dir, ".pew-*.tmp")
+	temp, err := os.CreateTemp(dir, ".pew-*.tmp")
 	if err != nil {
 		return err
 	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once renamed
-	if _, err := tmp.Write(buf.Bytes()); err != nil {
-		tmp.Close()
+	tempName := temp.Name()
+	defer os.Remove(tempName)
+	if _, err := temp.Write(buf.Bytes()); err != nil {
+		temp.Close()
 		return err
 	}
-	if err := tmp.Close(); err != nil {
+	if err := temp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	return os.Rename(tempName, path)
+}
+
+// WriteBatch replaces a set of recordings transactionally for every returned
+// error. Every destination is encoded and staged before any existing recording
+// moves; a commit failure restores the complete prior set. Sudden process death may
+// leave canonical paths absent, which is safe because absence reruns regenerable
+// recordings; it never exposes a torn file as a recording.
+func (s *Store) WriteBatch(requests []WriteRequest) error {
+	return s.writeBatch(requests, nil)
+}
+
+func (s *Store) writeBatch(requests []WriteRequest, beforeInstall func()) error {
+	type stagedWrite struct {
+		path, temp, backup string
+		existed            bool
+		installed          bool
+	}
+	staged := make([]stagedWrite, 0, len(requests))
+	destinations := make(map[string]bool, len(requests))
+	cleanupTemps := func() {
+		for _, item := range staged {
+			if item.temp != "" {
+				_ = os.Remove(item.temp)
+			}
+		}
+	}
+	for _, request := range requests {
+		if len(request.Results) == 0 {
+			cleanupTemps()
+			return fmt.Errorf("store: refusing to write empty recording for %s", request.Bench)
+		}
+		path, err := s.Path(request.PkgRel, request.Bench, request.Label)
+		if err != nil {
+			cleanupTemps()
+			return err
+		}
+		if destinations[path] {
+			cleanupTemps()
+			return fmt.Errorf("store: duplicate recording destination: %s", path)
+		}
+		destinations[path] = true
+		if info, err := os.Lstat(path); err == nil {
+			if !info.Mode().IsRegular() {
+				cleanupTemps()
+				return fmt.Errorf("store: recording destination is not a regular file: %s", path)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			cleanupTemps()
+			return err
+		}
+		dir := filepath.Dir(path)
+		if err := s.ensureDir(dir); err != nil {
+			cleanupTemps()
+			return err
+		}
+		var buf bytes.Buffer
+		writer := benchfmt.NewWriter(&buf)
+		for _, result := range request.Results {
+			if err := writer.Write(result); err != nil {
+				cleanupTemps()
+				return fmt.Errorf("store: encode %s: %w", request.Bench, err)
+			}
+		}
+		temp, err := os.CreateTemp(dir, ".pew-*.tmp")
+		if err != nil {
+			cleanupTemps()
+			return err
+		}
+		name := temp.Name()
+		if _, err := temp.Write(buf.Bytes()); err != nil {
+			temp.Close()
+			_ = os.Remove(name)
+			cleanupTemps()
+			return err
+		}
+		if err := temp.Close(); err != nil {
+			_ = os.Remove(name)
+			cleanupTemps()
+			return err
+		}
+		_, err = os.Lstat(path)
+		staged = append(staged, stagedWrite{path: path, temp: name, existed: err == nil})
+	}
+
+	rollback := func() error {
+		var errs []error
+		for i := len(staged) - 1; i >= 0; i-- {
+			item := &staged[i]
+			if item.installed {
+				if err := os.Remove(item.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+					errs = append(errs, err)
+				}
+			}
+			if item.backup != "" {
+				if err := os.Rename(item.backup, item.path); err != nil {
+					errs = append(errs, err)
+				}
+			}
+		}
+		cleanupTemps()
+		return errors.Join(errs...)
+	}
+	for i := range staged {
+		item := &staged[i]
+		if !item.existed {
+			continue
+		}
+		backup, err := os.CreateTemp(filepath.Dir(item.path), ".pew-backup-*.tmp")
+		if err != nil {
+			return errors.Join(err, rollback())
+		}
+		backupName := backup.Name()
+		if err := backup.Close(); err != nil {
+			_ = os.Remove(backupName)
+			return errors.Join(err, rollback())
+		}
+		if err := os.Remove(backupName); err != nil {
+			return errors.Join(err, rollback())
+		}
+		if err := os.Rename(item.path, backupName); err != nil {
+			return errors.Join(err, rollback())
+		}
+		item.backup = backupName
+	}
+	if beforeInstall != nil {
+		beforeInstall()
+	}
+	for i := range staged {
+		item := &staged[i]
+		if err := os.Rename(item.temp, item.path); err != nil {
+			return errors.Join(err, rollback())
+		}
+		item.temp = ""
+		item.installed = true
+	}
+	for _, item := range staged {
+		if item.backup != "" {
+			// The new set is already committed. Cleanup residue is ignored rather
+			// than reporting a failure that cannot restore the prior set.
+			_ = os.Remove(item.backup)
+		}
+	}
+	return nil
 }
 
 // Read parses the recording for (pkgRel, bench, label). The returned results are

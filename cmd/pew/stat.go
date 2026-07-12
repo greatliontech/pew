@@ -185,12 +185,7 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 	// stat honors //gofresh:pure directives exactly as status and run do (§7.5:
 	// every consumer of the shared engine). In A/B mode both sides are historical
 	// recordings and no staleness check applies.
-	var engine *gofresh.Engine
-	if bl.newRef == "" {
-		if engine, err = newEngine(pkgs); err != nil {
-			return err
-		}
-	}
+	engines := map[string]*gofresh.Engine{}
 
 	for _, m := range modules {
 		if err := addStatInventory(m, bl, sc.label); err != nil {
@@ -232,7 +227,15 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 					// Best-effort: a check failure warns but never blocks the comparison.
 					fp, pure := fingerprintFromConfig(newRecs[0].Config)
 					subj := gofresh.Subject{Package: cur.importPath, Symbol: key.bench}
-					if v, e := engine.Check(fp, subj, cur.moduleDir, gofresh.Measurement); e != nil {
+					engine := engines[cur.moduleDir]
+					if engine == nil {
+						engine, err = newEngine(cur.moduleDir)
+						if err != nil {
+							return err
+						}
+						engines[cur.moduleDir] = engine
+					}
+					if v, e := engine.Check(fp, subj, cur.moduleDir); e != nil {
 						fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, e)
 					} else if v = applyPurity(v, pure); v.Status != gofresh.Valid {
 						msg := string(v.Status)
