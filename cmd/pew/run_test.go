@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,58 +12,11 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/gitblob"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
 )
-
-// TestRuntimeInputsUncommitted pins the dirty-marking (§5, §7.8, Q3-A): a runtime
-// input under the module but absent at the run commit (e.g. a .gitignore'd fixture,
-// created after commit) makes the recording not reproducible from that commit, so
-// it is marked dirty; a committed input does not.
-func TestRuntimeInputsUncommitted(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "committed.txt"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := gogit.PlainInit(dir, false)
-	if err != nil {
-		t.Fatalf("git init: %v", err)
-	}
-	wt, err := raw.Worktree()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := wt.AddGlob("."); err != nil {
-		t.Fatal(err)
-	}
-	commit, err := wt.Commit("c", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// An input created after the commit (stands in for a .gitignore'd/untracked fixture).
-	if err := os.WriteFile(filepath.Join(dir, "secret.dat"), []byte("s"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	stateFor := func(rel string) runtimeinput.State {
-		t.Helper()
-		st, err := runtimeinput.FromTestLog([]byte("# test log\nopen "+rel+"\n"), dir, dir)
-		if err != nil {
-			t.Fatalf("FromTestLog(%s): %v", rel, err)
-		}
-		return st
-	}
-
-	if u, err := runtimeInputsDirty(dir, commit.String(), stateFor("committed.txt")); err != nil || u {
-		t.Errorf("committed input: uncommitted=%v err=%v, want false", u, err)
-	}
-	if u, err := runtimeInputsDirty(dir, commit.String(), stateFor("secret.dat")); err != nil || !u {
-		t.Errorf("uncommitted input: uncommitted=%v err=%v, want true", u, err)
-	}
-}
 
 func TestRequiredBenchmarksIncludesCurrentImpureSelection(t *testing.T) {
 	all := []string{"BenchmarkA", "BenchmarkB", "BenchmarkC"}
@@ -227,6 +181,111 @@ func TestRunRunKeepsSharedRepositoryModulesClean(t *testing.T) {
 	}
 }
 
+func TestRunRecordsIncompleteRuntimeEvidence(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":        "module example.com/incompleterun\n\ngo 1.26.4\n",
+		"bench_test.go": "package incompleterun\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc BenchmarkNoIO(b *testing.B) {}\nfunc BenchmarkReadError(b *testing.B) { _, _ = os.ReadFile(\"transiently-missing.txt\") }\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	benchDir := filepath.Join(t.TempDir(), "benchmarks")
+	withWorkingDir(t, dir)
+
+	var out, errOut bytes.Buffer
+	err = runRun(&out, &errOut, runConfig{
+		benchDir: benchDir,
+		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
+	}, []string{"."})
+	if err != nil {
+		t.Fatalf("runRun: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+	e, err := newEngine(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(benchDir)
+	for _, bench := range []string{"BenchmarkNoIO", "BenchmarkReadError"} {
+		recs, err := st.Read("", bench, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		fp, _ := fingerprintFromConfig(recs[0].Config)
+		if fp.RuntimeInputs == "" || fp.RuntimeDigest == "" {
+			t.Fatalf("%s missing incomplete runtime evidence", bench)
+		}
+		v, reason, err := checkOne(st, e, "example.com/incompleterun", "", dir, bench, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v != verdictUnverifiable || reason != "testlog lacks operation outcome evidence" {
+			t.Fatalf("%s recording = {%s %q}, want unverifiable incomplete observation", bench, v, reason)
+		}
+	}
+}
+
+func TestRunStaleIntersectsBenchmarkPattern(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":        "module example.com/stalefilter\n\ngo 1.26.4\n",
+		"bench_test.go": "package stalefilter\n\nimport \"testing\"\n\nfunc BenchmarkSelected(b *testing.B) {}\nfunc BenchmarkExcluded(b *testing.B) {}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	benchDir := filepath.Join(t.TempDir(), "benchmarks")
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	err = runRun(&out, &errOut, runConfig{
+		benchDir:  benchDir,
+		staleOnly: true,
+		opts:      runpkg.Options{Count: 1, Benchtime: "1x", Bench: "^BenchmarkSelected$"},
+	}, []string{"."})
+	if err != nil {
+		t.Fatalf("runRun: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+	st := store.New(benchDir)
+	if _, err := st.Read("", "BenchmarkSelected", ""); err != nil {
+		t.Fatalf("selected benchmark not recorded: %v", err)
+	}
+	if _, err := st.Read("", "BenchmarkExcluded", ""); !errors.Is(err, store.ErrNotRecorded) {
+		t.Fatalf("excluded benchmark read error = %v, want not recorded", err)
+	}
+}
+
 func TestSourceInputsDirtyIncludesIgnoredAndMetadataStableSource(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{
@@ -306,50 +365,7 @@ func TestRejectRecordingDestinations(t *testing.T) {
 	if err := os.WriteFile(recording, []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLog([]byte("open benchmarks/BenchmarkX.txt\n"), moduleDir, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := rejectRecordingDestinations(state, moduleDir, nil, []string{recording}); err == nil {
-		t.Fatal("recording destination equal to runtime input accepted")
-	}
-	directoryState, err := runtimeinput.FromTestLog([]byte("open benchmarks\n"), moduleDir, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := rejectRecordingDestinations(directoryState, moduleDir, nil, []string{recording}); err == nil {
-		t.Fatal("recording destination beneath runtime input directory accepted")
-	}
-	external := filepath.Join(t.TempDir(), "external.txt")
-	if err := os.WriteFile(external, []byte("old"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	externalState, err := runtimeinput.FromTestLog([]byte("open "+external+"\n"), moduleDir, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := rejectRecordingDestinations(externalState, moduleDir, nil, []string{external}); err == nil {
-		t.Fatal("external recording destination equal to runtime input accepted")
-	}
-	statState, err := runtimeinput.FromTestLog([]byte("stat benchmarks/BenchmarkX.txt\n"), moduleDir, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := rejectRecordingDestinations(statState, moduleDir, nil, []string{recording}); err == nil {
-		t.Fatal("recording destination equal to stat input accepted")
-	}
-	missingExternal := t.TempDir()
-	if err := os.Symlink(missingExternal, filepath.Join(moduleDir, "linked")); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
-	}
-	missingState, err := runtimeinput.FromTestLog([]byte("open linked/missing.txt\n"), moduleDir, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := rejectRecordingDestinations(missingState, moduleDir, nil, []string{filepath.Join(missingExternal, "missing.txt")}); err == nil {
-		t.Fatal("missing runtime input beneath symlinked directory accepted")
-	}
-	if err := rejectRecordingDestinations(state, moduleDir, []string{recording}, []string{recording}); err == nil {
+	if err := rejectRecordingDestinations([]string{recording}, []string{recording}); err == nil {
 		t.Fatal("recording destination equal to source input accepted")
 	}
 	aliasRoot := filepath.Join(t.TempDir(), "module-link")
@@ -357,10 +373,10 @@ func TestRejectRecordingDestinations(t *testing.T) {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 	aliasRecording := filepath.Join(aliasRoot, "benchmarks", "BenchmarkX.txt")
-	if err := rejectRecordingDestinations(state, moduleDir, []string{recording}, []string{aliasRecording}); err == nil {
+	if err := rejectRecordingDestinations([]string{recording}, []string{aliasRecording}); err == nil {
 		t.Fatal("recording destination alias of source input accepted")
 	}
-	if err := rejectRecordingDestinations(state, moduleDir, nil, []string{filepath.Join(benchDir, "BenchmarkY.txt")}); err != nil {
+	if err := rejectRecordingDestinations([]string{recording}, []string{filepath.Join(benchDir, "BenchmarkY.txt")}); err != nil {
 		t.Fatalf("disjoint recording destination rejected: %v", err)
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/compare"
 	"github.com/greatliontech/pew/internal/gitblob"
+	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
 )
@@ -244,6 +245,58 @@ func TestStatABDoesNotDiscoverSiblingModuleOutsideCurrentScope(t *testing.T) {
 	}
 }
 
+func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statdirective\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "bench_test.go"), "package statdirective\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\n//gofresh:pure\nfunc BenchmarkPureRead(b *testing.B) { _, _ = os.ReadFile(\"fixture.txt\") }\n")
+	writeFile(t, filepath.Join(dir, "fixture.txt"), "fixture\n")
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withWorkingDir(t, dir)
+	e, err := newEngine(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := gofresh.Subject{Package: "example.com/statdirective", Symbol: "BenchmarkPureRead"}
+	fp, err := e.CaptureFor(subject, dir, gofresh.Measurement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation, err := runtimeinput.Incomplete(dir, "package-test-binary:example.com/statdirective", "testlog lacks operation outcome evidence")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	cfg := append(runpkg.ProvenanceConfig("c1", false, fp.Guards), runpkg.ClosureConfig(fp.MaximalClosure))
+	cfg = append(cfg, runpkg.RuntimeConfig(observation.Digest, observation.Manifest)...)
+	cfg = append(cfg, runpkg.GofreshPurityConfig(fp.PurityAssertion))
+	recs := []*benchfmt.Result{{Name: benchfmt.Name("PureRead"), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
+	if err := st.Write("", "BenchmarkPureRead", "", recs); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, repo, "recording")
+
+	var out, errOut bytes.Buffer
+	if err := runStat(&out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
+		t.Fatalf("runStat valid: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if strings.Contains(errOut.String(), "is unverifiable") || strings.Contains(errOut.String(), "is stale") {
+		t.Fatalf("directive-backed current recording warned:\n%s", errOut.String())
+	}
+
+	writeFile(t, filepath.Join(dir, "bench_test.go"), "package statdirective\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\n//gofresh:pure\nfunc BenchmarkPureRead(b *testing.B) { _, _ = os.ReadFile(\"fixture.txt\"); b.ReportAllocs() }\n")
+	out.Reset()
+	errOut.Reset()
+	if err := runStat(&out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
+		t.Fatalf("runStat stale: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "is stale (closure)") {
+		t.Fatalf("stale working-tree recording did not warn:\n%s", errOut.String())
+	}
+}
+
 func TestDedupeStatModulesMergesSharedBenchDir(t *testing.T) {
 	shared := filepath.Join(t.TempDir(), "benchmarks")
 	key := statKey{pkgRel: "pkg", bench: "BenchmarkShared"}
@@ -463,7 +516,7 @@ func TestNonValidUsesLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	rt, err := runtimeinput.FromTestLog([]byte("# test log\n"), ".", ".")
+	rt, err := runtimeinput.Incomplete(".", "package-test-binary:non-valid", "testlog lacks operation outcome evidence")
 	if err != nil {
 		t.Fatalf("runtime inputs: %v", err)
 	}

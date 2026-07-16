@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -20,28 +22,28 @@ type Options struct {
 	Bench     string // -bench pattern (default ".")
 }
 
-// TestArgs builds the `go test` argument list for benchmarking pkg. If testlog
-// is non-empty, it enables Go's testlog channel for observed runtime inputs.
-func TestArgs(pkg string, o Options, testlog string) []string {
-	args := []string{
+// TestArgs builds the `go test` argument list for benchmarking pkg.
+func TestArgs(pkg string, o Options) []string {
+	return []string{
 		"test", "-run", "^$", "-bench", o.Bench, "-benchmem",
 		"-count", strconv.Itoa(o.Count), "-benchtime", o.Benchtime, pkg,
 	}
-	if testlog != "" {
-		args = append(args, "-args", "-test.testlogfile="+testlog)
-	}
-	return args
 }
 
 // Execute runs the benchmark command (optionally pinned via `taskset -c <pin>`)
 // in dir and returns stdout (the benchmark-format output).
-func Execute(dir, pin string, args []string) ([]byte, error) {
+func Execute(dir, pin string, env, args []string) ([]byte, error) {
 	name, full := "go", args
 	if pin != "" {
 		name, full = "taskset", append([]string{"-c", pin, "go"}, args...)
 	}
 	cmd := exec.Command(name, full...)
 	cmd.Dir = dir
+	commandEnv, err := commandEnvironment(env, dir)
+	if err != nil {
+		return nil, fmt.Errorf("run: command environment: %w", err)
+	}
+	cmd.Env = commandEnv
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
@@ -49,6 +51,29 @@ func Execute(dir, pin string, args []string) ([]byte, error) {
 			name, strings.Join(full, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
+}
+
+func commandEnvironment(env []string, dir string) ([]string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
+	command := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		name, _, ok := strings.Cut(entry, "=")
+		if ok && equalEnvKey(name, "PWD") {
+			continue
+		}
+		command = append(command, entry)
+	}
+	return append(command, "PWD="+abs), nil
+}
+
+func equalEnvKey(left, right string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }
 
 // Parse reads benchmark-format output into results.

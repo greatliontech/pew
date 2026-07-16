@@ -1,10 +1,16 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/runtimeinput"
+	runpkg "github.com/greatliontech/pew/internal/run"
+	"github.com/greatliontech/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
 )
 
@@ -70,5 +76,79 @@ func TestFingerprintFromConfig(t *testing.T) {
 	fp, pure = fingerprintFromConfig(nil)
 	if fp.ResultKind != gofresh.Measurement || fp.MaximalClosure != "" || fp.Guards != (guard.Guards{}) || pure != "" {
 		t.Errorf("empty config: fp=%+v pure=%q, want empty measurement", fp, pure)
+	}
+}
+
+func TestLegacyRuntimeManifestsUseOrdinaryChecking(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/legacyruntime\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bench_test.go"), []byte("package legacyruntime\n\nimport \"testing\"\n\nfunc BenchmarkNoIO(b *testing.B) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fixture := filepath.Join(dir, "fixture.txt")
+	if err := os.WriteFile(fixture, []byte("original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e, err := newEngine(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pkg = "example.com/legacyruntime"
+	const bench = "BenchmarkNoIO"
+	subject := gofresh.Subject{Package: pkg, Symbol: bench}
+	fp, err := e.CaptureFor(subject, dir, gofresh.Measurement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	complete, err := runtimeinput.FromTestLog([]byte("open fixture.txt\n"), dir, dir, runtimeinput.WithCompletedProcess("legacy-package-test-binary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(t.TempDir())
+	write := func(label string, state runtimeinput.State) {
+		t.Helper()
+		cfg := append(runpkg.ProvenanceConfig("c1", false, fp.Guards), runpkg.ClosureConfig(fp.MaximalClosure))
+		cfg = append(cfg, runpkg.RuntimeConfig(state.Digest, state.Manifest)...)
+		recs := []*benchfmt.Result{{Name: benchfmt.Name("NoIO"), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
+		if err := st.Write("", bench, label, recs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("complete", complete.State)
+
+	v, reason, err := checkOne(st, e, pkg, "", dir, bench, "complete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != verdictValid || reason != "" {
+		t.Fatalf("unchanged complete legacy manifest = {%s %q}, want valid", v, reason)
+	}
+	if err := os.WriteFile(fixture, []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	v, reason, err = checkOne(st, e, pkg, "", dir, bench, "complete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != verdictStale || reason != "runtimeinputs" {
+		t.Fatalf("changed complete legacy manifest = {%s %q}, want stale runtimeinputs", v, reason)
+	}
+
+	if err := os.WriteFile(fixture, []byte("original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unverifiable, err := runtimeinput.FromTestLog([]byte("stat fixture.txt\n"), dir, dir, runtimeinput.WithCompletedProcess("legacy-package-test-binary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	write("unverifiable", unverifiable.State)
+	v, reason, err = checkOne(st, e, pkg, "", dir, bench, "unverifiable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != verdictUnverifiable || !strings.Contains(reason, "stat metadata input") {
+		t.Fatalf("unverifiable legacy manifest = {%s %q}, want unverifiable metadata reason", v, reason)
 	}
 }

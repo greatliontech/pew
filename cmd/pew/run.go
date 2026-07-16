@@ -86,6 +86,7 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 		}
 	}
 	gc := newGitStateCache()
+	env := os.Environ()
 	for _, p := range pkgs {
 		if p.Module.Dir == "" {
 			continue
@@ -97,13 +98,13 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 		if p.Module.Dir == "" {
 			continue
 		}
-		e, err := newEngine(p.Module.Dir)
+		e, err := newEngineWithEnv(p.Module.Dir, env)
 		if err != nil {
 			return err
 		}
 		// Like status, a per-package failure (e.g. one that does not build) is
 		// reported and does not abort the rest of the tree.
-		runErr := runPackage(w, e, gc, rc, p)
+		runErr := runPackage(w, e, gc, rc, p, env)
 		if runErr != nil {
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, runErr)
 			failures = append(failures, p.ImportPath)
@@ -161,7 +162,7 @@ func (c *gitStateCache) recordWrites(repoRoot string, paths []string) {
 	}
 }
 
-func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig, p pkgMeta) error {
+func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig, p pkgMeta, env []string) error {
 	benches, err := selectedBenchmarks(p)
 	if err != nil {
 		return err
@@ -237,25 +238,20 @@ func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig,
 	// A benchmark failure makes `go test` exit non-zero and discards the whole
 	// package's run (the successful benches too) — a suspect package records
 	// nothing rather than a partial set.
-	testlog, err := os.CreateTemp("", "pew-testlog-*.txt")
+	out, err := run.Execute(p.Module.Dir, rc.pin, env, run.TestArgs(p.ImportPath, opts))
 	if err != nil {
 		return err
 	}
-	testlogPath := testlog.Name()
-	if err := testlog.Close(); err != nil {
-		return err
-	}
-	defer os.Remove(testlogPath)
-
-	out, err := run.Execute(p.Module.Dir, rc.pin, run.TestArgs(p.ImportPath, opts, testlogPath))
+	runtimeObservation, err := runtimeinput.IncompleteEnv(
+		p.Module.Dir,
+		"package-test-binary:"+p.ImportPath,
+		"testlog lacks operation outcome evidence",
+		env,
+	)
 	if err != nil {
 		return err
 	}
-	testlogBytes, err := os.ReadFile(testlogPath)
-	if err != nil {
-		return err
-	}
-	runtimeState, err := runtimeinput.FromTestLog(testlogBytes, p.Module.Dir, filepath.Join(p.Module.Dir, filepath.FromSlash(pkgRel)))
+	runtimeState, err := runtimeinput.CompletedState(runtimeObservation)
 	if err != nil {
 		return err
 	}
@@ -271,19 +267,9 @@ func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig,
 	if err := view.Validate(); err != nil {
 		return err
 	}
-	runtimeState, err = runtimeinput.Merge(p.Module.Dir, runtimeState)
-	if err != nil {
-		return err
-	}
 	dirty := initialDirty
 	if !dirty {
 		dirty, err = sourceInputsDirty(p.Module.Dir, commit, view.SourceFiles())
-		if err != nil {
-			return err
-		}
-	}
-	if !dirty {
-		dirty, err = runtimeInputsDirty(p.Module.Dir, commit, runtimeState)
 		if err != nil {
 			return err
 		}
@@ -331,13 +317,10 @@ func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig,
 		}
 		recordingPaths = append(recordingPaths, path)
 	}
-	if err := rejectRecordingDestinations(runtimeState, p.Module.Dir, view.SourceFiles(), recordingPaths); err != nil {
+	if err := rejectRecordingDestinations(view.SourceFiles(), recordingPaths); err != nil {
 		return err
 	}
 	if err := view.Validate(); err != nil {
-		return err
-	}
-	if _, err := runtimeinput.Merge(p.Module.Dir, runtimeState); err != nil {
 		return err
 	}
 	stateAtWrite, err := gitblob.Snapshot(p.Module.Dir)
@@ -516,27 +499,6 @@ func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {
 		r.Config = append(r.Config, c)
 	}
 	return recs
-}
-
-// moduleInspector adapts gitblob's absolute-path reproducibility check to Gofresh's
-// module-relative CommitInspector.
-type moduleInspector struct {
-	repo      *gitblob.Repo
-	moduleDir string
-}
-
-func (m moduleInspector) ReproducibleAt(commit, moduleRelPath string) (bool, error) {
-	return m.repo.ReproducibleAtWithin(commit, filepath.Join(m.moduleDir, filepath.FromSlash(moduleRelPath)), m.moduleDir)
-}
-
-// runtimeInputsDirty reports whether any module-local runtime input state is not
-// reproducible from commit (§5, §7.8, §10).
-func runtimeInputsDirty(moduleDir, commit string, state runtimeinput.State) (bool, error) {
-	repo, err := gitblob.Open(moduleDir)
-	if err != nil {
-		return false, err
-	}
-	return runtimeinput.Dirty(state, moduleDir, commit, moduleInspector{repo: repo, moduleDir: moduleDir})
 }
 
 func nonValid(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, label string, benches []string) ([]string, error) {

@@ -3,17 +3,10 @@ package main
 import (
 	"fmt"
 	"path/filepath"
-
-	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
-func rejectRecordingDestinations(state runtimeinput.State, moduleDir string, sourceFiles, recordingPaths []string) error {
-	inputs, err := runtimeinput.Paths(state.Manifest, moduleDir)
-	if err != nil {
-		return err
-	}
-	protected := append(append([]string(nil), sourceFiles...), inputs...)
-	for _, input := range protected {
+func rejectRecordingDestinations(sourceFiles, recordingPaths []string) error {
+	for _, input := range sourceFiles {
 		candidates := []string{input, resolveExistingPrefix(input)}
 		for _, recording := range recordingPaths {
 			recordings := []string{recording, resolveExistingPrefix(recording)}
@@ -22,7 +15,7 @@ func rejectRecordingDestinations(state runtimeinput.State, moduleDir string, sou
 					if !pathsOverlap(candidate, destination) {
 						continue
 					}
-					return fmt.Errorf("run: recording destination %s overlaps runtime input %s", recording, input)
+					return fmt.Errorf("run: recording destination %s overlaps source input %s", recording, input)
 				}
 			}
 		}

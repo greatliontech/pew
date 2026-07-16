@@ -64,6 +64,10 @@ func newEngine(moduleDir string) (*gofresh.Engine, error) {
 	return gofresh.New(gofresh.WithDir(moduleDir))
 }
 
+func newEngineWithEnv(moduleDir string, env []string) (*gofresh.Engine, error) {
+	return gofresh.New(gofresh.WithDir(moduleDir), gofresh.WithEnv(env...))
+}
+
 func runStatus(w io.Writer, benchDir string, staleOnly bool, patterns []string) error {
 	pkgs, err := resolvePackages(patterns)
 	if err != nil {

@@ -9,9 +9,7 @@ close-out convention.
 | [buildconfig-completeness](buildconfig-completeness.md) | PGO profile content + CLI build-flag pass-throughs in the buildconfig guard (cgo/env half landed; gofresh `WithBuildInputs` is the mechanism) | when PGO benchmarks see real use, or `pew run` grows build-flag flags |
 | [json-output](json-output.md) | `-json` machine-readable output for `status`/`stat` | when pew is first wired into CI/scripting beyond exit-code gating |
 | [purity-directives](purity-directives.md) | durable impure directive (`//gofresh:pure` landed at §7.5; the external half has no durable form) | when `--impure` re-specification proves friction |
-| [run-stale-bench-filter](run-stale-bench-filter.md) | `pew run --stale` discards the user's `--bench` pattern | when `pew run` benchmark selection or `--stale` handling is next changed |
 | [stat-blob-reread](stat-blob-reread.md) | `pew stat` parses every historical recording blob twice | when stat inventory or side-reading code is next changed |
-| [stat-staleness-warning-e2e](stat-staleness-warning-e2e.md) | no end-to-end test drives `runStat` into `engine.Check`; directive purity in the warning is pinned only compositionally | when stat's working-tree staleness check is next changed |
 | [stat-explain](stat-explain.md) | implement the spec-reserved `pew stat --explain` guard/input view | when guard-failure opacity bites in real use |
 | [status-label-flag](status-label-flag.md) | `--label` on `pew status` so labeled recordings get verdicts | when labeled-variant recordings see real use, or the status CLI is next extended |
 

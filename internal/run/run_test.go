@@ -1,8 +1,11 @@
 package run
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/greatliontech/gofresh/guard"
@@ -73,10 +76,9 @@ func TestRecordedConfigSerializable(t *testing.T) {
 
 func TestTestArgs(t *testing.T) {
 	tests := []struct {
-		name    string
-		opts    Options
-		testlog string
-		want    []string
+		name string
+		opts Options
+		want []string
 	}{
 		{
 			name: "defaults",
@@ -88,20 +90,38 @@ func TestTestArgs(t *testing.T) {
 			opts: Options{Count: 3, Benchtime: "250ms", Bench: "BenchmarkHash"},
 			want: []string{"test", "-run", "^$", "-bench", "BenchmarkHash", "-benchmem", "-count", "3", "-benchtime", "250ms", "example/p"},
 		},
-		{
-			name:    "testlog",
-			opts:    Options{Count: 10, Benchtime: "1s", Bench: "."},
-			testlog: "/tmp/pew-testlog",
-			want:    []string{"test", "-run", "^$", "-bench", ".", "-benchmem", "-count", "10", "-benchtime", "1s", "example/p", "-args", "-test.testlogfile=/tmp/pew-testlog"},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := TestArgs("example/p", tt.opts, tt.testlog)
+			got := TestArgs("example/p", tt.opts)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("TestArgs = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestExecuteDerivesCommandEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/commandenv\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nimport (\"fmt\"; \"os\")\n\nfunc main() { fmt.Println(os.Getenv(\"PWD\")); fmt.Println(os.Getenv(\"GOWORK\")) }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var env []string
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GOWORK=") && !strings.HasPrefix(entry, "PWD=") {
+			env = append(env, entry)
+		}
+	}
+	env = append(env, "GOWORK=off", "PWD=/wrong")
+	out, err := Execute(dir, "", env, []string{"run", "."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n"); !reflect.DeepEqual(got, []string{dir, "off"}) {
+		t.Fatalf("go env PWD GOWORK = %q, want [%s off]", got, dir)
 	}
 }
 

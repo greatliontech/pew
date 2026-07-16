@@ -29,10 +29,11 @@ valid for HEAD, or must I re-run it?"** mechanically rather than by guesswork.
 ## 2. Goals
 
 - **G1 — Provenance.** Every stored result records enough to decide its own validity later:
-  commit, toolchain, machine fingerprint, build configuration, and observed runtime inputs.
+  commit, toolchain, machine fingerprint, build configuration, and runtime-input evidence or an
+  explicit incomplete-observation disposition.
 - **G2 — Staleness.** For any stored result, decide *valid* (re-use) vs *stale* (re-run) for
   the current tree, with **no false "valid" within pew's specified guard model**: source closure,
-  observed runtime inputs, toolchain, machine, and build configuration. Class-B external-dependence
+  runtime-input evidence, toolchain, machine, and build configuration. Class-B external-dependence
   detection has the documented best-effort boundary in §7.3; known external state outside that
   detection is declared with `--impure`.
 - **G3 — Run hygiene.** Drive `go test -bench` with statistics-grade defaults (multiple counts,
@@ -89,8 +90,8 @@ global config lines):
 | `buildconfig`        | digest of build tags + relevant GOFLAGS/gcflags + cgo + PGO  | yes              |
 | `runtimeconfig`      | digest of Go runtime-config env (GOGC/GODEBUG/GOMEMLIMIT/GOMAXPROCS), §7 | yes  |
 | `dirty`              | `true` if the working tree had uncommitted changes at run    | yes              |
-| `pew-runtime`        | digest of observed runtime inputs (§7.8)                     | derived          |
-| `pew-runtime-inputs` | encoded manifest of observed runtime input names/paths (§7.8) | yes              |
+| `pew-runtime`        | digest of runtime-input evidence (§7.8)                      | derived          |
+| `pew-runtime-inputs` | encoded runtime-input manifest or incomplete disposition (§7.8) | yes            |
 | `pew-purity`         | attributable Gofresh purity evidence used for this fingerprint | yes            |
 
 `pew-purity` is benchmark-specific despite the surrounding uniform provenance keys and is omitted
@@ -103,10 +104,10 @@ overwrite makes each file single-block, so the key cannot fragment a benchstat p
 additionally strips `pew-*` keys from its own comparison projections (§10). The `.txt` is therefore
 fully self-describing — everything needed to evaluate its own validity lives in one file.
 
-Observed runtime inputs use the same in-band rule: `pew-runtime-inputs` is the recorded manifest
-(input names/paths, not secret values), and `pew-runtime` is the digest of those inputs' run-time
-values/content. The manifest is source-of-truth for recomputing the current digest; the digest is the
-guard value.
+Runtime-input evidence uses the same in-band rule: `pew-runtime-inputs` is the recorded manifest and
+`pew-runtime` is its digest. New recordings carry a canonical incomplete disposition rather than
+observed identities (§7.8). Previously released manifests remain readable under their existing
+ordinary runtime-input guard semantics.
 
 A `dirty` run is recorded but flagged: its `commit` does not faithfully describe its source, so
 its closure is computed from the *working tree*, and it is never usable as a pinned baseline.
@@ -127,7 +128,7 @@ analysis dead weight.
   compared HEAD/current-vs-record.
 
 The two keys differ in which facts answer each question: commit identifies the recording point, while
-closure and observed runtime inputs prove reuse validity:
+closure and runtime-input evidence prove reuse validity:
 
 | term         | identity (which record) | validity (reuse for HEAD) |
 |--------------|:-----------------------:|:-------------------------:|
@@ -139,7 +140,7 @@ closure and observed runtime inputs prove reuse validity:
 | buildconfig  |           ✓             |             ✓             |
 | runtimeconfig |          ✓             |             ✓             |
 
-Identity **pins** code by commit; validity **tests** code by closure plus observed runtime inputs. The
+Identity **pins** code by commit; validity **tests** code by closure plus runtime-input evidence. The
 commit is a coarse "some code somewhere changed" signal — correct for *naming a point in history*,
 fatally over-broad for *deciding a re-run*. The closure is the precise "code this benchmark exercises
 changed" signal, and runtime inputs are the precise "observed non-source input changed" signal.
@@ -206,13 +207,15 @@ rule is **`valid` requires proof**. `unrecorded` is a `status` inventory state f
 result, not a verdict about an existing result.
 
 - **valid** (reuse `R`) — all six guards below provably hold over a soundly over-approximated
-   closure.
+  closure, and either neither the closure nor runtime-input manifest carries an unverifiable
+  disposition or an applicable purity assertion explicitly overrides those dispositions (§7.5).
 - **stale** (re-run) — some guard demonstrably fails: closure, runtime input, toolchain, machine,
    build config, or runtime config changed.
 - **unverifiable** (re-run, reason recorded) — guards would pass, but `B`'s closure reaches an
-  external dependence pew cannot hash (Class B, §7.3), so validity can be neither proven nor
-  refuted. Operationally a re-run, but distinct from `stale`: the user can assert purity to override
-  (§7.5). Absence of proof never collapses to `valid` (INV-1).
+  external dependence pew cannot hash (Class B, §7.3), or the runtime-input manifest carries an
+  unverifiable disposition such as explicit incomplete outcome evidence. Operationally a re-run,
+  but distinct from `stale`: the user can assert purity to override (§7.5). Absence of proof never
+  collapses to `valid` (INV-1).
 
 The six guards:
 
@@ -241,7 +244,7 @@ The six guards:
    unset `GOMAXPROCS` defaults to the machine's CPU count, already covered by the machine guard (§8).
 
 Guards 3–6 are exact-equality on recorded provenance — cheap and unambiguous. Guards 1–2 are derived
-digests over source and observed runtime inputs; the rest of this section defines their soundness.
+digests over source and runtime-input evidence; the rest of this section defines their soundness.
 
 ### 7.1 What the closure covers
 
@@ -343,17 +346,16 @@ not source at all, so no source widening can bound it:
 
 | construct | external state |
 |-----------|----------------|
-| file I/O on a non-embedded path (`os.Open`, `os.ReadFile`, …) | observed local file inputs are recorded by §7.8; an unobserved/unhashable file input remains `unverifiable` |
+| file I/O on a non-embedded path (`os.Open`, `os.ReadFile`, …) | requires the complete observation conjunction in §7.8; Pew's current producer records incompleteness, so it remains `unverifiable` |
 | network I/O | a remote that may change |
 | `plugin.Open` / `plugin.Lookup` | code loaded from an arbitrary `.so` at runtime |
 | cgo linked against an external library (`#cgo LDFLAGS: -l…`) | C outside the build (in-tree `.c`/`.h` *are* hashed → that is A′, not B) |
 | `go:wasmimport` host functions | host code outside the binary |
 
 Any non-file Class-B dependence reachable in `B`'s closure → `unverifiable`. File I/O reached by
-the closure also remains `unverifiable` unless the recorded runtime-input manifest proves complete
-coverage of the observed files and the runtime guard passes (§7.8). The current testlog manifest
-hashes inputs it observes, but does not prove that every reachable file-I/O path was emitted, so it
-cannot by itself suppress the Class-B marker. (Ambient nondeterminism — `time.Now`, unseeded `rand` — is a
+the closure also remains `unverifiable` unless the full upstream observation conjunction holds
+(§7.8). Testlog identities alone prove neither complete path coverage nor operation outcomes, so
+they cannot suppress the Class-B marker. (Ambient nondeterminism — `time.Now`, unseeded `rand` — is a
 benchmark-*quality* issue, out of scope per §3, not a Class-B trigger.)
 
 Class-B detection is **best-effort coverage**, not a hard guarantee — perfect external-dependence
@@ -456,56 +458,32 @@ Two consequences:
   side effects can affect `B` without a declaration edge. Per-declaration hashing *into* cache deps is
   an available precision upgrade (like VTA), not a default.
 
-### 7.8 Observed runtime inputs
+### 7.8 Runtime-input evidence
 
-During `pew run`, pew enables Go's testlog channel for the benchmark process and records the inputs
-the runtime reports as observed. This is a separate guard from the source closure: source changes move
-`pew-closure`; observed non-source changes move `pew-runtime`.
+Go's testlog stream records operation identities but omits behavior-affecting return values, byte
+counts, and errors. A zero exit from the `go test` driver proves neither those outcomes nor normal
+completion of an observation protocol by itself. Pew has no separate per-operation outcome evidence,
+so `pew run` does not call the completed-observation constructor, does not select an observability
+proof, and never promotes a file-reading benchmark to `valid` from testlog identities.
 
-Recorded data:
+Every new run instead records one canonical incomplete observation for the result-contributing
+package test-binary process, with reason `testlog lacks operation outcome evidence`. Its
+`pew-runtime-inputs` manifest carries that disposition and `pew-runtime` carries the corresponding
+digest. Ordinary checking therefore returns `unverifiable` while the other guards hold. In
+particular, a transient read error followed by a successful process exit cannot become `valid` merely
+because the process exited zero. An explicit purity assertion retains its separate full-trust
+semantics from §7.5.
 
-- `pew-runtime-inputs` — an encoded manifest of observed input identities: environment variable names
-  and file paths. Environment values are **not** stored in clear text.
-- `pew-runtime` — a digest over the manifest's current values/content at record time.
+Previously recorded complete identity manifests remain guard evidence: status decodes the manifest,
+re-hashes its environment names and paths in the current working tree/environment, and compares the
+digest to `pew-runtime`. A mismatch, malformed manifest, or unevaluable identity is `stale` with
+reason `runtimeinputs`; manifest-level unverifiability remains `unverifiable`. A recording carrying
+no manifest is the caller's assertion that the run observed no runtime inputs under Gofresh
+`REQ-inputs-absent-asserted`.
 
-At status time, pew decodes `pew-runtime-inputs`, re-hashes those same inputs in the current working
-tree/environment, and compares the digest to `pew-runtime`. A mismatch — including a manifest that
-can no longer be decoded or re-evaluated — is `stale` with reason `runtimeinputs` (an unevaluable
-guard is absence of proof, never an error and never `valid`). Every `pew run` records the manifest;
-a run that observed nothing records an *empty* manifest, distinct from no manifest at all. A
-recording carrying no manifest is therefore read as the recorded assertion that the run observed no
-runtime inputs (gofresh `REQ-inputs-absent-asserted`), the guard holding vacuously.
-
-File inputs under the module directory are stored module-relative so moving a checkout does not make a
-recording stale. External file inputs are stored absolute. A module-local input whose current
-Git-representable state is not reproducible from the run commit makes the recording **dirty** (§5):
-the comparison covers absence, regular-file content and executable mode, symlink target, and directory
-membership/member state. This bars it as a pinned baseline (§10) while leaving it usable for
-working-tree reuse and covers ignored/untracked inputs and targets reached through committed symlinks,
-not only ordinary git-status changes. Missing files hash as
-missing, so a file appearing/disappearing moves the guard. Opened regular files hash both content and stable `FileInfo`
-metadata; opened directories hash their tree entries, entry content, and stable entry metadata.
-Package-local directories may be hashed as directory trees; directory symlinks are hashed through only
-when their resolved target remains inside the module. Metadata-only `stat` observations are
-`unverifiable` unless pew can bound the full metadata value the benchmark observed. Directories or
-inputs that cannot be bounded are `unverifiable`, not valid.
-
-The Go testlog stream is package-run scoped, not benchmark-row scoped, so a package run's observed
-runtime inputs are conservatively attached to every benchmark result written from that run. This can
-make siblings stale together, but never makes a changed input look valid.
-The manifest is evidence about the identities present in the stream, not proof that the stream is
-complete for all reachable file I/O. Therefore matching `pew-runtime` can make a logged input change
-`stale`, but it does not make closure-level file I/O `valid` without an explicit complete-coverage
-proof in the manifest/mechanism.
-Package initialization runs before Go starts the testlog stream; file I/O reached only through init
-remains `unverifiable` unless some later benchmark/testlog-observed operation covers the same input.
-User `TestMain` code outside the `m.Run` execution window is likewise not proven by the benchmark
-testlog and remains `unverifiable` when it reaches file I/O.
-Relative runtime paths are valid only when the initial testlog CWD is known not to have been changed
-before the stream starts; pre-testlog CWD changes, including syscall/unix wrappers, make relative
-observed paths `unverifiable`. Path binding, file creation, or directory creation mutations that the
-testlog does not observe, such as symlink/remove/rename/create/temp-directory changes, are likewise not
-runtime-coverable proof of a stable input identity.
+Pew defines and reads no positive observation-proof metadata. New and previously released recordings
+are checked through Gofresh's ordinary fingerprint path; older recordings naturally lack the
+incomplete disposition and retain their existing manifest semantics.
 
 ## 8. Machine fingerprint
 
@@ -576,22 +554,24 @@ provenance is captured atomically with the run:
   comparison-mismatch check can be added later if mixing ever bites).
   On Linux, turbo/boost is checked via exposed `intel_pstate/no_turbo` or `cpufreq/boost` sysfs state,
   and thermal throttling via exposed CPU `thermal_throttle/*_throttle_count` counters.
-- Records provenance (§5) and computes the run-commit closure hash (§7), recorded in-band as
-  `pew-closure` (§5), plus observed runtime inputs (`pew-runtime*`, §7.8), at run time.
-- Captures one measurement view and every benchmark fingerprint before execution, then validates that
-  view and revalidates the completed runtime-input state before writing any result. Source, guard,
-  purity, runtime, commit, or worktree-state drift aborts the package write. Every destination is
+- Records provenance (§5), computes the run-commit closure hash (§7), and records explicit incomplete
+  runtime-input evidence (`pew-runtime*`, §7.8) at run time.
+- Captures one ordinary measurement view and every benchmark fingerprint before execution. The
+  result-contributing process is the package test binary launched by the `go test` driver. Because
+  Pew has no per-operation outcome evidence, it finalizes exactly one incomplete observation for
+  that package test binary. It validates the view and the sealed incomplete runtime state before
+  writing any result. One immutable complete process-environment snapshot configures the view, the
+  driver and inherited package test binary, and incomplete-observation construction. Source, guard,
+  purity, commit, or worktree-state drift aborts the package write. Every destination is
   staged before replacement and every returned commit failure restores the prior complete set, so one
   package run is one producer transaction across ordinary filesystem errors. Each file is individually
   temp-and-rename safe; sudden process death during a multi-file commit may leave a recording absent,
   which safely forces regeneration rather than exposing a torn recording.
-- The caller excludes source, runtime-input, and repository mutation during final validation and commit.
-  Pew double-checks the view, completed runtime state, HEAD, and dirty state immediately before the
-  write batch; as with Gofresh producer views, an externally allowed change-and-restore interval cannot
-  be proven absent.
-- A package write is refused when any recording destination overlaps a selected maximal-source path
-  or an observed runtime-input path, including a destination nested beneath an observed directory,
-  because storage must not invalidate the completed source or runtime evidence it is about to persist.
+- The caller excludes source and repository mutation during final validation and commit.
+  Pew double-checks the view, HEAD, and dirty state immediately before the write batch; as with
+  Gofresh producer views, an externally allowed change-and-restore interval cannot be proven absent.
+- A package write is refused when any recording destination overlaps a selected maximal-source path,
+  because storage must not invalidate the completed source evidence it is about to persist.
 
 ## 10. Comparison & regression
 
@@ -669,7 +649,8 @@ Four commands; names follow the `go test` / benchstat idiom.
 - **`pew run [packages] [flags]`** — run with hygiene (§9), store (overwrite, in-band provenance §5).
   - selection: `[packages]` (default `./...`), `--bench <pat>` (default `.`)
   - **`--stale`** — (re)run only benchmarks currently `stale` / `unverifiable` / `unrecorded`; skip
-    `valid` ones (the reuse-don't-rerun win; shares the `status` closure-analysis path).
+    `valid` ones (the reuse-don't-rerun win; shares the `status` closure-analysis path). This filter
+    intersects the independent `--bench` selection and never adds or records an excluded benchmark.
   - hygiene: `--count` (10), `--benchtime` (1s), `--pin`, `--strict` (§9)
   - storage: `--bench-dir <dir>` (default `<module>/benchmarks`), `--label <name>` (§6);
     purity overrides: `--assume-pure <bench>` (§7.5), `--impure <bench>` (§7.3). The pure
@@ -702,25 +683,30 @@ Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred
   guards (§7) provably hold over a closure that is a *superset* of the source able to affect `B`'s
   performance. Every blind spot is **resolved** to a precise edge, **widened** to the maximal non-std
   closure, or **downgraded** to `unverifiable` — never silently dropped, never narrowing the covered
-  set; absence of proof yields `unverifiable`, never `valid`. *Violation (strongest):* a reachable
+  set. An unresolved blind spot yields `unverifiable` unless an applicable explicit purity assertion
+  accepts responsibility for that disposition; purity never waives the six guards. *Violation (strongest):* a reachable
   `const`/type/embed `B` depends on changes while `B`'s call graph is byte-identical, the closure
   hash is unchanged, and `B` is reported `valid` → silent regression behind a stale baseline (the
   core failure pew exists to prevent). *Kind:* entailed.
-- **INV-2 — Validity verdict.** `B` is `valid` for HEAD iff *all six* guards hold **and** its
-  closure reaches no unhashable external dependence (Class B, §7.3); any guard failing ⇒ `stale`;
-  guards holding but a Class-B dependence present ⇒ `unverifiable`. *Violation:* e.g. toolchain
-  changed but reported valid, or a benchmark reading an external file reported valid after the file
-  changed. *Kind:* clause-explicit (§7).
+- **INV-2 — Validity verdict.** `B` is `valid` for HEAD iff *all six* guards hold and either its
+  closure reaches no unhashable external dependence (Class B, §7.3) and its runtime-input manifest
+  has no unverifiable disposition, or an applicable purity assertion overrides those dispositions
+  (§7.5). Any guard failing ⇒ `stale`; absent a purity assertion, guards holding but either
+  unverifiability source present ⇒ `unverifiable`. *Violation:* e.g. toolchain changed but reported valid, a
+  benchmark reading an external file reported valid after the file changed, or a no-I/O benchmark
+  carrying explicit incomplete outcome evidence reported valid. *Kind:* clause-explicit (§7).
 - **INV-3 — Artifact format compatibility.** Every stored `.txt` is a well-formed Go
   benchmark-format file parseable by `benchfmt` and plain `benchstat`. *Violation:* a written file
   that `benchfmt` rejects → ecosystem lock-in, G5 broken. *Kind:* clause-explicit (§5, G5).
-- **INV-4 — Provenance completeness.** Every stored result carries the provenance and manifests
-  required to evaluate all six guards: `pew run` always writes the commit, the runtime-input
-  manifest (empty when the run observed nothing, §7.8), and the four environment guard lines.
+- **INV-4 — Provenance completeness.** Every newly produced result carries the provenance and
+  manifests required to evaluate all six guards: `pew run` always writes the commit, the runtime-input
+  manifest (a canonical incomplete disposition for every new run, §7.8), and the four environment
+  guard lines.
   *Violation:* a result missing `commit` or a guard value → the guard is unevaluable → validity
-  undecidable → must conservatively re-run, defeating G1/G2. (A recording carrying *no* manifest at
-  all is the recorded assertion of no observed inputs, §7.8 — not a completeness violation; a
-  recorded `pew-runtime` digest without its manifest is corruption, and stale.) *Kind:*
+  undecidable → must conservatively re-run, defeating G1/G2. A recorded `pew-runtime` digest without
+  its manifest is corruption and stale; a new recording without the incomplete disposition violates
+  the producer contract. An older recording carrying neither manifest nor digest retains Gofresh's
+  existing caller assertion of no observed inputs. *Kind:*
   entailed.
 - **INV-5 — Derived state is never authoritative.** Persisted closure hashes are a memoization keyed
   *only* by immutable inputs `(commit, toolchain, buildconfig)`; they are never the source of truth

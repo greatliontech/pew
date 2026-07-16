@@ -44,8 +44,11 @@
 - `unverifiable`: pew cannot prove the recording is reusable, so rerun it.
 - `unrecorded`: no stored result exists yet.
 
-Runtime inputs observed through Go's testlog are stored as input identities plus
-a digest. Environment values are hashed but not stored in clear text.
+Go's testlog omits operation outcomes, so a successful benchmark process cannot prove
+runtime-input observation completeness. New recordings therefore carry explicit incomplete
+runtime evidence and remain `unverifiable` even when the benchmark performs no I/O or ignores a
+transient read error. An explicit `--assume-pure` or `//gofresh:pure` assertion is the documented
+full-trust override.
 
 By default recordings live under `<module>/benchmarks`. Use `--bench-dir` on the
 commands when a different storage directory is needed.
