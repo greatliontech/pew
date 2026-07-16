@@ -126,6 +126,17 @@ type statModule struct {
 	repo       *gitblob.Repo
 	keys       map[statKey]bool
 	current    map[statKey]currentBench
+	sides      map[statSideKey]statSide
+}
+
+type statSideKey struct {
+	ref, pkgRel, bench, label string
+}
+
+type statSide struct {
+	recs []*benchfmt.Result
+	ok   bool
+	err  error
 }
 
 func baselineFor(refs []string) (baseline, error) {
@@ -194,16 +205,44 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 		checkStale := bl.newRef == ""
 
 		for _, key := range sortedStatKeys(m.keys) {
-			baseRecs, baseOK, err := readSide(m.store, m.repo, bl.baseRef, key.pkgRel, key.bench, key.label)
+			baseRecs, baseOK, err := m.readSide(bl.baseRef, key.pkgRel, key.bench, key.label)
 			if err != nil {
 				return err
 			}
-			newRecs, newOK, err := readSide(m.store, m.repo, bl.newRef, key.pkgRel, key.bench, key.label)
+			newRecs, newOK, err := m.readSide(bl.newRef, key.pkgRel, key.bench, key.label)
 			if err != nil {
 				return err
 			}
 			if !baseOK && !newOK {
 				continue // never recorded on either side — nothing to say
+			}
+			if baseOK {
+				if !store.IsRecordingShape(baseRecs) {
+					fmt.Fprintf(errw, "pew: warning: baseline %s:%s is stale (format); skipping — re-run `pew run`\n", bl.baseRef, key.bench)
+					continue
+				}
+				if _, _, ok := fingerprintFromConfig(baseRecs[0].Config); !ok {
+					fmt.Fprintf(errw, "pew: warning: baseline %s:%s is stale (format); skipping — re-run `pew run`\n", bl.baseRef, key.bench)
+					continue
+				}
+			}
+			if newOK {
+				if !store.IsRecordingShape(newRecs) {
+					side := bl.newRef
+					if side == "" {
+						side = "working-tree"
+					}
+					fmt.Fprintf(errw, "pew: warning: %s recording %s.%s is stale (format); skipping — re-run `pew run`\n", side, key.pkgRel, key.bench)
+					continue
+				}
+				if _, _, ok := fingerprintFromConfig(newRecs[0].Config); !ok {
+					side := bl.newRef
+					if side == "" {
+						side = "working-tree"
+					}
+					fmt.Fprintf(errw, "pew: warning: %s recording %s.%s is stale (format); skipping — re-run `pew run`\n", side, key.pkgRel, key.bench)
+					continue
+				}
 			}
 			// A dirty recording's commit does not faithfully describe its source
 			// (§5), so it is never usable as a baseline (§5, §10: "Pinned refs must
@@ -225,7 +264,11 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 					fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s has no current benchmark declaration; comparison may not reflect HEAD — re-run `pew run`\n", key.pkgRel, key.bench)
 				} else {
 					// Best-effort: a check failure warns but never blocks the comparison.
-					fp, pure := fingerprintFromConfig(newRecs[0].Config)
+					fp, pure, formatOK := fingerprintFromConfig(newRecs[0].Config)
+					if !formatOK {
+						fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is stale (format) — re-run `pew run`\n", key.pkgRel, key.bench)
+						continue
+					}
 					subj := gofresh.Subject{Package: cur.importPath, Symbol: key.bench}
 					engine := engines[cur.moduleDir]
 					if engine == nil {
@@ -476,12 +519,16 @@ func addStatInventory(m *statModule, bl baseline, label string) error {
 		return err
 	}
 	if bl.newRef == "" {
-		recs, err := m.store.List()
+		recs, err := m.store.ListCandidates()
 		if err != nil {
 			return err
 		}
 		for _, r := range recs {
-			if r.Label == label {
+			parsed, ok, err := m.readSide("", r.PkgRel, r.Bench, r.Label)
+			if err != nil {
+				return err
+			}
+			if ok && store.IsRecordingShape(parsed) && r.Label == label {
 				m.keys[statKey{pkgRel: r.PkgRel, bench: r.Bench, label: r.Label}] = true
 			}
 		}
@@ -500,11 +547,11 @@ func addRefInventory(m *statModule, ref, label string) error {
 		if !ok || r.Label != label {
 			continue
 		}
-		recs, sideOK, err := readSide(m.store, m.repo, ref, r.PkgRel, r.Bench, r.Label)
+		recs, sideOK, err := m.readSide(ref, r.PkgRel, r.Bench, r.Label)
 		if err != nil {
 			return err
 		}
-		if !sideOK || !store.IsRecording(recs) {
+		if !sideOK || !store.IsRecordingShape(recs) {
 			continue
 		}
 		m.keys[statKey{pkgRel: r.PkgRel, bench: r.Bench, label: r.Label}] = true
@@ -548,9 +595,6 @@ func readSide(st *store.Store, repo *gitblob.Repo, ref, pkgRel, bench, label str
 		if err != nil {
 			return nil, false, err
 		}
-		if !store.IsRecording(recs) {
-			return nil, false, nil
-		}
 		return recs, true, nil
 	}
 	abs, err := st.Path(pkgRel, bench, label)
@@ -568,8 +612,21 @@ func readSide(st *store.Store, repo *gitblob.Repo, ref, pkgRel, bench, label str
 	if err != nil {
 		return nil, false, err
 	}
-	if !store.IsRecording(recs) {
-		return nil, false, nil
-	}
 	return recs, true, nil
+}
+
+func (m *statModule) readSide(ref, pkgRel, bench, label string) ([]*benchfmt.Result, bool, error) {
+	if ref == "" {
+		return readSide(m.store, m.repo, ref, pkgRel, bench, label)
+	}
+	if m.sides == nil {
+		m.sides = make(map[statSideKey]statSide)
+	}
+	key := statSideKey{ref: ref, pkgRel: pkgRel, bench: bench, label: label}
+	if side, ok := m.sides[key]; ok {
+		return side.recs, side.ok, side.err
+	}
+	recs, ok, err := readSide(m.store, m.repo, ref, pkgRel, bench, label)
+	m.sides[key] = statSide{recs: recs, ok: ok, err: err}
+	return recs, ok, err
 }

@@ -285,6 +285,32 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 	if strings.Contains(errOut.String(), "is unverifiable") || strings.Contains(errOut.String(), "is stale") {
 		t.Fatalf("directive-backed current recording warned:\n%s", errOut.String())
 	}
+	recordingPath, err := st.Path("", "BenchmarkPureRead", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recording, err := os.ReadFile(recordingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unversioned := bytes.Replace(recording, []byte("pew-format: 1\n"), nil, 1)
+	if bytes.Equal(unversioned, recording) {
+		t.Fatal("recording format line not found")
+	}
+	if err := os.WriteFile(recordingPath, unversioned, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if err := runStat(&out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
+		t.Fatalf("runStat unversioned: %v", err)
+	}
+	if !strings.Contains(errOut.String(), "stale (format)") {
+		t.Fatalf("unversioned working-tree recording did not warn:\n%s", errOut.String())
+	}
+	if err := os.WriteFile(recordingPath, recording, 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	writeFile(t, filepath.Join(dir, "bench_test.go"), "package statdirective\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\n//gofresh:pure\nfunc BenchmarkPureRead(b *testing.B) { _, _ = os.ReadFile(\"fixture.txt\"); b.ReportAllocs() }\n")
 	out.Reset()
@@ -294,6 +320,16 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "is stale (closure)") {
 		t.Fatalf("stale working-tree recording did not warn:\n%s", errOut.String())
+	}
+}
+
+func TestStatSideCacheServesHistoricalParse(t *testing.T) {
+	key := statSideKey{ref: "HEAD", pkgRel: "p", bench: "BenchmarkX"}
+	want := []*benchfmt.Result{{Name: benchfmt.Name("X")}}
+	m := &statModule{sides: map[statSideKey]statSide{key: {recs: want, ok: true}}}
+	got, ok, err := m.readSide(key.ref, key.pkgRel, key.bench, key.label)
+	if err != nil || !ok || len(got) != 1 || string(got[0].Name) != "X" {
+		t.Fatalf("cached historical side = %v, %v, %v", got, ok, err)
 	}
 }
 
@@ -313,7 +349,7 @@ func TestDedupeStatModulesMergesSharedBenchDir(t *testing.T) {
 	}
 }
 
-func TestStatABIgnoresHistoricalPathShapedNonPewRecording(t *testing.T) {
+func TestStatABRejectsFormatValidNonPewOppositeSide(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statghost\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -327,7 +363,7 @@ func TestStatABIgnoresHistoricalPathShapedNonPewRecording(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, ghostPath, "machine: m1\ntoolchain: go-test\nbuildconfig: b1\nBenchmarkGhost-8 1 100 sec/op\n")
+	writeStatRecording(t, st, "pkg", "BenchmarkGhost", 100)
 	base := commitAll(t, repo, "base")
 	writeFile(t, ghostPath, "machine: m1\ntoolchain: go-test\nbuildconfig: b1\nBenchmarkGhost-8 1 120 sec/op\n")
 	newer := commitAll(t, repo, "newer")
@@ -339,8 +375,8 @@ func TestStatABIgnoresHistoricalPathShapedNonPewRecording(t *testing.T) {
 	if err := addRefInventory(m, base.String(), ""); err != nil {
 		t.Fatalf("addRefInventory: %v", err)
 	}
-	if len(m.keys) != 0 {
-		t.Fatalf("non-pew path-shaped blob entered inventory: %v", sortedStatKeys(m.keys))
+	if len(m.keys) != 1 {
+		t.Fatalf("valid base recording missing from inventory: %v", sortedStatKeys(m.keys))
 	}
 
 	withWorkingDir(t, dir)
@@ -352,9 +388,12 @@ func TestStatABIgnoresHistoricalPathShapedNonPewRecording(t *testing.T) {
 	if strings.Contains(out.String(), "BenchmarkGhost") {
 		t.Fatalf("stat output compared non-pew recording:\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
 	}
+	if !strings.Contains(errOut.String(), "stale (format)") {
+		t.Fatalf("format-valid non-pew side was not rejected:\n%s", errOut.String())
+	}
 }
 
-func TestReadSideIgnoresNonPewBlobAtInventoriedKey(t *testing.T) {
+func TestReadSideRetainsStaleFormatBlobForReporting(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statghostside\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -379,8 +418,10 @@ func TestReadSideIgnoresNonPewBlobAtInventoriedKey(t *testing.T) {
 	if _, ok, err := readSide(st, reader, base.String(), "pkg", "BenchmarkGhost", ""); err != nil || !ok {
 		t.Fatalf("valid base side ok=%v err=%v", ok, err)
 	}
-	if recs, ok, err := readSide(st, reader, newer.String(), "pkg", "BenchmarkGhost", ""); err != nil || ok || len(recs) != 0 {
-		t.Fatalf("non-pew side read as recording: ok=%v len=%d err=%v", ok, len(recs), err)
+	if recs, ok, err := readSide(st, reader, newer.String(), "pkg", "BenchmarkGhost", ""); err != nil || !ok || len(recs) == 0 {
+		t.Fatalf("stale-format side unavailable for reporting: ok=%v len=%d err=%v", ok, len(recs), err)
+	} else if _, _, formatOK := fingerprintFromConfig(recs[0].Config); formatOK {
+		t.Fatal("stale-format historical side accepted")
 	}
 }
 
@@ -399,10 +440,12 @@ func TestAddRefInventoryReportsMalformedHistoricalRecording(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, badPath, strings.Join([]string{
+		"pew-format: 1",
 		"commit: c1",
 		"toolchain: go-test",
 		"machine: m1",
 		"buildconfig: b1",
+		"runtimeconfig: r1",
 		"dirty: false",
 		"pew-closure: cl1",
 		"pew-runtime: rt1",
@@ -455,10 +498,12 @@ func writeStatRecording(t *testing.T, st *store.Store, pkgRel, bench string, val
 				{Value: value + float64(i), Unit: "sec/op"},
 			},
 			Config: []benchfmt.Config{
+				{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
 				{Key: "commit", Value: []byte("c1"), File: true},
 				{Key: "toolchain", Value: []byte("go-test"), File: true},
 				{Key: "machine", Value: []byte("m1"), File: true},
 				{Key: "buildconfig", Value: []byte("b1"), File: true},
+				{Key: "runtimeconfig", Value: []byte("r1"), File: true},
 				{Key: "dirty", Value: []byte("false"), File: true},
 				{Key: "pew-closure", Value: []byte("cl1"), File: true},
 				{Key: "pew-runtime", Value: []byte("rt1"), File: true},
@@ -526,6 +571,7 @@ func TestNonValidUsesLabel(t *testing.T) {
 		// The recorded guards must be the values the engine recomputes at check
 		// time, so the closure hash alone decides the verdict.
 		cfg := []benchfmt.Config{
+			{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
 			{Key: "commit", Value: []byte("c1"), File: true},
 			{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
 			{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
@@ -576,13 +622,22 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
+	rt, err := runtimeinput.Incomplete(".", "measurement-test", "test observation incomplete")
+	if err != nil {
+		t.Fatal(err)
+	}
 	st := store.New(t.TempDir())
 	cfg := []benchfmt.Config{
+		{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
+		{Key: "commit", Value: []byte("c1"), File: true},
 		{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
 		{Key: "machine", Value: []byte("some-other-machine"), File: true},
 		{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
 		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
 		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
+		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
+		{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
+		{Key: "dirty", Value: []byte("false"), File: true},
 	}
 	recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
 	if err := st.Write("", bench, "", recs); err != nil {
@@ -599,11 +654,16 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 	// End to end through checkOne, a recording flagged --impure (pure: false) whose
 	// guards all hold is unverifiable "impure": it always re-runs (§7.3).
 	impCfg := []benchfmt.Config{
+		{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
+		{Key: "commit", Value: []byte("c1"), File: true},
 		{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
 		{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
 		{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
 		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
 		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
+		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
+		{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
+		{Key: "dirty", Value: []byte("false"), File: true},
 		{Key: "pure", Value: []byte("false"), File: true},
 	}
 	impRecs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: impCfg}}

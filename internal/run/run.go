@@ -22,6 +22,9 @@ type Options struct {
 	Bench     string // -bench pattern (default ".")
 }
 
+// RecordingFormat is the current in-band Pew recording format.
+const RecordingFormat = "1"
+
 // TestArgs builds the `go test` argument list for benchmarking pkg.
 func TestArgs(pkg string, o Options) []string {
 	return []string{
@@ -78,6 +81,16 @@ func equalEnvKey(left, right string) bool {
 
 // Parse reads benchmark-format output into results.
 func Parse(out []byte) ([]*benchfmt.Result, error) {
+	for _, line := range bytes.Split(out, []byte{'\n'}) {
+		colon := bytes.IndexByte(line, ':')
+		if colon < 0 {
+			continue
+		}
+		key := string(line[:colon])
+		if strings.HasPrefix(key, "pew-") || reservedConfigKey(key) {
+			return nil, fmt.Errorf("run: benchmark output uses reserved %s configuration", key)
+		}
+	}
 	r := benchfmt.NewReader(bytes.NewReader(out), "go test")
 	var results []*benchfmt.Result
 	for r.Scan() {
@@ -92,6 +105,15 @@ func Parse(out []byte) ([]*benchfmt.Result, error) {
 		return nil, fmt.Errorf("run: read benchmark output: %w", err)
 	}
 	return results, nil
+}
+
+func reservedConfigKey(key string) bool {
+	switch key {
+	case "commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pure":
+		return true
+	default:
+		return false
+	}
 }
 
 // BenchName derives the storage function name ("BenchmarkXxx") from a benchfmt
@@ -115,6 +137,7 @@ func BenchName(resultName string) string {
 // File==false config as internal).
 func ProvenanceConfig(commit string, dirty bool, g guard.Guards) []benchfmt.Config {
 	return []benchfmt.Config{
+		{Key: "pew-format", Value: []byte(RecordingFormat), File: true},
 		{Key: "commit", Value: []byte(commit), File: true},
 		{Key: "toolchain", Value: []byte(g.Toolchain), File: true},
 		{Key: "machine", Value: []byte(g.Machine), File: true},

@@ -48,7 +48,8 @@ Go's testlog omits operation outcomes, so a successful benchmark process cannot 
 runtime-input observation completeness. New recordings therefore carry explicit incomplete
 runtime evidence and remain `unverifiable` even when the benchmark performs no I/O or ignores a
 transient read error. An explicit `--assume-pure` or `//gofresh:pure` assertion is the documented
-full-trust override.
+full-trust override. Current recordings carry `pew-format: 1`; unversioned or unknown formats are
+rejected and must be regenerated.
 
 By default recordings live under `<module>/benchmarks`. Use `--bench-dir` on the
 commands when a different storage directory is needed.

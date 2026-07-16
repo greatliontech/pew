@@ -227,7 +227,10 @@ func TestRunRecordsIncompleteRuntimeEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fp, _ := fingerprintFromConfig(recs[0].Config)
+		fp, _, ok := fingerprintFromConfig(recs[0].Config)
+		if !ok {
+			t.Fatalf("%s recording lacks current format", bench)
+		}
 		if fp.RuntimeInputs == "" || fp.RuntimeDigest == "" {
 			t.Fatalf("%s missing incomplete runtime evidence", bench)
 		}

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -15,10 +16,12 @@ const sample = `goos: linux
 goarch: amd64
 pkg: example.com/x/internal/foo
 cpu: TestCPU
+pew-format: 1
 commit: abc123def
 toolchain: go1.26.4
 machine: m-deadbeef
 buildconfig: default
+runtimeconfig: default
 dirty: false
 pew-closure: 1234abcd5678
 pew-runtime: abcdef1234567890
@@ -30,6 +33,9 @@ BenchmarkRun/case=big-8 200000 6100 ns/op 2048 B/op 9 allocs/op
 
 func parse(t *testing.T, raw string) []*benchfmt.Result {
 	t.Helper()
+	if !strings.Contains(raw, "pew-format:") {
+		raw = "pew-format: 1\n" + raw
+	}
 	r := benchfmt.NewReader(strings.NewReader(raw), "test")
 	var out []*benchfmt.Result
 	for r.Scan() {
@@ -55,6 +61,32 @@ func configMap(r *benchfmt.Result) map[string]string {
 		m[c.Key] = string(c.Value)
 	}
 	return m
+}
+
+func TestIsRecordingRequiresCurrentFormat(t *testing.T) {
+	recs := parse(t, sample)
+	if !IsRecording(recs) {
+		t.Fatal("current format rejected")
+	}
+	without := recs[0].Clone()
+	without.Config = slices.DeleteFunc(without.Config, func(c benchfmt.Config) bool { return c.Key == "pew-format" })
+	if IsRecording([]*benchfmt.Result{without}) {
+		t.Fatal("unversioned recording accepted")
+	}
+	unknown := recs[0].Clone()
+	for i := range unknown.Config {
+		if unknown.Config[i].Key == "pew-format" {
+			unknown.Config[i].Value = []byte("2")
+		}
+	}
+	if IsRecording([]*benchfmt.Result{unknown}) {
+		t.Fatal("unknown format accepted")
+	}
+	duplicate := recs[0].Clone()
+	duplicate.Config = append(duplicate.Config, benchfmt.Config{Key: "pew-format", Value: []byte("1"), File: true})
+	if IsRecording([]*benchfmt.Result{duplicate}) {
+		t.Fatal("duplicate format accepted")
+	}
 }
 
 func valueMap(r *benchfmt.Result) map[string]float64 {
@@ -402,6 +434,31 @@ func TestParseFromContent(t *testing.T) {
 	}
 	if _, err := Parse(strings.NewReader("BenchmarkRun notAnInt ns/op\n"), "blob"); err == nil {
 		t.Error("Parse of corrupt content: want error")
+	}
+	for name, raw := range map[string]string{
+		"missing":   strings.Replace(sample, "pew-format: 1\n", "", 1),
+		"unknown":   strings.Replace(sample, "pew-format: 1", "pew-format: 2", 1),
+		"duplicate": strings.Replace(sample, "pew-format: 1", "pew-format: 2\npew-format: 1", 1),
+		"tab-change": strings.Replace(sample,
+			"BenchmarkRun-8 1000000 1240 ns/op",
+			"pew-format:\t2\nBenchmarkRun-8 1000000 1240 ns/op", 1),
+		"deletion": strings.Replace(sample,
+			"BenchmarkRun-8 1000000 1240 ns/op",
+			"pew-format:\nBenchmarkRun-8 1000000 1240 ns/op", 1),
+		"crlf": strings.ReplaceAll(sample, "\n", "\r\n"),
+		"changed": strings.Replace(sample,
+			"BenchmarkRun-8 1000000 1240 ns/op",
+			"pew-format: 1\nBenchmarkRun-8 1000000 1240 ns/op", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			recs, err := Parse(strings.NewReader(raw), name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if IsRecording(recs) {
+				t.Fatal("malformed raw format accepted after benchfmt normalization")
+			}
+		})
 	}
 }
 

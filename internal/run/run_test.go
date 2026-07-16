@@ -19,6 +19,7 @@ func TestProvenanceConfigKeysAndOrder(t *testing.T) {
 		Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc",
 	})
 	want := []struct{ key, value string }{
+		{"pew-format", RecordingFormat},
 		{"commit", "c1"},
 		{"toolchain", "tc"},
 		{"machine", "m"},
@@ -166,5 +167,23 @@ func TestParseAndDemux(t *testing.T) {
 	}
 	if cfg[0].Key != "goos" {
 		t.Errorf("original config lost; first key = %q", cfg[0].Key)
+	}
+}
+
+func TestParseRejectsReservedFormatConfig(t *testing.T) {
+	for name, line := range map[string]string{
+		"format-space":  "pew-format: 2",
+		"format-tab":    "pew-format:\t2",
+		"format-delete": "pew-format:",
+		"purity":        "pure: true",
+		"guard":         "commit: forged",
+		"unknown-pew":   "pew-future: forged",
+	} {
+		t.Run(name, func(t *testing.T) {
+			out := []byte(line + "\nBenchmarkRun-8 1 1 ns/op\n")
+			if _, err := Parse(out); err == nil {
+				t.Fatalf("reserved configuration %q accepted", line)
+			}
+		})
 	}
 }

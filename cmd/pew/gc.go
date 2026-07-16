@@ -112,12 +112,16 @@ func runGC(w io.Writer, benchDir string) error {
 }
 
 func gcStore(st *store.Store, live map[string]map[string]bool, protected map[string]bool) ([]string, error) {
-	recs, err := st.List()
+	recs, err := st.ListCandidates()
 	if err != nil {
 		return nil, err
 	}
 	var removed []string
 	for _, r := range recs {
+		parsed, err := st.Read(r.PkgRel, r.Bench, r.Label)
+		if err != nil || !store.IsRecordingShape(parsed) {
+			continue
+		}
 		if protected[r.PkgRel] {
 			continue
 		}
@@ -134,11 +138,15 @@ func gcStore(st *store.Store, live map[string]map[string]bool, protected map[str
 }
 
 func addStoreOnlySourceBenchmarks(st *store.Store, moduleDir string, live map[string]map[string]bool, protected map[string]bool) error {
-	recs, err := st.List()
+	recs, err := st.ListCandidates()
 	if err != nil {
 		return err
 	}
 	for _, r := range recs {
+		parsed, err := st.Read(r.PkgRel, r.Bench, r.Label)
+		if err != nil || !store.IsRecordingShape(parsed) {
+			continue
+		}
 		if _, ok := live[r.PkgRel]; ok || protected[r.PkgRel] {
 			continue
 		}

@@ -1,14 +1,9 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
@@ -50,6 +45,7 @@ func TestApplyPurity(t *testing.T) {
 // pew owns the serialization; gofresh owns the semantics).
 func TestFingerprintFromConfig(t *testing.T) {
 	cfg := []benchfmt.Config{
+		{Key: "pew-format", Value: []byte(runpkg.RecordingFormat)},
 		{Key: "commit", Value: []byte("c1")},
 		{Key: "toolchain", Value: []byte("tc")},
 		{Key: "machine", Value: []byte("m")},
@@ -61,7 +57,10 @@ func TestFingerprintFromConfig(t *testing.T) {
 		{Key: "pew-purity", Value: []byte("source directive")},
 		{Key: "pure", Value: []byte("true")},
 	}
-	fp, pure := fingerprintFromConfig(cfg)
+	fp, pure, ok := fingerprintFromConfig(cfg)
+	if !ok {
+		t.Fatal("current recording format rejected")
+	}
 	if fp.MaximalClosure != "cl" || fp.RuntimeInputs != "manifest" || fp.RuntimeDigest != "rd" || fp.PurityAssertion != "source directive" || fp.ResultKind != gofresh.Measurement {
 		t.Errorf("fingerprint closure/runtime fields = %+v", fp)
 	}
@@ -72,83 +71,49 @@ func TestFingerprintFromConfig(t *testing.T) {
 	if pure != "true" {
 		t.Errorf("pure = %q, want true", pure)
 	}
+	unknown := append([]benchfmt.Config(nil), cfg...)
+	unknown[0].Value = []byte("2")
+	duplicate := append(append([]benchfmt.Config(nil), cfg...), benchfmt.Config{Key: "pew-format", Value: []byte(runpkg.RecordingFormat)})
+	for name, malformed := range map[string][]benchfmt.Config{"unknown": unknown, "duplicate": duplicate} {
+		if _, _, ok := fingerprintFromConfig(malformed); ok {
+			t.Errorf("%s recording format accepted", name)
+		}
+	}
 
-	fp, pure = fingerprintFromConfig(nil)
-	if fp.ResultKind != gofresh.Measurement || fp.MaximalClosure != "" || fp.Guards != (guard.Guards{}) || pure != "" {
-		t.Errorf("empty config: fp=%+v pure=%q, want empty measurement", fp, pure)
+	fp, pure, ok = fingerprintFromConfig(nil)
+	if ok || fp != (gofresh.Fingerprint{}) || pure != "" {
+		t.Errorf("unversioned config: fp=%+v pure=%q ok=%v, want rejection", fp, pure, ok)
 	}
 }
 
-func TestLegacyRuntimeManifestsUseOrdinaryChecking(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/legacyruntime\n\ngo 1.26.4\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "bench_test.go"), []byte("package legacyruntime\n\nimport \"testing\"\n\nfunc BenchmarkNoIO(b *testing.B) {}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	fixture := filepath.Join(dir, "fixture.txt")
-	if err := os.WriteFile(fixture, []byte("original\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	e, err := newEngine(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	const pkg = "example.com/legacyruntime"
-	const bench = "BenchmarkNoIO"
-	subject := gofresh.Subject{Package: pkg, Symbol: bench}
-	fp, err := e.CaptureFor(subject, dir, gofresh.Measurement)
-	if err != nil {
-		t.Fatal(err)
-	}
-	complete, err := runtimeinput.FromTestLog([]byte("open fixture.txt\n"), dir, dir, runtimeinput.WithCompletedProcess("legacy-package-test-binary"))
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestUnversionedRecordingIsStale(t *testing.T) {
 	st := store.New(t.TempDir())
-	write := func(label string, state runtimeinput.State) {
-		t.Helper()
-		cfg := append(runpkg.ProvenanceConfig("c1", false, fp.Guards), runpkg.ClosureConfig(fp.MaximalClosure))
-		cfg = append(cfg, runpkg.RuntimeConfig(state.Digest, state.Manifest)...)
-		recs := []*benchfmt.Result{{Name: benchfmt.Name("NoIO"), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
-		if err := st.Write("", bench, label, recs); err != nil {
-			t.Fatal(err)
-		}
+	recs := []*benchfmt.Result{{Name: benchfmt.Name("NoIO"), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: []benchfmt.Config{{Key: "pew-runtime", Value: []byte("old")}}}}
+	if err := st.Write("", "BenchmarkNoIO", "", recs); err != nil {
+		t.Fatal(err)
 	}
-	write("complete", complete.State)
-
-	v, reason, err := checkOne(st, e, pkg, "", dir, bench, "complete")
+	v, reason, err := checkOne(st, nil, "example.com/old", "", "", "BenchmarkNoIO", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != verdictValid || reason != "" {
-		t.Fatalf("unchanged complete legacy manifest = {%s %q}, want valid", v, reason)
+	if v != verdictStale || reason != "format" {
+		t.Fatalf("unversioned recording = {%s %q}, want stale format", v, reason)
 	}
-	if err := os.WriteFile(fixture, []byte("changed\n"), 0o644); err != nil {
+	incomplete := []*benchfmt.Result{{Name: benchfmt.Name("NoIO"), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: []benchfmt.Config{
+		{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
+		{Key: "toolchain", Value: []byte("go"), File: true}, {Key: "machine", Value: []byte("m"), File: true},
+		{Key: "buildconfig", Value: []byte("b"), File: true}, {Key: "runtimeconfig", Value: []byte("r"), File: true},
+		{Key: "dirty", Value: []byte("false"), File: true}, {Key: "pew-closure", Value: []byte("c"), File: true},
+		{Key: "pew-runtime", Value: []byte("d"), File: true}, {Key: "pew-runtime-inputs", Value: []byte("i"), File: true},
+	}}}
+	if err := st.Write("", "BenchmarkNoIO", "incomplete", incomplete); err != nil {
 		t.Fatal(err)
 	}
-	v, reason, err = checkOne(st, e, pkg, "", dir, bench, "complete")
+	v, reason, err = checkOne(st, nil, "example.com/old", "", "", "BenchmarkNoIO", "incomplete")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != verdictStale || reason != "runtimeinputs" {
-		t.Fatalf("changed complete legacy manifest = {%s %q}, want stale runtimeinputs", v, reason)
-	}
-
-	if err := os.WriteFile(fixture, []byte("original\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	unverifiable, err := runtimeinput.FromTestLog([]byte("stat fixture.txt\n"), dir, dir, runtimeinput.WithCompletedProcess("legacy-package-test-binary"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	write("unverifiable", unverifiable.State)
-	v, reason, err = checkOne(st, e, pkg, "", dir, bench, "unverifiable")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if v != verdictUnverifiable || !strings.Contains(reason, "stat metadata input") {
-		t.Fatalf("unverifiable legacy manifest = {%s %q}, want unverifiable metadata reason", v, reason)
+	if v != verdictStale || reason != "format" {
+		t.Fatalf("incomplete format-1 recording = {%s %q}, want stale format", v, reason)
 	}
 }

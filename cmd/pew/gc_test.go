@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
 )
@@ -20,10 +21,12 @@ func writeRecording(t *testing.T, st *store.Store, pkgRel, bench, label string) 
 		Iters:  1,
 		Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}},
 		Config: []benchfmt.Config{
+			{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
 			{Key: "commit", Value: []byte("c1"), File: true},
 			{Key: "toolchain", Value: []byte("go-test"), File: true},
 			{Key: "machine", Value: []byte("m1"), File: true},
 			{Key: "buildconfig", Value: []byte("b1"), File: true},
+			{Key: "runtimeconfig", Value: []byte("r1"), File: true},
 			{Key: "dirty", Value: []byte("false"), File: true},
 			{Key: "pew-closure", Value: []byte("cl1"), File: true},
 			{Key: "pew-runtime", Value: []byte("rt1"), File: true},
@@ -62,6 +65,14 @@ func TestGCStoreRemovesOnlyMissingBenchmarks(t *testing.T) {
 	hiddenLabel := writeRecording(t, st, "internal/foo", "BenchmarkTagged", "exp")
 	deadLabel := writeRecording(t, st, "internal/foo", "BenchmarkDeleted", "exp")
 	deadPkg := writeRecording(t, st, "internal/old", "BenchmarkOld", "")
+	deadPkgData, err := os.ReadFile(deadPkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadPkgData = bytes.Replace(deadPkgData, []byte("pew-format: 1\n"), nil, 1)
+	if err := os.WriteFile(deadPkg, deadPkgData, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	protected := writeRecording(t, st, "internal/broken", "BenchmarkMaybe", "")
 	ignored := filepath.Join(st.Root, "README.txt")
 	if err := os.WriteFile(ignored, []byte("not a pew recording"), 0o644); err != nil {

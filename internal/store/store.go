@@ -317,6 +317,22 @@ func (s *Store) Read(pkgRel, bench, label string) ([]*benchfmt.Result, error) {
 // the store. Files that do not match pew's storage layout are ignored: gc removes
 // stored results, not arbitrary user files that happen to live under bench-dir.
 func (s *Store) List() ([]Recording, error) {
+	candidates, err := s.ListCandidates()
+	if err != nil {
+		return nil, err
+	}
+	var out []Recording
+	for _, candidate := range candidates {
+		if isPewRecording(candidate.Path) {
+			out = append(out, candidate)
+		}
+	}
+	return out, nil
+}
+
+// ListCandidates returns safely-addressable files in Pew's recording layout
+// without interpreting their format.
+func (s *Store) ListCandidates() ([]Recording, error) {
 	var out []Recording
 	root, err := s.checkedRoot()
 	if err != nil {
@@ -332,7 +348,7 @@ func (s *Store) List() ([]Recording, error) {
 		if d.IsDir() || filepath.Ext(path) != ".txt" {
 			return nil
 		}
-		r, ok := s.recordingFromPath(path)
+		r, ok := s.candidateFromPath(path)
 		if ok {
 			out = append(out, r)
 		}
@@ -379,6 +395,14 @@ func (s *Store) KeyFromPath(path string) (Recording, bool) {
 }
 
 func (s *Store) recordingFromPath(path string) (Recording, bool) {
+	r, ok := s.candidateFromPath(path)
+	if !ok || !isPewRecording(path) {
+		return Recording{}, false
+	}
+	return r, true
+}
+
+func (s *Store) candidateFromPath(path string) (Recording, bool) {
 	r, ok := s.KeyFromPath(path)
 	if !ok {
 		return Recording{}, false
@@ -388,9 +412,6 @@ func (s *Store) recordingFromPath(path string) (Recording, bool) {
 	}
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return Recording{}, false
-	}
-	if !isPewRecording(path) {
 		return Recording{}, false
 	}
 	return r, true
@@ -413,19 +434,37 @@ func isPewRecording(path string) bool {
 // guard keys. It lets callers distinguish pew recordings from arbitrary benchmark
 // files that happen to match the storage path shape.
 func IsRecording(recs []*benchfmt.Result) bool {
+	if !IsRecordingShape(recs) {
+		return false
+	}
+	cfg := map[string]string{}
+	formatCount := 0
+	for _, c := range recs[0].Config {
+		cfg[c.Key] = string(c.Value)
+		if c.Key == "pew-format" {
+			formatCount++
+		}
+	}
+	return cfg["pew-format-invalid"] != "true" && formatCount == 1 && cfg["pew-format"] == "1"
+}
+
+// IsRecordingShape reports whether results carry Pew provenance independent
+// of the format discriminator. It distinguishes stale pre-format recordings
+// from arbitrary benchmark files without interpreting their fingerprint.
+func IsRecordingShape(recs []*benchfmt.Result) bool {
 	if len(recs) == 0 {
 		return false
 	}
-	cfg := map[string]bool{}
+	cfg := map[string]string{}
 	for _, c := range recs[0].Config {
-		cfg[c.Key] = true
+		cfg[c.Key] = string(c.Value)
 	}
-	for _, key := range []string{"commit", "toolchain", "machine", "buildconfig", "dirty", "pew-closure", "pew-runtime", "pew-runtime-inputs"} {
-		if !cfg[key] {
+	for _, key := range []string{"commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pew-closure", "pew-runtime", "pew-runtime-inputs"} {
+		if cfg[key] == "" {
 			return false
 		}
 	}
-	return true
+	return cfg["dirty"] == "true" || cfg["dirty"] == "false"
 }
 
 // Remove deletes a recording and prunes empty package directories up to the store
@@ -593,7 +632,12 @@ func checkRegularFile(path string) error {
 // rejects malformed input and unexpected record kinds rather than silently
 // dropping data (INV-3), and rejects an empty recording.
 func Parse(r io.Reader, name string) ([]*benchfmt.Result, error) {
-	rd := benchfmt.NewReader(r, name)
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("store: read recording %s: %w", name, err)
+	}
+	formatValid := rawFormatValid(data)
+	rd := benchfmt.NewReader(bytes.NewReader(data), name)
 	var out []*benchfmt.Result
 	for rd.Scan() {
 		switch rec := rd.Result().(type) {
@@ -616,5 +660,43 @@ func Parse(r io.Reader, name string) ([]*benchfmt.Result, error) {
 	if len(out) == 0 {
 		return nil, fmt.Errorf("store: empty recording %s", name)
 	}
+	if !formatValid {
+		for _, result := range out {
+			result.Config = append(result.Config, benchfmt.Config{Key: "pew-format-invalid", Value: []byte("true")})
+		}
+	}
 	return out, nil
+}
+
+func rawFormatValid(data []byte) bool {
+	counts := map[string]int{}
+	valid := true
+	for _, line := range bytes.Split(data, []byte{'\n'}) {
+		colon := bytes.IndexByte(line, ':')
+		if colon < 0 {
+			continue
+		}
+		key := string(line[:colon])
+		if !recordingConfigKey(key) {
+			if strings.HasPrefix(key, "pew-") {
+				valid = false
+			}
+			continue
+		}
+		counts[key]++
+		valid = valid && counts[key] == 1
+		if key == "pew-format" {
+			valid = valid && bytes.Equal(line, []byte("pew-format: 1"))
+		}
+	}
+	return counts["pew-format"] == 1 && valid
+}
+
+func recordingConfigKey(key string) bool {
+	switch key {
+	case "pew-format", "commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pew-closure", "pew-runtime", "pew-runtime-inputs", "pew-purity", "pure":
+		return true
+	default:
+		return false
+	}
 }

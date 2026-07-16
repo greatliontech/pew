@@ -84,6 +84,7 @@ global config lines):
 
 | key                  | meaning                                                       | source-of-truth? |
 |----------------------|---------------------------------------------------------------|------------------|
+| `pew-format`         | exact Pew recording format version, currently `1`            | yes              |
 | `commit`             | full SHA of HEAD at run time                                  | yes              |
 | `toolchain`          | `go version` output (compiler/runtime identity)               | yes              |
 | `machine`            | machine fingerprint id (§8)                                   | yes              |
@@ -94,6 +95,13 @@ global config lines):
 | `pew-runtime-inputs` | encoded runtime-input manifest or incomplete disposition (§7.8) | yes            |
 | `pew-purity`         | attributable Gofresh purity evidence used for this fingerprint | yes            |
 
+`pew-format` occurs exactly once as the byte-exact LF-terminated line `pew-format: 1`. A recording
+with no discriminator, a duplicate, alternate whitespace or line endings, or another value is
+`stale (format)` and MUST be regenerated; Pew never interprets it as an earlier shape. Benchmark
+output that attempts to define `pew-*` or any other Pew-owned provenance, guard, or purity key is
+refused before storage. A format-1 recording missing any mandatory field is likewise `stale (format)`
+before guard or purity interpretation.
+Format governs interpretation rather than measurement identity and is projected from comparisons.
 `pew-purity` is benchmark-specific despite the surrounding uniform provenance keys and is omitted
 when capture used no purity assertion; omission is the canonical no-attribution encoding.
 
@@ -105,9 +113,8 @@ additionally strips `pew-*` keys from its own comparison projections (§10). The
 fully self-describing — everything needed to evaluate its own validity lives in one file.
 
 Runtime-input evidence uses the same in-band rule: `pew-runtime-inputs` is the recorded manifest and
-`pew-runtime` is its digest. New recordings carry a canonical incomplete disposition rather than
-observed identities (§7.8). Previously released manifests remain readable under their existing
-ordinary runtime-input guard semantics.
+`pew-runtime` is its digest. Format-1 recordings carry a canonical incomplete disposition rather than
+observed identities (§7.8).
 
 A `dirty` run is recorded but flagged: its `commit` does not faithfully describe its source, so
 its closure is computed from the *working tree*, and it is never usable as a pinned baseline.
@@ -205,6 +212,9 @@ log is required, and provenance-in-band is mandatory regardless of append-vs-ove
 A stored result `R` for benchmark `B` gets one of **three verdicts** for HEAD, and the governing
 rule is **`valid` requires proof**. `unrecorded` is a `status` inventory state for a missing stored
 result, not a verdict about an existing result.
+
+Exact format validation is a prerequisite to the six-guard predicate below. A format failure is
+`stale (format)` without interpreting any guard or purity field.
 
 - **valid** (reuse `R`) — all six guards below provably hold over a soundly over-approximated
   closure, and either neither the closure nor runtime-input manifest carries an unverifiable
@@ -474,16 +484,9 @@ particular, a transient read error followed by a successful process exit cannot 
 because the process exited zero. An explicit purity assertion retains its separate full-trust
 semantics from §7.5.
 
-Previously recorded complete identity manifests remain guard evidence: status decodes the manifest,
-re-hashes its environment names and paths in the current working tree/environment, and compares the
-digest to `pew-runtime`. A mismatch, malformed manifest, or unevaluable identity is `stale` with
-reason `runtimeinputs`; manifest-level unverifiability remains `unverifiable`. A recording carrying
-no manifest is the caller's assertion that the run observed no runtime inputs under Gofresh
-`REQ-inputs-absent-asserted`.
-
-Pew defines and reads no positive observation-proof metadata. New and previously released recordings
-are checked through Gofresh's ordinary fingerprint path; older recordings naturally lack the
-incomplete disposition and retain their existing manifest semantics.
+Pew defines and reads no positive observation-proof metadata. Format-1 recordings are checked through
+Gofresh's ordinary fingerprint path. Unversioned recordings are rejected at the Pew format boundary
+before their runtime manifest or any other fingerprint field is interpreted.
 
 ## 8. Machine fingerprint
 
@@ -698,15 +701,14 @@ Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred
 - **INV-3 — Artifact format compatibility.** Every stored `.txt` is a well-formed Go
   benchmark-format file parseable by `benchfmt` and plain `benchstat`. *Violation:* a written file
   that `benchfmt` rejects → ecosystem lock-in, G5 broken. *Kind:* clause-explicit (§5, G5).
-- **INV-4 — Provenance completeness.** Every newly produced result carries the provenance and
-  manifests required to evaluate all six guards: `pew run` always writes the commit, the runtime-input
-  manifest (a canonical incomplete disposition for every new run, §7.8), and the four environment
+- **INV-4 — Provenance completeness.** Every produced result carries format `1` and the provenance
+  and manifests required to evaluate all six guards: `pew run` always writes the commit, the runtime-input
+  manifest (a canonical incomplete disposition for every run, §7.8), and the four environment
   guard lines.
   *Violation:* a result missing `commit` or a guard value → the guard is unevaluable → validity
-  undecidable → must conservatively re-run, defeating G1/G2. A recorded `pew-runtime` digest without
-  its manifest is corruption and stale; a new recording without the incomplete disposition violates
-  the producer contract. An older recording carrying neither manifest nor digest retains Gofresh's
-  existing caller assertion of no observed inputs. *Kind:*
+  undecidable → must conservatively re-run, defeating G1/G2. A missing or unknown format is rejected
+  without interpretation. A recorded `pew-runtime` digest without its manifest is corruption and stale;
+  a recording without the incomplete disposition violates the producer contract. *Kind:*
   entailed.
 - **INV-5 — Derived state is never authoritative.** Persisted closure hashes are a memoization keyed
   *only* by immutable inputs `(commit, toolchain, buildconfig)`; they are never the source of truth

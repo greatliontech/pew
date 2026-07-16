@@ -12,6 +12,7 @@ import (
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/pew/internal/gotool"
+	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 	"github.com/spf13/cobra"
 	"golang.org/x/perf/benchfmt"
@@ -133,7 +134,13 @@ func checkOne(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, be
 	case err != nil:
 		return "", "", err
 	}
-	fp, pure := fingerprintFromConfig(recs[0].Config)
+	if !store.IsRecordingShape(recs) {
+		return verdictStale, "format", nil
+	}
+	fp, pure, ok := fingerprintFromConfig(recs[0].Config)
+	if !ok {
+		return verdictStale, "format", nil
+	}
 	v, err := e.Check(fp, gofresh.Subject{Package: pkgPath, Symbol: bench}, moduleDir)
 	if err != nil {
 		return "", "", err
@@ -145,10 +152,17 @@ func checkOne(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, be
 // fingerprintFromConfig reads the recorded fingerprint out of a recording's config
 // lines (spec §5: pew owns the serialization, gofresh owns the semantics), plus the
 // recorded per-benchmark purity flag ("" when none).
-func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string) {
+func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, bool) {
 	m := make(map[string]string, len(cfg))
+	formatCount := 0
 	for _, c := range cfg {
 		m[c.Key] = string(c.Value)
+		if c.Key == "pew-format" {
+			formatCount++
+		}
+	}
+	if m["pew-format-invalid"] == "true" || formatCount != 1 || m["pew-format"] != runpkg.RecordingFormat {
+		return gofresh.Fingerprint{}, "", false
 	}
 	return gofresh.Fingerprint{
 		MaximalClosure: m["pew-closure"],
@@ -162,7 +176,7 @@ func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string) 
 		RuntimeInputs:   m["pew-runtime-inputs"],
 		RuntimeDigest:   m["pew-runtime"],
 		ResultKind:      gofresh.Measurement,
-	}, m["pure"]
+	}, m["pure"], true
 }
 
 // applyPurity folds the recorded per-benchmark purity flag into the engine verdict
