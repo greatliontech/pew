@@ -1,4 +1,4 @@
-version: '3'
+version: "3"
 
 tasks:
   build:
@@ -29,3 +29,10 @@ tasks:
   check:
     desc: Vet + test
     deps: [vet, test]
+
+  install:
+    cmds:
+      - mkdir -p $HOME/.local/bin $HOME/.local/share/zsh/site-functions
+      - go build -o $HOME/.local/bin/pew ./cmd/pew
+      - $HOME/.local/bin/pew completion zsh > $HOME/.local/share/zsh/site-functions/_pew
+      - echo "note - ensure fpath includes ~/.local/share/zsh/site-functions before compinit"
