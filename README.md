@@ -31,6 +31,13 @@
    pew stat main HEAD
    ```
 
+   In CI, gate on regressions with `pew stat --fail-on-regression`. The gate fails
+   closed: a regression on a gated metric exits `1`, and a comparison that measured
+   nothing on a gated unit — no recordings yet, or every candidate skipped — exits `2`
+   with a diagnostic naming why, instead of passing vacuously. When some benchmarks
+   compare and others are skipped, the compared subset alone decides the exit. Without
+   the flag, `pew stat` is informational and exits `0`.
+
 5. Remove recordings for benchmarks that no longer exist:
 
    ```sh

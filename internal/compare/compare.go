@@ -68,11 +68,46 @@ func DefaultOptions() Options {
 
 // Result is the outcome of a comparison: one table per (file config, unit) plus
 // notes for benchmarks that could not be compared (one-sided, missing/mixed
-// provenance, or variant-guard mismatch). The notes exist so that an
-// un-comparable benchmark is never silently dropped.
+// provenance, variant-guard mismatch, or no metric unit present on both sides).
+// The notes exist so that an un-comparable benchmark is never silently dropped.
 type Result struct {
 	Tables []*Table
 	Notes  []string
+	// OneSided, GuardMismatch, and NoCommonUnit count the benchmarks surfaced
+	// as notes instead of compared: present on one side only, blocked by a
+	// missing/mixed/differing provenance guard, or two-sided with no metric
+	// unit present on both sides. They let a caller whose comparison set came
+	// out empty name why it is empty (spec §10.1: an empty comparison is
+	// diagnosed, never silently reported clean).
+	OneSided      int
+	GuardMismatch int
+	NoCommonUnit  int
+}
+
+// ComparedRows returns the number of (benchmark, unit) comparisons actually
+// performed — the rows across every table.
+func (r *Result) ComparedRows() int {
+	n := 0
+	for _, t := range r.Tables {
+		n += len(t.Rows)
+	}
+	return n
+}
+
+// GatedComparisons returns how many compared rows are on gated units — the rows
+// --fail-on-regression actually judges. Zero means the gate measured nothing,
+// which must never read as a clean pass (spec §10.1) even though Regressed()
+// is vacuously false.
+func (r *Result) GatedComparisons() int {
+	n := 0
+	for _, t := range r.Tables {
+		for _, row := range t.Rows {
+			if row.Gated {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // Table holds the per-benchmark comparison rows for one file configuration and
@@ -251,23 +286,22 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 				side = "new"
 			}
 			res.Notes = append(res.Notes, fmt.Sprintf("%s: only present in %s; not compared", g.label(), side))
+			res.OneSided++
 			continue
 		}
 		if note, ok := g.guardNote(); ok {
 			res.Notes = append(res.Notes, note)
+			res.GuardMismatch++
 			continue
 		}
-		// Run conditions are surfaced, not gated (spec §10.1): the note is
-		// appended and the comparison still proceeds.
-		if note, ok := g.conditionsNote(); ok {
-			res.Notes = append(res.Notes, note)
-		}
-
+		condNote, hasCondNote := g.conditionsNote()
+		rows := 0
 		for _, unit := range sortUnits(g.units) {
 			c := g.cells[unit]
 			if len(c.base) == 0 || len(c.newer) == 0 {
 				continue // metric present on only one side
 			}
+			rows++
 			bs := benchmath.NewSample(c.base, th)
 			ns := benchmath.NewSample(c.newer, th)
 			bsum := benchmath.AssumeNothing.Summary(bs, opts.Confidence)
@@ -303,6 +337,25 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 				Gated:      opts.GateUnits[unit],
 				Warnings:   collectWarnings(bsum.Warnings, nsum.Warnings, cmp.Warnings),
 			})
+		}
+		// Two-sided with every metric unit one-sided (disjoint unit sets):
+		// no row was produced, so without a note the benchmark would vanish
+		// from the output entirely — the silent drop the notes exist to
+		// prevent. The run-conditions note (spec §10.1: surfaced, not gated —
+		// appended while the comparison still proceeds) is emitted only when
+		// rows exist: with nothing compared it would annotate a comparison
+		// that never happened. The mixed-within-a-side variant is the
+		// exception — it reports internally inconsistent provenance, an
+		// integrity signal that stands regardless of whether anything
+		// compared.
+		if rows == 0 {
+			res.Notes = append(res.Notes, fmt.Sprintf("%s: no metric unit present on both sides; not compared", g.label()))
+			res.NoCommonUnit++
+			if hasCondNote && (g.baseConds.mixed || g.newConds.mixed) {
+				res.Notes = append(res.Notes, condNote)
+			}
+		} else if hasCondNote {
+			res.Notes = append(res.Notes, condNote)
 		}
 	}
 

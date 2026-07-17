@@ -633,6 +633,17 @@ flags real-but-trivial changes; a floor without significance flags noise.
   meeting the three conditions. **`--fail-on-regression`** drives a non-zero exit on the same
   criterion for CI. `sec/op` gates by default; `allocs/op` and `B/op` are flagged but failing on
   them is opt-in.
+- **The gate never passes vacuously.** `--fail-on-regression` asserts "compared and clean", not
+  merely "no regression seen": exit status `0` requires at least one gated-unit comparison to have
+  actually been performed with no gated regression. When zero benchmarks are statistically compared
+  on any gated unit — nothing recorded on either side, every candidate skipped (stale format, dirty
+  baseline, one-sided, provenance guard mismatch, no shared metric unit), or metrics compared but
+  none among the gated units — the exit is non-zero and **distinct from the regression exit**: a
+  detected regression exits `1`, an empty gated comparison exits `2`, each with a diagnostic on
+  stderr naming its cause. In a partial comparison the compared subset alone governs the exit;
+  skipped benchmarks surface as warnings/notes, never silently. Without `--fail-on-regression` an
+  empty comparison stays informational (exit `0`), and the "no recorded benchmarks to compare" line
+  names why when the cause is determinable from the inventoried recordings.
 - Comparison projects *away* pew's own provenance keys (`commit`, `pew-closure`, …) so differing
   metadata doesn't fragment the benchstat grouping, and separately requires non-empty equal
   `machine`, `toolchain`, `buildconfig`, and `runtimeconfig` — never comparing across machine
@@ -776,3 +787,12 @@ Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred
   transient-mismatch trap §8 excludes by construction. *Kind:* entailed (from §8's exclusion and
   the §5.1 identity/validity keys). *Anchor tests:* two recordings differing only in
   `pew-runconditions` ⇒ both valid; ⇒ compared (with a note), never fragmented or blocked.
+- **INV-10 — The regression gate is never vacuously green.** Under `--fail-on-regression`, exit
+  status `0` requires at least one gated-unit comparison to have been performed and found clean
+  (§10.1); an empty gated comparison set exits non-zero with a status distinct from the regression
+  exit and a cause-naming diagnostic. *Violation:* a repo with no recordings yet (or every recording
+  skipped) wires `pew stat --fail-on-regression` as a CI gate; the gate exits `0` — passing
+  precisely when it measured nothing — and a regression lands behind a green check: the silent-
+  staleness failure (§1) reproduced at the gate itself. *Kind:* clause-explicit (§10.1). *Anchor
+  tests:* empty store under the flag ⇒ exit `2` with diagnostic; all candidates skipped ⇒ exit `2`
+  with per-cause tally; partial skip with a clean compared subset ⇒ exit `0`.

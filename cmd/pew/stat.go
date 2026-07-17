@@ -103,6 +103,70 @@ func parseGateUnits(s string) (map[string]bool, error) {
 	return out, nil
 }
 
+// nothingComparedError is the --fail-on-regression empty-comparison failure
+// (spec §10.1): the gate measured nothing on any gated unit, so a clean-pass
+// exit would be vacuous — the gate would pass precisely when it measured
+// nothing. main maps it to a distinct exit status so CI can tell "compared and
+// clean" (0), "regression detected" (1), and "nothing compared" (2) apart.
+type nothingComparedError struct{ reason string }
+
+func (e *nothingComparedError) Error() string {
+	return "fail-on-regression: nothing compared — " + e.reason
+}
+
+// statTally counts the disposition of every inventoried comparison candidate
+// that runStat skips before the compare pipeline, so an empty comparison can
+// name its cause (spec §10.1): the informational view prints it, and under
+// --fail-on-regression the failure carries it.
+type statTally struct {
+	inventoried int // recording keys with at least one readable side
+	staleFormat int // skipped: a side is stale (format)
+	dirty       int // skipped: a ref-resolved side is a dirty recording
+}
+
+// emptyReason names why a comparison produced no gated rows: nothing recorded,
+// every candidate skipped (with per-cause counts, spanning both runStat's own
+// skips and the compare pipeline's uncompared notes), or metrics compared but
+// none on a gated unit. The skip causes carry two denominations — stale
+// format / dirty count recording files, while the compare-pipeline causes
+// count benchmarks (one file's sub-benchmarks fan out to several) — so the
+// wording names each and never implies the counts sum to the recording total.
+func (t statTally) emptyReason(res *compare.Result, gateUnits map[string]bool) string {
+	if n := res.ComparedRows(); n > 0 {
+		return fmt.Sprintf("%d metric(s) compared, none on a gated unit (%s)", n, gateUnitList(gateUnits))
+	}
+	if t.inventoried == 0 {
+		return "no recordings on either side (run `pew run` first)"
+	}
+	var parts []string
+	add := func(n int, cause string) {
+		if n > 0 {
+			parts = append(parts, fmt.Sprintf("%s: %d", cause, n))
+		}
+	}
+	add(t.staleFormat, "stale format")
+	add(t.dirty, "dirty recording")
+	add(res.OneSided, "one-sided benchmarks")
+	add(res.GuardMismatch, "guard-mismatched benchmarks")
+	add(res.NoCommonUnit, "benchmarks with no shared metric unit")
+	if len(parts) == 0 {
+		return fmt.Sprintf("%d recording(s) yielded no comparison", t.inventoried)
+	}
+	return fmt.Sprintf("%d recording(s) found, none compared (%s)", t.inventoried, strings.Join(parts, "; "))
+}
+
+func gateUnitList(units map[string]bool) string {
+	if len(units) == 0 {
+		return "none configured"
+	}
+	out := make([]string, 0, len(units))
+	for u := range units {
+		out = append(out, u)
+	}
+	sort.Strings(out)
+	return strings.Join(out, ", ")
+}
+
 // baseline names the two sides of a comparison. newRef == "" means the new side
 // is the working-tree recording (the latest `pew run`), giving "git diff
 // semantics" for the auto and pinned modes (spec §10).
@@ -198,6 +262,7 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 	// every consumer of the shared engine). In A/B mode both sides are historical
 	// recordings and no staleness check applies.
 	engines := map[string]*gofresh.Engine{}
+	var tally statTally
 
 	for _, m := range modules {
 		if err := addStatInventory(m, bl, sc.label); err != nil {
@@ -217,13 +282,16 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 			if !baseOK && !newOK {
 				continue // never recorded on either side — nothing to say
 			}
+			tally.inventoried++
 			if baseOK {
 				if !store.IsRecordingShape(baseRecs) {
 					fmt.Fprintf(errw, "pew: warning: baseline %s:%s is stale (format); skipping — re-run `pew run`\n", bl.baseRef, key.bench)
+					tally.staleFormat++
 					continue
 				}
 				if _, _, ok := fingerprintFromConfig(baseRecs[0].Config); !ok {
 					fmt.Fprintf(errw, "pew: warning: baseline %s:%s is stale (format); skipping — re-run `pew run`\n", bl.baseRef, key.bench)
+					tally.staleFormat++
 					continue
 				}
 			}
@@ -234,6 +302,7 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 						side = "working-tree"
 					}
 					fmt.Fprintf(errw, "pew: warning: %s recording %s.%s is stale (format); skipping — re-run `pew run`\n", side, key.pkgRel, key.bench)
+					tally.staleFormat++
 					continue
 				}
 				if _, _, ok := fingerprintFromConfig(newRecs[0].Config); !ok {
@@ -242,6 +311,7 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 						side = "working-tree"
 					}
 					fmt.Fprintf(errw, "pew: warning: %s recording %s.%s is stale (format); skipping — re-run `pew run`\n", side, key.pkgRel, key.bench)
+					tally.staleFormat++
 					continue
 				}
 			}
@@ -253,10 +323,12 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 			// dirty baseline rather than report a verdict against unfaithful numbers.
 			if baseOK && isDirty(baseRecs) {
 				fmt.Fprintf(errw, "pew: warning: baseline %s:%s is a dirty recording; skipping (spec §10)\n", bl.baseRef, key.bench)
+				tally.dirty++
 				continue
 			}
 			if newOK && bl.newRef != "" && isDirty(newRecs) {
 				fmt.Fprintf(errw, "pew: warning: new side %s:%s is a dirty recording; skipping (spec §10)\n", bl.newRef, key.bench)
+				tally.dirty++
 				continue
 			}
 			if checkStale && newOK {
@@ -268,6 +340,7 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 					fp, pure, formatOK := fingerprintFromConfig(newRecs[0].Config)
 					if !formatOK {
 						fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is stale (format) — re-run `pew run`\n", key.pkgRel, key.bench)
+						tally.staleFormat++
 						continue
 					}
 					subj := gofresh.Subject{Package: cur.importPath, Symbol: key.bench}
@@ -297,14 +370,22 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 
 	res := compare.Compare(baseAll, newAll, sc.opts)
 	if len(res.Tables) == 0 && len(res.Notes) == 0 {
-		fmt.Fprintln(w, "no recorded benchmarks to compare")
-		return nil
-	}
-	if err := res.WriteText(w); err != nil {
+		fmt.Fprintln(w, "no recorded benchmarks to compare:", tally.emptyReason(res, sc.opts.GateUnits))
+	} else if err := res.WriteText(w); err != nil {
 		return err
 	}
-	if sc.failOnRegression && res.Regressed() {
+	if !sc.failOnRegression {
+		return nil
+	}
+	if res.Regressed() {
 		return errors.New("regression detected")
+	}
+	// The gate never passes vacuously (spec §10.1): with zero gated-unit
+	// comparisons there is nothing for Regressed() to judge, so a clean exit
+	// would report "no regression" over a set that was never measured. Compared
+	// rows govern a partial comparison; only a fully empty gated set fails.
+	if res.GatedComparisons() == 0 {
+		return &nothingComparedError{reason: tally.emptyReason(res, sc.opts.GateUnits)}
 	}
 	return nil
 }

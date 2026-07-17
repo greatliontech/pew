@@ -18,6 +18,13 @@ a cohort) is skipped without any diagnostic on two paths:
   "no recorded benchmarks to compare" with no hint that recordings exist or why they were skipped.
   The same silence hits pinned mode and an A/B between two pre-change refs. (`pew status` is
   unaffected — it reports `stale (format)` per benchmark.)
+
+  The *gating* arm of this symptom is fixed (spec §10.1, INV-10): `pew stat
+  --fail-on-regression` now exits `2` instead of `0` when nothing was compared, and the
+  empty-comparison line names the cause for every *inventoried* recording. What remains open here
+  is the visibility arm: a recording dropped by `IsRecordingShape` *before* inventory contributes
+  nothing to that diagnostic — the cause reads "no recordings on either side" even though old-shape
+  recordings exist on disk / at the refs.
 - **`pew gc`** (`cmd/pew/gc.go`, both `IsRecordingShape` filters): a shape-failing recording is
   never removed and never reported. Combined with the stat silence, a recording whose benchmark was
   since deleted from source is fully orphaned: no command surfaces it and no command will ever

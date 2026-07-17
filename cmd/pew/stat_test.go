@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -772,5 +774,150 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 	}
 	if v != verdictUnverifiable || reason != "impure" {
 		t.Errorf("checkOne imp = {%s %q}, want {unverifiable impure}", v, reason)
+	}
+}
+
+// TestStatFailOnRegressionEmptyStoreFailsClosed pins the §10.1 empty-comparison
+// gate: with nothing recorded on either side, --fail-on-regression must not
+// exit clean (the gate would pass precisely when it measured nothing), while
+// the flagless invocation stays informational and names why nothing compared.
+func TestStatFailOnRegressionEmptyStoreFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statempty\n\ngo 1.26.4\n")
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	commitAll(t, repo, "base")
+	withWorkingDir(t, dir)
+
+	var out, errOut bytes.Buffer
+	sc := statConfig{opts: compare.DefaultOptions(), failOnRegression: true}
+	err = runStat(&out, &errOut, sc, nil)
+	if err == nil {
+		t.Fatalf("empty comparison under --fail-on-regression exited clean\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+	var empty *nothingComparedError
+	if !errors.As(err, &empty) {
+		t.Fatalf("err = %v (%T), want *nothingComparedError", err, err)
+	}
+	if !strings.Contains(err.Error(), "no recordings on either side") {
+		t.Fatalf("gate diagnostic does not name the cause: %v", err)
+	}
+
+	// Without the flag the same empty comparison is informational: no error
+	// (exit 0) and the no-benchmarks line names why.
+	out.Reset()
+	errOut.Reset()
+	sc.failOnRegression = false
+	if err := runStat(&out, &errOut, sc, nil); err != nil {
+		t.Fatalf("informational empty comparison errored: %v", err)
+	}
+	if !strings.Contains(out.String(), "no recorded benchmarks to compare: no recordings on either side") {
+		t.Fatalf("informational empty message does not name why:\n%s", out.String())
+	}
+}
+
+// TestStatFailOnRegressionAllSkippedFailsClosed: every inventoried candidate is
+// skipped (the new side fails the recording shape), so zero benchmarks are
+// statistically compared — the gate fails with the per-cause tally rather than
+// passing vacuously (spec §10.1).
+func TestStatFailOnRegressionAllSkippedFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statskipgate\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	ghostPath, err := st.Path("pkg", "BenchmarkGhost", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeStatRecording(t, st, "pkg", "BenchmarkGhost", 100)
+	base := commitAll(t, repo, "base")
+	writeFile(t, ghostPath, "machine: m1\ntoolchain: go-test\nbuildconfig: b1\nBenchmarkGhost-8 1 120 sec/op\n")
+	newer := commitAll(t, repo, "newer")
+
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), failOnRegression: true}
+	err = runStat(&out, &errOut, sc, []string{base.String(), newer.String()})
+	var empty *nothingComparedError
+	if !errors.As(err, &empty) {
+		t.Fatalf("all-skipped comparison under --fail-on-regression: err = %v (%T), want *nothingComparedError\nstderr:\n%s", err, err, errOut.String())
+	}
+	if !strings.Contains(err.Error(), "stale format: 1") {
+		t.Fatalf("gate diagnostic does not carry the skip tally: %v", err)
+	}
+}
+
+// TestStatFailOnRegressionPartialSkipGovernedByComparedSubset: when some
+// benchmarks compare and others are skipped, the compared subset alone governs
+// the exit (spec §10.1) — clean compared rows pass the gate despite skips, and
+// a regressing compared row fails it as a regression, not as empty.
+func TestStatFailOnRegressionPartialSkipGovernedByComparedSubset(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statpartial\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	ghostPath, err := st.Path("pkg", "BenchmarkGhost", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeStatRecording(t, st, "pkg", "BenchmarkGood", 100)
+	writeStatRecording(t, st, "pkg", "BenchmarkGhost", 100)
+	base := commitAll(t, repo, "base")
+	writeStatRecording(t, st, "pkg", "BenchmarkGood", 100) // unchanged: no regression
+	writeFile(t, ghostPath, "machine: m1\ntoolchain: go-test\nbuildconfig: b1\nBenchmarkGhost-8 1 120 sec/op\n")
+	clean := commitAll(t, repo, "clean")
+	writeStatRecording(t, st, "pkg", "BenchmarkGood", 130) // ~30% worse: regression
+	regressed := commitAll(t, repo, "regressed")
+
+	withWorkingDir(t, dir)
+	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), failOnRegression: true}
+
+	var out, errOut bytes.Buffer
+	if err := runStat(&out, &errOut, sc, []string{base.String(), clean.String()}); err != nil {
+		t.Fatalf("clean compared subset did not govern the exit: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "stale (format)") {
+		t.Fatalf("skipped benchmark not surfaced:\n%s", errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	err = runStat(&out, &errOut, sc, []string{base.String(), regressed.String()})
+	if err == nil || err.Error() != "regression detected" {
+		t.Fatalf("regressing compared subset: err = %v, want regression detected", err)
+	}
+	var empty *nothingComparedError
+	if errors.As(err, &empty) {
+		t.Fatalf("regression misclassified as empty comparison: %v", err)
+	}
+}
+
+// TestExitCode pins the exit-status contract (spec §10.1): every error exits 1
+// — including "regression detected" — except the empty-comparison gate
+// failure, which exits 2 so CI can tell "regressed" from "measured nothing".
+func TestExitCode(t *testing.T) {
+	if got := exitCode(errors.New("regression detected")); got != 1 {
+		t.Errorf("exitCode(regression) = %d, want 1", got)
+	}
+	if got := exitCode(errors.New("any other failure")); got != 1 {
+		t.Errorf("exitCode(generic) = %d, want 1", got)
+	}
+	if got := exitCode(&nothingComparedError{reason: "no recordings on either side"}); got != 2 {
+		t.Errorf("exitCode(nothing compared) = %d, want 2", got)
+	}
+	if got := exitCode(fmt.Errorf("wrapped: %w", &nothingComparedError{reason: "x"})); got != 2 {
+		t.Errorf("exitCode(wrapped nothing compared) = %d, want 2", got)
 	}
 }

@@ -672,3 +672,103 @@ func TestWriteTextMarksRegression(t *testing.T) {
 		}
 	}
 }
+
+// TestComparedAndGatedCounts pins the row counters the empty-comparison gate
+// reads (spec §10.1): ComparedRows counts every (benchmark, unit) row and
+// GatedComparisons only the rows on gated units, so a comparison with no
+// gated row is detectable even when Regressed() is (vacuously) false.
+func TestComparedAndGatedCounts(t *testing.T) {
+	base := sampleSet("BenchmarkX-8", "m1", map[string][]float64{
+		"sec/op": rep(1000, 8), "B/op": rep(1000, 8),
+	})
+	newer := sampleSet("BenchmarkX-8", "m1", map[string][]float64{
+		"sec/op": rep(1000, 8), "B/op": rep(1000, 8),
+	})
+
+	res := Compare(base, newer, DefaultOptions()) // gate: sec/op
+	if got := res.ComparedRows(); got != 2 {
+		t.Errorf("ComparedRows() = %d, want 2 (sec/op and B/op)", got)
+	}
+	if got := res.GatedComparisons(); got != 1 {
+		t.Errorf("GatedComparisons() = %d, want 1 (sec/op only)", got)
+	}
+
+	// Nothing compared at all: both counters are zero.
+	empty := Compare(nil, nil, DefaultOptions())
+	if empty.ComparedRows() != 0 || empty.GatedComparisons() != 0 {
+		t.Errorf("empty comparison counters = %d/%d, want 0/0", empty.ComparedRows(), empty.GatedComparisons())
+	}
+
+	// Rows exist but none on a gated unit: only the gated counter is zero.
+	opts := DefaultOptions()
+	opts.GateUnits = map[string]bool{"allocs/op": true}
+	unGated := Compare(base, newer, opts)
+	if unGated.ComparedRows() != 2 || unGated.GatedComparisons() != 0 {
+		t.Errorf("ungated comparison counters = %d/%d, want 2/0", unGated.ComparedRows(), unGated.GatedComparisons())
+	}
+}
+
+// TestUncomparedCounters pins the per-cause counters an empty comparison is
+// diagnosed with (spec §10.1): one-sided benchmarks and guard-blocked
+// benchmarks are counted alongside their notes.
+func TestUncomparedCounters(t *testing.T) {
+	oneSided := Compare(sampleSet("BenchmarkOnlyBase-8", "m1", map[string][]float64{"sec/op": seq(1000, 8)}), nil, DefaultOptions())
+	if oneSided.OneSided != 1 || oneSided.GuardMismatch != 0 {
+		t.Errorf("one-sided counters = %d/%d, want 1/0", oneSided.OneSided, oneSided.GuardMismatch)
+	}
+
+	blocked := Compare(
+		sampleSet("BenchmarkX-8", "m1", map[string][]float64{"sec/op": seq(1000, 8)}),
+		sampleSet("BenchmarkX-8", "m2", map[string][]float64{"sec/op": seq(1000, 8)}),
+		DefaultOptions(),
+	)
+	if blocked.GuardMismatch != 1 || blocked.OneSided != 0 {
+		t.Errorf("guard-blocked counters = %d/%d, want 1/0", blocked.GuardMismatch, blocked.OneSided)
+	}
+}
+
+// TestNoCommonUnitNoted: a benchmark present on both sides whose metric units
+// are disjoint yields no comparison row — it must surface as a note (and be
+// counted), never vanish silently.
+func TestNoCommonUnitNoted(t *testing.T) {
+	base := sampleSet("BenchmarkX-8", "m1", map[string][]float64{"sec/op": seq(1000, 8)})
+	newer := sampleSet("BenchmarkX-8", "m1", map[string][]float64{"B/op": seq(1000, 8)})
+	res := Compare(base, newer, DefaultOptions())
+	if len(res.Tables) != 0 {
+		t.Errorf("disjoint-unit benchmark produced %d tables, want 0", len(res.Tables))
+	}
+	if len(res.Notes) != 1 || !strings.Contains(res.Notes[0], "no metric unit present on both sides") {
+		t.Errorf("notes = %v, want one no-common-unit note", res.Notes)
+	}
+	if res.NoCommonUnit != 1 {
+		t.Errorf("NoCommonUnit = %d, want 1", res.NoCommonUnit)
+	}
+
+	// With differing run conditions on top, the conditions note is suppressed:
+	// it annotates a comparison, and none happened — only the no-common-unit
+	// note is emitted.
+	noisy := "governor=powersave turbo=on load1=6.41 throttled=false battery=false"
+	res = Compare(
+		condSet("BenchmarkX-8", quietConds, map[string][]float64{"sec/op": seq(1000, 8)}),
+		condSet("BenchmarkX-8", noisy, map[string][]float64{"B/op": seq(1000, 8)}),
+		DefaultOptions(),
+	)
+	if len(res.Notes) != 1 || !strings.Contains(res.Notes[0], "no metric unit present on both sides") {
+		t.Errorf("notes = %v, want only the no-common-unit note", res.Notes)
+	}
+
+	// The mixed-within-a-side conditions note is an integrity signal
+	// (internally inconsistent provenance), so it survives the suppression:
+	// disjoint units plus a mixed base side yields both notes.
+	mixedBase := append(
+		condSet("BenchmarkX-8", quietConds, map[string][]float64{"sec/op": seq(1000, 4)}),
+		condSet("BenchmarkX-8", noisy, map[string][]float64{"sec/op": seq(1000, 4)})...,
+	)
+	res = Compare(mixedBase, condSet("BenchmarkX-8", quietConds, map[string][]float64{"B/op": seq(1000, 8)}), DefaultOptions())
+	if len(res.Notes) != 2 {
+		t.Fatalf("notes = %v, want no-common-unit plus mixed-conditions", res.Notes)
+	}
+	if !strings.Contains(res.Notes[0], "no metric unit present on both sides") || !strings.Contains(res.Notes[1], "mixed run conditions within the base side") {
+		t.Errorf("notes = %v, want no-common-unit then mixed-conditions", res.Notes)
+	}
+}
