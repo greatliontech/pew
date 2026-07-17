@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -222,7 +223,8 @@ func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig,
 	for _, name := range runBenches {
 		subjects = append(subjects, gofresh.Subject{Package: p.ImportPath, Symbol: name})
 	}
-	view, err := e.NewViewFor(subjects, p.Module.Dir, gofresh.Measurement)
+	ctx := context.Background()
+	view, err := e.NewViewFor(ctx, subjects, p.Module.Dir, gofresh.Measurement)
 	if err != nil {
 		return err
 	}
@@ -264,7 +266,7 @@ func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig,
 	if err := requireBenchmarkGroups(runBenches, groups); err != nil {
 		return err
 	}
-	if err := view.Validate(); err != nil {
+	if err := view.Validate(ctx); err != nil {
 		return err
 	}
 	dirty := initialDirty
@@ -320,7 +322,7 @@ func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig,
 	if err := rejectRecordingDestinations(view.SourceFiles(), recordingPaths); err != nil {
 		return err
 	}
-	if err := view.Validate(); err != nil {
+	if err := view.Validate(ctx); err != nil {
 		return err
 	}
 	stateAtWrite, err := gitblob.Snapshot(p.Module.Dir)

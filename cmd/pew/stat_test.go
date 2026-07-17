@@ -260,7 +260,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := gofresh.Subject{Package: "example.com/statdirective", Symbol: "BenchmarkPureRead"}
-	fp, err := e.CaptureFor(subject, dir, gofresh.Measurement)
+	fp, err := e.CaptureFor(t.Context(), subject, dir, gofresh.Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,7 +557,7 @@ func TestNonValidUsesLabel(t *testing.T) {
 	}
 	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
 	const bench = "BenchmarkDecode"
-	fp, err := e.CaptureFor(gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
+	fp, err := e.CaptureFor(t.Context(), gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
@@ -618,7 +618,7 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 	}
 	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
 	const bench = "BenchmarkDecode"
-	fp, err := e.CaptureFor(gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
+	fp, err := e.CaptureFor(t.Context(), gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}

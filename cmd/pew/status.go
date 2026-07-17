@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +32,7 @@ const (
 
 func newStatusCmd() *cobra.Command {
 	var benchDir string
+	var label string
 	var staleOnly bool
 	cmd := &cobra.Command{
 		Use:   "status [packages]",
@@ -40,10 +42,11 @@ func newStatusCmd() *cobra.Command {
 			if len(patterns) == 0 {
 				patterns = []string{"./..."}
 			}
-			return runStatus(cmd.OutOrStdout(), benchDir, staleOnly, patterns)
+			return runStatus(cmd.OutOrStdout(), benchDir, label, staleOnly, patterns)
 		},
 	}
 	cmd.Flags().StringVar(&benchDir, "bench-dir", "", "stored-recordings directory (default <module>/benchmarks); an explicit value applies to every package")
+	cmd.Flags().StringVar(&label, "label", "", "variant label to check (spec §6); empty = the unlabeled recording")
 	cmd.Flags().BoolVar(&staleOnly, "stale", false, "show only benchmarks that need re-running (non-valid)")
 	return cmd
 }
@@ -69,7 +72,7 @@ func newEngineWithEnv(moduleDir string, env []string) (*gofresh.Engine, error) {
 	return gofresh.New(gofresh.WithDir(moduleDir), gofresh.WithEnv(env...))
 }
 
-func runStatus(w io.Writer, benchDir string, staleOnly bool, patterns []string) error {
+func runStatus(w io.Writer, benchDir, label string, staleOnly bool, patterns []string) error {
 	pkgs, err := resolvePackages(patterns)
 	if err != nil {
 		return err
@@ -84,14 +87,14 @@ func runStatus(w io.Writer, benchDir string, staleOnly bool, patterns []string) 
 		}
 		// A per-package failure (e.g. a sibling that does not compile) is reported
 		// as a row and does not abort status of the rest of the tree.
-		if err := statusPackage(w, e, benchDir, staleOnly, p); err != nil {
+		if err := statusPackage(w, e, benchDir, label, staleOnly, p); err != nil {
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
 		}
 	}
 	return nil
 }
 
-func statusPackage(w io.Writer, e *gofresh.Engine, benchDir string, staleOnly bool, p pkgMeta) error {
+func statusPackage(w io.Writer, e *gofresh.Engine, benchDir, label string, staleOnly bool, p pkgMeta) error {
 	benches, err := selectedBenchmarks(p)
 	if err != nil {
 		return err
@@ -106,14 +109,20 @@ func statusPackage(w io.Writer, e *gofresh.Engine, benchDir string, staleOnly bo
 	st := store.New(dir)
 	pkgRel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, p.Module.Path), "/")
 	for _, b := range benches {
-		v, reason, err := checkOne(st, e, p.ImportPath, pkgRel, p.Module.Dir, b, "")
+		v, reason, err := checkOne(st, e, p.ImportPath, pkgRel, p.Module.Dir, b, label)
 		if err != nil {
 			return err
 		}
 		if staleOnly && v == verdictValid {
 			continue
 		}
-		line := fmt.Sprintf("%-12s %s.%s", v, p.ImportPath, b)
+		name := b
+		if label != "" {
+			// The row names the recording it inventoried: the labeled variant
+			// carries its label exactly as its filename does.
+			name = b + "." + label
+		}
+		line := fmt.Sprintf("%-12s %s.%s", v, p.ImportPath, name)
 		if reason != "" {
 			line += "  (" + reason + ")"
 		}
@@ -141,7 +150,7 @@ func checkOne(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, be
 	if !ok {
 		return verdictStale, "format", nil
 	}
-	v, err := e.Check(fp, gofresh.Subject{Package: pkgPath, Symbol: bench}, moduleDir)
+	v, err := e.Check(context.Background(), fp, gofresh.Subject{Package: pkgPath, Symbol: bench}, moduleDir)
 	if err != nil {
 		return "", "", err
 	}

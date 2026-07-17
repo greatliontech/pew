@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -255,7 +256,7 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 				continue
 			}
 			if newOK && bl.newRef != "" && isDirty(newRecs) {
-				fmt.Fprintf(errw, "pew: warning: baseline %s:%s is a dirty recording; skipping (spec §10)\n", bl.newRef, key.bench)
+				fmt.Fprintf(errw, "pew: warning: new side %s:%s is a dirty recording; skipping (spec §10)\n", bl.newRef, key.bench)
 				continue
 			}
 			if checkStale && newOK {
@@ -278,7 +279,7 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 						}
 						engines[cur.moduleDir] = engine
 					}
-					if v, e := engine.Check(fp, subj, cur.moduleDir); e != nil {
+					if v, e := engine.Check(context.Background(), fp, subj, cur.moduleDir); e != nil {
 						fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, e)
 					} else if v = applyPurity(v, pure); v.Status != gofresh.Valid {
 						msg := string(v.Status)

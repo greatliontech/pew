@@ -321,7 +321,7 @@ func TestSourceInputsDirtyIncludesIgnoredAndMetadataStableSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]gofresh.Subject{{Package: "example.com/buildinputs", Symbol: "BenchmarkValue"}}, dir)
+	view, err := engine.NewView(t.Context(), []gofresh.Subject{{Package: "example.com/buildinputs", Symbol: "BenchmarkValue"}}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +349,7 @@ func TestSourceInputsDirtyIncludesIgnoredAndMetadataStableSource(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "generated.go"), []byte("package buildinputs\n\nfunc init() { Value = 2 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	view, err = engine.NewView([]gofresh.Subject{{Package: "example.com/buildinputs", Symbol: "BenchmarkValue"}}, dir)
+	view, err = engine.NewView(t.Context(), []gofresh.Subject{{Package: "example.com/buildinputs", Symbol: "BenchmarkValue"}}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
