@@ -3,18 +3,9 @@
 Lands: when PGO-driven benchmarks see real use, or when `pew run` grows build-affecting CLI
 pass-throughs (`-tags`/`-gcflags`/`-pgo`)
 
-## Resolved (landed)
+## Gap
 
-The environment-input half of this gap is closed: `buildconfig` now digests the full codegen
-feature level and cgo toolchain environment (`CGO_*FLAGS`, `CC`/`CXX`, `PKG_CONFIG*`) alongside
-`GOFLAGS`, with host `GOOS`/`GOARCH` deliberately left to the machine guard (§8). The canonical input
-contract is stated at spec §7 guard 5 and pinned by `TestBuildConfigCapturesBuildAffectingEnv`
-(each hashed key moves the digest). The `CGO_CFLAGS=-DFAST=0 → -DFAST=1` false-valid no longer
-reproduces.
-
-## Remaining fault
-
-Two build-affecting inputs still change generated code without moving the guard:
+Two build-affecting inputs change generated code without moving the `buildconfig` guard:
 
 - **PGO profile content.** `GOFLAGS=-pgo=/tmp/profile.pprof` is captured only as the flag *string*;
   the profile file's *contents* can change while the digest stays fixed. `-pgo=auto` / `default.pgo`

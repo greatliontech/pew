@@ -1,5 +1,5 @@
 // Command pew manages Go benchmark provenance, staleness, and comparison.
-// See docs/spec.md for the design contract.
+// See docs/specs/spec.md for the design contract.
 package main
 
 import (

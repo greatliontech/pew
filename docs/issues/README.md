@@ -6,11 +6,10 @@ close-out convention.
 
 | slug | summary | Lands |
 |------|---------|-------|
-| [buildconfig-completeness](buildconfig-completeness.md) | PGO profile content + CLI build-flag pass-throughs in the buildconfig guard (cgo/env half landed; gofresh `WithBuildInputs` is the mechanism) | when PGO benchmarks see real use, or `pew run` grows build-flag flags |
+| [buildconfig-completeness](buildconfig-completeness.md) | PGO profile content and CLI build-flag pass-throughs are absent from the buildconfig guard | when PGO benchmarks see real use, or `pew run` grows build-flag flags |
 | [json-output](json-output.md) | `-json` machine-readable output for `status`/`stat` | when pew is first wired into CI/scripting beyond exit-code gating |
-| [purity-directives](purity-directives.md) | durable impure directive (`//gofresh:pure` landed at §7.5; the external half has no durable form) | when `--impure` re-specification proves friction |
+| [purity-directives](purity-directives.md) | impure benchmarks have no durable in-source form and must be re-specified per invocation | when `--impure` re-specification proves friction |
 | [stat-explain](stat-explain.md) | implement the spec-reserved `pew stat --explain` guard/input view | when guard-failure opacity bites in real use |
-| [status-label-flag](status-label-flag.md) | `--label` on `pew status` so labeled recordings get verdicts | when labeled-variant recordings see real use, or the status CLI is next extended |
 
 ## In-spec upgrade paths (tracked inline, not here)
 

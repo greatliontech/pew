@@ -3,11 +3,11 @@
 Lands: when `--impure` sees enough use that re-specifying it per run is friction, or a known-external
 benchmark's marker needs to travel with the code through clones/CI.
 
-## Context
+## Gap
 
-The purity escape hatch's *pure* half is durable now: `//gofresh:pure` on the benchmark declaration
-is honored by the shared gofresh engine and specced at §7.5. The *impure* half has no durable form —
-`--impure <bench>` (spec §7.3) remains a per-invocation CLI flag recorded as `pure: false`.
+The purity escape hatch's *impure* half has no durable form: `--impure <bench>` (spec §7.3) is a
+per-invocation CLI flag recorded as `pure: false`, unlike the durable `//gofresh:pure` directive
+(§7.5).
 
 ## The exploration
 

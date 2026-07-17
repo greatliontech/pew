@@ -100,7 +100,9 @@ with no discriminator, a duplicate, alternate whitespace or line endings, or ano
 `stale (format)` and MUST be regenerated; Pew never interprets it as an earlier shape. Benchmark
 output that attempts to define `pew-*` or any other Pew-owned provenance, guard, or purity key is
 refused before storage. A format-1 recording missing any mandatory field is likewise `stale (format)`
-before guard or purity interpretation.
+before guard or purity interpretation. Duplicate rejection applies to every recording key — the
+table above plus `pew-closure` and the per-benchmark `pure` line (§7.5) — not only `pew-format`:
+a recording that repeats any of them is `stale (format)`.
 Format governs interpretation rather than measurement identity and is projected from comparisons.
 `pew-purity` is benchmark-specific despite the surrounding uniform provenance keys and is omitted
 when capture used no purity assertion; omission is the canonical no-attribution encoding.
@@ -660,7 +662,7 @@ Four commands; names follow the `go test` / benchstat idiom.
     assertion also has a durable in-code form, `//gofresh:pure` (§7.5); the impure one does not.
 - **`pew status [packages]`** — per-benchmark verdict: `valid` / `stale ⟨reason⟩` /
   `unverifiable ⟨reason⟩` / `unrecorded`. `--stale` filters to non-valid (scriptable; feeds
-  `run --stale`). Supports `--bench-dir <dir>`.
+  `run --stale`). Supports `--bench-dir <dir>` and `--label <name>` (§6).
 - **`pew stat [ref | refA refB] [flags]`** — compare; the three baselines (§10) fall out of arg
   count (none → auto, one → pinned, two → A/B). `--fail-on-regression`, `--threshold` (3%),
   `--alpha` (0.05), metric selection (§10.1). `--explain` is reserved for a detailed guard/input
