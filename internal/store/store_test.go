@@ -89,6 +89,18 @@ func TestIsRecordingRequiresCurrentFormat(t *testing.T) {
 	}
 }
 
+// TestRawFormatRejectsDuplicateRecordingKeys: §5's duplicate rejection covers
+// every recording key, not only the format discriminator.
+func TestRawFormatRejectsDuplicateRecordingKeys(t *testing.T) {
+	base := "toolchain: go1\npew-format: 1\nBenchmarkRun-8 1000000 1234 ns/op\n"
+	if !rawFormatValid([]byte(base)) {
+		t.Fatal("well-formed recording rejected")
+	}
+	if rawFormatValid([]byte("toolchain: go2\n" + base)) {
+		t.Error("duplicate toolchain key accepted")
+	}
+}
+
 func valueMap(r *benchfmt.Result) map[string]float64 {
 	m := map[string]float64{}
 	for _, v := range r.Values {
@@ -459,6 +471,29 @@ func TestParseFromContent(t *testing.T) {
 				t.Fatal("malformed raw format accepted after benchfmt normalization")
 			}
 		})
+	}
+}
+
+// TestRawFormatRequiresLFTermination: §5 requires the byte-exact LF-terminated
+// line "pew-format: 1"; a recording whose final bytes are the discriminator with
+// no terminating newline is format-stale, and the same bytes plus the newline
+// are accepted (the termination is the only difference under test).
+func TestRawFormatRequiresLFTermination(t *testing.T) {
+	unterminated := "BenchmarkRun-8 1000000 1234 ns/op\npew-format: 1"
+	if rawFormatValid([]byte(unterminated)) {
+		t.Error("unterminated pew-format discriminator accepted")
+	}
+	if !rawFormatValid([]byte(unterminated + "\n")) {
+		t.Error("LF-terminated pew-format discriminator rejected")
+	}
+	recs, err := Parse(strings.NewReader(unterminated), "unterminated")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !slices.ContainsFunc(recs[0].Config, func(c benchfmt.Config) bool {
+		return c.Key == "pew-format-invalid" && string(c.Value) == "true"
+	}) {
+		t.Error("Parse of unterminated discriminator did not mark the recording format-invalid")
 	}
 }
 

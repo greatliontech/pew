@@ -671,7 +671,8 @@ func Parse(r io.Reader, name string) ([]*benchfmt.Result, error) {
 func rawFormatValid(data []byte) bool {
 	counts := map[string]int{}
 	valid := true
-	for _, line := range bytes.Split(data, []byte{'\n'}) {
+	lines := bytes.Split(data, []byte{'\n'})
+	for i, line := range lines {
 		colon := bytes.IndexByte(line, ':')
 		if colon < 0 {
 			continue
@@ -686,7 +687,10 @@ func rawFormatValid(data []byte) bool {
 		counts[key]++
 		valid = valid && counts[key] == 1
 		if key == "pew-format" {
-			valid = valid && bytes.Equal(line, []byte("pew-format: 1"))
+			// §5: the discriminator is the byte-exact LF-terminated line
+			// "pew-format: 1". After splitting on '\n', only the final element
+			// lacks a terminating LF, so a discriminator there is unterminated.
+			valid = valid && bytes.Equal(line, []byte("pew-format: 1")) && i < len(lines)-1
 		}
 	}
 	return counts["pew-format"] == 1 && valid
