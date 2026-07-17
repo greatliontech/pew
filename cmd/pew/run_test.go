@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -234,12 +235,127 @@ func TestRunRecordsIncompleteRuntimeEvidence(t *testing.T) {
 		if fp.RuntimeInputs == "" || fp.RuntimeDigest == "" {
 			t.Fatalf("%s missing incomplete runtime evidence", bench)
 		}
+		assertRunConditionsLine(t, bench, recs[0].GetConfig("pew-runconditions"))
+		// The recorded conditions are the *observed* ones, not a zero value.
+		// The governor signal is boot-stable, so when this host can observe it
+		// the recording must carry it; hosts without the signal leave this
+		// unasserted (the unknown-marker rendering is pinned by unit tests).
+		if fresh := runpkg.ObserveConditions(); fresh.Governor != "" {
+			wantGovernor, _, _ := strings.Cut(strings.TrimPrefix(fresh.String(), "governor="), " ")
+			if got, _, _ := strings.Cut(strings.TrimPrefix(recs[0].GetConfig("pew-runconditions"), "governor="), " "); got != wantGovernor {
+				t.Errorf("%s recorded governor %q, want observed %q", bench, got, wantGovernor)
+			}
+		}
 		v, reason, err := checkOne(st, e, "example.com/incompleterun", "", dir, bench, "")
 		if err != nil {
 			t.Fatal(err)
 		}
 		if v != verdictUnverifiable || reason != "testlog lacks operation outcome evidence" {
 			t.Fatalf("%s recording = {%s %q}, want unverifiable incomplete observation", bench, v, reason)
+		}
+	}
+}
+
+// TestRunPackageRecordsProvidedConditions pins that runPackage records the
+// observation handed to it verbatim (spec §9: the gate and the recording share
+// one observation). It kills a records-zero-Conditions mutant deterministically
+// on every host; a mutant that re-observes inside runPackage is caught only
+// insofar as the synthetic values differ from the host's live signals (the
+// governor equality check in TestRunRecordsIncompleteRuntimeEvidence adds the
+// live-host layer where a governor signal exists).
+func TestRunPackageRecordsProvidedConditions(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":        "module example.com/condwire\n\ngo 1.26.4\n",
+		"bench_test.go": "package condwire\n\nimport \"testing\"\n\nfunc BenchmarkWire(b *testing.B) {}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	benchDir := filepath.Join(t.TempDir(), "benchmarks")
+	withWorkingDir(t, dir)
+	pkgs, err := resolvePackages([]string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pkgs) != 1 {
+		t.Fatalf("resolved %d packages, want 1", len(pkgs))
+	}
+	env := os.Environ()
+	e, err := newEngineWithEnv(pkgs[0].Module.Dir, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turbo, throttled, battery := true, false, false
+	load := 1.25
+	conditions := runpkg.Conditions{Governor: "performance", Turbo: &turbo, Load1: &load, Throttled: &throttled, Battery: &battery}
+	var out bytes.Buffer
+	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}
+	if err := runPackage(&out, e, newGitStateCache(), rc, pkgs[0], env, conditions); err != nil {
+		t.Fatalf("runPackage: %v\nstdout:\n%s", err, out.String())
+	}
+	recs, err := store.New(benchDir).Read("", "BenchmarkWire", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "governor=performance turbo=on load1=1.25 throttled=false battery=false"
+	if got := recs[0].GetConfig("pew-runconditions"); got != want {
+		t.Fatalf("recorded conditions = %q, want the provided observation %q", got, want)
+	}
+}
+
+// assertRunConditionsLine checks a produced pew-runconditions value (spec §9):
+// all five fields present in order, each either the explicit unknown marker or a
+// plausibly observed value. On the Linux hosts that run this suite the real
+// sysfs/procfs is observed, so this exercises genuine values; elsewhere every
+// field is unknown.
+func assertRunConditionsLine(t *testing.T, bench, value string) {
+	t.Helper()
+	if value == "" {
+		t.Fatalf("%s recording missing pew-runconditions provenance", bench)
+	}
+	fields := strings.Fields(value)
+	wantKeys := []string{"governor", "turbo", "load1", "throttled", "battery"}
+	if len(fields) != len(wantKeys) {
+		t.Fatalf("%s pew-runconditions = %q, want %d fields", bench, value, len(wantKeys))
+	}
+	for i, field := range fields {
+		key, v, ok := strings.Cut(field, "=")
+		if !ok || key != wantKeys[i] || v == "" {
+			t.Fatalf("%s pew-runconditions field %d = %q, want %s=<value>", bench, i, field, wantKeys[i])
+		}
+		if v == "unknown" {
+			continue
+		}
+		switch key {
+		case "turbo":
+			if v != "on" && v != "off" {
+				t.Errorf("%s turbo = %q, want on/off/unknown", bench, v)
+			}
+		case "throttled", "battery":
+			if v != "true" && v != "false" {
+				t.Errorf("%s %s = %q, want true/false/unknown", bench, key, v)
+			}
+		case "load1":
+			if _, err := strconv.ParseFloat(v, 64); err != nil {
+				t.Errorf("%s load1 = %q, want a decimal", bench, v)
+			}
 		}
 	}
 }

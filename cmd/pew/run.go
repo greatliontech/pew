@@ -78,7 +78,11 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 	if err != nil {
 		return err
 	}
-	if warns := run.Quiesce(); len(warns) > 0 {
+	// One pre-run observation both drives the quiesce gate and is recorded as
+	// the pew-runconditions provenance line (spec §9), so the recording states
+	// exactly the conditions the gate evaluated.
+	conditions := run.ObserveConditions()
+	if warns := conditions.Warnings(); len(warns) > 0 {
 		for _, x := range warns {
 			fmt.Fprintln(errw, "pew: warning:", x)
 		}
@@ -105,7 +109,7 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 		}
 		// Like status, a per-package failure (e.g. one that does not build) is
 		// reported and does not abort the rest of the tree.
-		runErr := runPackage(w, e, gc, rc, p, env)
+		runErr := runPackage(w, e, gc, rc, p, env, conditions)
 		if runErr != nil {
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, runErr)
 			failures = append(failures, p.ImportPath)
@@ -163,7 +167,7 @@ func (c *gitStateCache) recordWrites(repoRoot string, paths []string) {
 	}
 }
 
-func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig, p pkgMeta, env []string) error {
+func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig, p pkgMeta, env []string, conditions run.Conditions) error {
 	benches, err := selectedBenchmarks(p)
 	if err != nil {
 		return err
@@ -291,7 +295,7 @@ func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig,
 		if !ok {
 			return fmt.Errorf("benchmark %s was not captured in the producer view", name)
 		}
-		for _, cfg := range run.ProvenanceConfig(commit, dirty, fp.Guards) {
+		for _, cfg := range run.ProvenanceConfig(commit, dirty, fp.Guards, conditions) {
 			recs = withConfig(recs, cfg)
 		}
 		recs = withConfig(recs, run.ClosureConfig(fp.MaximalClosure))

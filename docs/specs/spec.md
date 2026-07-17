@@ -91,6 +91,7 @@ global config lines):
 | `buildconfig`        | digest of build tags + relevant GOFLAGS/gcflags + cgo + PGO  | yes              |
 | `runtimeconfig`      | digest of Go runtime-config env (GOGC/GODEBUG/GOMEMLIMIT/GOMAXPROCS), §7 | yes  |
 | `dirty`              | `true` if the working tree had uncommitted changes at run    | yes              |
+| `pew-runconditions`  | observed transient run conditions at run time (§9)           | yes              |
 | `pew-runtime`        | digest of runtime-input evidence (§7.8)                      | derived          |
 | `pew-runtime-inputs` | encoded runtime-input manifest or incomplete disposition (§7.8) | yes            |
 | `pew-purity`         | attributable Gofresh purity evidence used for this fingerprint | yes            |
@@ -148,6 +149,12 @@ closure and runtime-input evidence prove reuse validity:
 | machine      |           ✓             |             ✓             |
 | buildconfig  |           ✓             |             ✓             |
 | runtimeconfig |          ✓             |             ✓             |
+
+Run conditions (`pew-runconditions`, §9) appear in **neither** key: they neither name a recording
+point nor gate reuse. They are audit provenance only — recorded so "under what machine conditions
+was this number taken" is answerable from the recording alone — and surface solely as a
+comparison note (§10.1). Putting them in identity or validity would recreate the §8 spurious-stale
+trap (the governor at *check* time mismatching the governor at *run* time).
 
 Identity **pins** code by commit; validity **tests** code by closure plus runtime-input evidence. The
 commit is a coarse "some code somewhere changed" signal — correct for *naming a point in history*,
@@ -554,11 +561,27 @@ provenance is captured atomically with the run:
   on-battery, non-`performance` governor, high load average, turbo, thermal throttling. Warn-not-gate
   because hard-gating blocks legitimate quick runs and pew often can't fix the condition anyway
   (setting the governor needs root); the warning fires at the right moment — about to record a bad
-  run. **Run conditions are not recorded as provenance:** on a single machine you control conditions
-  deliberately and the run-time warn catches a bad run at its source (a `runconditions` line +
-  comparison-mismatch check can be added later if mixing ever bites).
+  run.
   On Linux, turbo/boost is checked via exposed `intel_pstate/no_turbo` or `cpufreq/boost` sysfs state,
   and thermal throttling via exposed CPU `thermal_throttle/*_throttle_count` counters.
+- **Run conditions are recorded as provenance, never identity.** The observation that produces the
+  quiesce warnings is also recorded in-band as the mandatory `pew-runconditions` config line — one
+  per recording, uniform per invocation:
+  `pew-runconditions: governor=<name> turbo=<on|off> load1=<1-min load> throttled=<true|false> battery=<true|false>`
+  with any unobservable signal recorded as the explicit field value `unknown` (a platform with no
+  quiesce signals — non-Linux today — records every field `unknown` rather than omitting the line:
+  an unobserved condition is stated, never implied, so a missing line always means a
+  pre-run-conditions producer, not a quiet run). The recorded values and the warn/`--strict` gate
+  derive from one pre-run observation, taken once per `pew run` invocation before execution, so the
+  gate and the recording can never disagree about what was observed; mid-run drift is not
+  re-observed (drift is caught by the statistics, §8). A governor value that is not a plain token
+  (`[A-Za-z0-9_.-]+`) is *recorded* as `unknown` — field values never carry separators that could
+  corrupt the line's `key=value` structure — while the advisory warning may still name the raw
+  value (warnings are stderr text, not persisted structure). The line answers the audit question "was this number
+  taken with the performance governor on a quiet machine" from the recording alone. It is excluded
+  from the machine fingerprint (§8), from every validity guard (§7), and from comparison grouping
+  (§10.1): recordings differing only in run conditions validate and compare identically, with a
+  differing-conditions note (§10.1) instead of a verdict.
 - Records provenance (§5), computes the run-commit closure hash (§7), and records explicit incomplete
   runtime-input evidence (`pew-runtime*`, §7.8) at run time.
 - Captures one ordinary measurement view and every benchmark fingerprint before execution. The
@@ -614,6 +637,15 @@ flags real-but-trivial changes; a floor without significance flags noise.
   metadata doesn't fragment the benchstat grouping, and separately requires non-empty equal
   `machine`, `toolchain`, `buildconfig`, and `runtimeconfig` — never comparing across machine
   fingerprints, toolchains, build variants, or runtime-configuration variants silently (§6, §8).
+- **Run conditions are surfaced, not gated.** When the two compared sides' recorded
+  `pew-runconditions` (§9) differ in a categorical field — `governor`, `turbo`, `throttled`,
+  `battery`, with a missing, malformed, or repeated field read as `unknown` — `pew stat` emits a
+  note naming both sides' recorded conditions; when one side lacks the line, or a side mixes
+  distinct values, the note names the affected side. In every case the comparison **still
+  proceeds**. Unlike the guard mismatches above, differing run conditions never block: the numbers
+  may still be wanted, the note keeps the mixing visible. Two sides that both lack the line are
+  silent — there is nothing recorded to disagree about. `load1` is continuous measurement context:
+  recorded and shown in the differing-conditions note, never itself a trigger.
 
 Every tunable across pew — α, threshold, `--count`, `--benchtime`, pinning, strictness, gating
 metrics — is **configurable with the stated values as defaults**; the correctness guards (§7) are
@@ -705,8 +737,8 @@ Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred
   that `benchfmt` rejects → ecosystem lock-in, G5 broken. *Kind:* clause-explicit (§5, G5).
 - **INV-4 — Provenance completeness.** Every produced result carries format `1` and the provenance
   and manifests required to evaluate all six guards: `pew run` always writes the commit, the runtime-input
-  manifest (a canonical incomplete disposition for every run, §7.8), and the four environment
-  guard lines.
+  manifest (a canonical incomplete disposition for every run, §7.8), the four environment
+  guard lines, and the run-conditions line (§9, explicit `unknown` fields when unobserved).
   *Violation:* a result missing `commit` or a guard value → the guard is unevaluable → validity
   undecidable → must conservatively re-run, defeating G1/G2. A missing or unknown format is rejected
   without interpretation. A recorded `pew-runtime` digest without its manifest is corruption and stale;
@@ -736,3 +768,11 @@ Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred
   pinning → hash unchanged → `B` reported `valid` while its dependency moved → false-`valid`.
   *Kind:* entailed. *Anchor test:* edit a locally-replaced dep's reachable code without touching
   `go.mod` ⇒ `B` reports stale.
+- **INV-9 — Run conditions are provenance-only.** The `pew-runconditions` line (§9) never enters
+  the machine fingerprint (§8), any validity guard (§7), or the comparison grouping / required-equal
+  guard set (§10.1). *Violation:* the `performance` governor is set for a recording run; at check
+  time the box idles in `powersave`; a conditions-bearing fingerprint or guard marks every
+  recording stale → spurious re-run of a still-valid result — G2 defeated by the exact
+  transient-mismatch trap §8 excludes by construction. *Kind:* entailed (from §8's exclusion and
+  the §5.1 identity/validity keys). *Anchor tests:* two recordings differing only in
+  `pew-runconditions` ⇒ both valid; ⇒ compared (with a note), never fragmented or blocked.

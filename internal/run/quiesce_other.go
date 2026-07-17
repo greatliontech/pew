@@ -2,6 +2,7 @@
 
 package run
 
-// Quiesce has no checks on non-Linux platforms yet (pew targets Linux
-// single-machine, §3).
-func Quiesce() []string { return nil }
+// ObserveConditions has no signals on non-Linux platforms (pew targets Linux
+// single-machine, §3): every condition stays unobserved, which records as
+// explicit unknown fields (spec §9) and derives no quiesce warnings.
+func ObserveConditions() Conditions { return Conditions{} }

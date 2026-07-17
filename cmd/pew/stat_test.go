@@ -269,7 +269,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := store.New(filepath.Join(dir, "benchmarks"))
-	cfg := append(runpkg.ProvenanceConfig("c1", false, fp.Guards), runpkg.ClosureConfig(fp.MaximalClosure))
+	cfg := append(runpkg.ProvenanceConfig("c1", false, fp.Guards, runpkg.Conditions{}), runpkg.ClosureConfig(fp.MaximalClosure))
 	cfg = append(cfg, runpkg.RuntimeConfig(observation.Digest, observation.Manifest)...)
 	cfg = append(cfg, runpkg.GofreshPurityConfig(fp.PurityAssertion))
 	recs := []*benchfmt.Result{{Name: benchfmt.Name("PureRead"), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
@@ -489,6 +489,11 @@ func writeFile(t *testing.T, path, content string) {
 
 func writeStatRecording(t *testing.T, st *store.Store, pkgRel, bench string, value float64) {
 	t.Helper()
+	writeStatRecordingConditions(t, st, pkgRel, bench, value, "governor=performance turbo=off load1=0.03 throttled=false battery=false")
+}
+
+func writeStatRecordingConditions(t *testing.T, st *store.Store, pkgRel, bench string, value float64, conditions string) {
+	t.Helper()
 	var recs []*benchfmt.Result
 	for i := range 8 {
 		recs = append(recs, &benchfmt.Result{
@@ -505,6 +510,7 @@ func writeStatRecording(t *testing.T, st *store.Store, pkgRel, bench string, val
 				{Key: "buildconfig", Value: []byte("b1"), File: true},
 				{Key: "runtimeconfig", Value: []byte("r1"), File: true},
 				{Key: "dirty", Value: []byte("false"), File: true},
+				{Key: "pew-runconditions", Value: []byte(conditions), File: true},
 				{Key: "pew-closure", Value: []byte("cl1"), File: true},
 				{Key: "pew-runtime", Value: []byte("rt1"), File: true},
 				{Key: "pew-runtime-inputs", Value: []byte("manifest1"), File: true},
@@ -577,6 +583,7 @@ func TestNonValidUsesLabel(t *testing.T) {
 			{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
 			{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
 			{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
+			{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
 			{Key: "pew-closure", Value: []byte(hash), File: true},
 			{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
 			{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
@@ -607,6 +614,93 @@ func TestNonValidUsesLabel(t *testing.T) {
 	}
 }
 
+// TestRunConditionsDoNotAffectValidity is INV-9's validity anchor: two
+// recordings identical except for their recorded run conditions get the same
+// verdict — run conditions are provenance, never a staleness guard (§8, §9).
+func TestRunConditionsDoNotAffectValidity(t *testing.T) {
+	e, err := gofresh.New()
+	if err != nil {
+		t.Fatalf("New engine: %v", err)
+	}
+	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
+	const bench = "BenchmarkDecode"
+	fp, err := e.CaptureFor(t.Context(), gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	rt, err := runtimeinput.Incomplete(".", "package-test-binary:run-conditions", "testlog lacks operation outcome evidence")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(t.TempDir())
+	write := func(label, conditions string) {
+		t.Helper()
+		cfg := []benchfmt.Config{
+			{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
+			{Key: "commit", Value: []byte("c1"), File: true},
+			{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
+			{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
+			{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
+			{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
+			{Key: "pew-runconditions", Value: []byte(conditions), File: true},
+			{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
+			{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
+			{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
+			{Key: "pew-purity", Value: []byte(fp.PurityAssertion), File: true},
+			{Key: "dirty", Value: []byte("false"), File: true},
+		}
+		recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
+		if err := st.Write("", bench, label, recs); err != nil {
+			t.Fatalf("Write(%q): %v", label, err)
+		}
+	}
+	write("quiet", "governor=performance turbo=off load1=0.03 throttled=false battery=false")
+	write("noisy", "governor=powersave turbo=on load1=7.50 throttled=true battery=true")
+	write("unknown", "governor=unknown turbo=unknown load1=unknown throttled=unknown battery=unknown")
+
+	for _, label := range []string{"quiet", "noisy", "unknown"} {
+		v, reason, err := checkOne(st, e, pkg, "", ".", bench, label)
+		if err != nil {
+			t.Fatalf("checkOne(%s): %v", label, err)
+		}
+		if v != verdictValid {
+			t.Errorf("checkOne(%s) = {%s %q}, want valid — run conditions leaked into a staleness guard", label, v, reason)
+		}
+	}
+}
+
+// TestStatABNotesDifferingRunConditions drives the §10.1 surface end to end:
+// two committed recordings differing in run conditions are compared (table
+// printed) with a differing-conditions note.
+func TestStatABNotesDifferingRunConditions(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statconds\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	writeStatRecordingConditions(t, st, "pkg", "BenchmarkConds", 100, "governor=performance turbo=off load1=0.03 throttled=false battery=false")
+	base := commitAll(t, repo, "base")
+	writeStatRecordingConditions(t, st, "pkg", "BenchmarkConds", 120, "governor=powersave turbo=on load1=6.41 throttled=false battery=false")
+	newer := commitAll(t, repo, "newer")
+
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	err = runStat(&out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	if err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if !strings.Contains(out.String(), "BenchmarkConds") || !strings.Contains(out.String(), "sec/op") {
+		t.Fatalf("differing conditions blocked the comparison:\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "run conditions differ") {
+		t.Fatalf("stat output missing the differing-conditions note:\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+}
+
 // TestCheckOneAppliesMeasurementGuards pins that a benchmark verdict is checked
 // under the measurement-guard policy: a recording whose machine guard differs from
 // the current machine is stale, which only a Measurement-kind check catches (a
@@ -634,6 +728,7 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 		{Key: "machine", Value: []byte("some-other-machine"), File: true},
 		{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
 		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
+		{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
 		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
 		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
 		{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
@@ -660,6 +755,7 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 		{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
 		{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
 		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
+		{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
 		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
 		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
 		{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},

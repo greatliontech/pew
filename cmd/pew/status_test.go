@@ -44,6 +44,7 @@ func TestStatusPackageUsesLabel(t *testing.T) {
 		{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
 		{Key: "pew-purity", Value: []byte(fp.PurityAssertion), File: true},
 		{Key: "dirty", Value: []byte("false"), File: true},
+		{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
 	}
 	recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
 	if err := st.Write("internal/fixtures/bench", bench, "x", recs); err != nil {

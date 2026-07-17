@@ -68,6 +68,11 @@ go test -run '^$' -bench . -benchmem -count 10 -benchtime 1s <pkg>
 - `--count 10` records enough samples for meaningful comparison.
 - `--benchtime 1s` keeps each sample time-based and compatible with Go's auto-scaling benchmark loop.
 
-Use `--pin` for CPU affinity and `--strict` to make run-hygiene warnings fatal. Build-affecting Go
+Use `--pin` for CPU affinity and `--strict` to make run-hygiene warnings fatal. The observed run
+conditions (governor, turbo/boost, 1-minute load, thermal throttling, battery) are recorded with
+every result as the `pew-runconditions` line — unobservable signals are recorded as explicit
+`unknown` — so a stored baseline documents the conditions it was measured under. Run conditions are
+provenance only: they never make a recording stale, and `pew stat` prints a note (while still
+comparing) when the two sides were recorded under different conditions. Build-affecting Go
 flags such as tags, gcflags, ldflags, PGO, and cgo/compiler inputs are deliberately not generic
 pass-through flags; they must be covered by pew's `buildconfig` guard before being exposed.

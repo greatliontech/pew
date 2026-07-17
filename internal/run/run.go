@@ -132,10 +132,11 @@ func BenchName(resultName string) string {
 }
 
 // ProvenanceConfig returns the in-band provenance lines in spec §5 order: the
-// measured commit and dirty flag from pew's git layer, and the gofresh guard
-// values. File:true so benchfmt.Writer emits them as `key: value` lines (it omits
+// measured commit and dirty flag from pew's git layer, the gofresh guard
+// values, and the observed run conditions (§9 — provenance only, never a guard,
+// INV-9). File:true so benchfmt.Writer emits them as `key: value` lines (it omits
 // File==false config as internal).
-func ProvenanceConfig(commit string, dirty bool, g guard.Guards) []benchfmt.Config {
+func ProvenanceConfig(commit string, dirty bool, g guard.Guards, conditions Conditions) []benchfmt.Config {
 	return []benchfmt.Config{
 		{Key: "pew-format", Value: []byte(RecordingFormat), File: true},
 		{Key: "commit", Value: []byte(commit), File: true},
@@ -144,6 +145,7 @@ func ProvenanceConfig(commit string, dirty bool, g guard.Guards) []benchfmt.Conf
 		{Key: "buildconfig", Value: []byte(g.BuildConfig), File: true},
 		{Key: "runtimeconfig", Value: []byte(g.RuntimeConfig), File: true},
 		{Key: "dirty", Value: []byte(strconv.FormatBool(dirty)), File: true},
+		{Key: "pew-runconditions", Value: []byte(conditions.String()), File: true},
 	}
 }
 

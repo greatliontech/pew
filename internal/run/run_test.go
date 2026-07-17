@@ -15,9 +15,10 @@ import (
 // TestProvenanceConfigKeysAndOrder pins the in-band provenance lines (spec §5):
 // keys, order, and serializability.
 func TestProvenanceConfigKeysAndOrder(t *testing.T) {
+	load := 0.03
 	cfgs := ProvenanceConfig("c1", true, guard.Guards{
 		Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc",
-	})
+	}, Conditions{Governor: "performance", Load1: &load})
 	want := []struct{ key, value string }{
 		{"pew-format", RecordingFormat},
 		{"commit", "c1"},
@@ -26,6 +27,7 @@ func TestProvenanceConfigKeysAndOrder(t *testing.T) {
 		{"buildconfig", "bc"},
 		{"runtimeconfig", "rc"},
 		{"dirty", "true"},
+		{"pew-runconditions", "governor=performance turbo=unknown load1=0.03 throttled=unknown battery=unknown"},
 	}
 	if len(cfgs) != len(want) {
 		t.Fatalf("got %d config lines, want %d", len(cfgs), len(want))

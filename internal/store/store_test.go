@@ -23,6 +23,7 @@ machine: m-deadbeef
 buildconfig: default
 runtimeconfig: default
 dirty: false
+pew-runconditions: governor=performance turbo=off load1=0.03 throttled=false battery=false
 pew-closure: 1234abcd5678
 pew-runtime: abcdef1234567890
 pew-runtime-inputs: eyJ2IjoxfQ
@@ -98,6 +99,27 @@ func TestRawFormatRejectsDuplicateRecordingKeys(t *testing.T) {
 	}
 	if rawFormatValid([]byte("toolchain: go2\n" + base)) {
 		t.Error("duplicate toolchain key accepted")
+	}
+	if rawFormatValid([]byte("pew-runconditions: governor=performance turbo=off load1=0.03 throttled=false battery=false\npew-runconditions: governor=powersave turbo=on load1=9.00 throttled=true battery=true\n" + base)) {
+		t.Error("duplicate pew-runconditions key accepted")
+	}
+}
+
+// TestIsRecordingShapeRequiresRunConditions: the run-conditions line is a
+// mandatory provenance field (spec §5, §9, INV-4) — a format-1 recording without
+// it is stale (format), like any other missing mandatory field.
+func TestIsRecordingShapeRequiresRunConditions(t *testing.T) {
+	recs := parse(t, sample)
+	if !IsRecordingShape(recs) {
+		t.Fatal("complete recording rejected")
+	}
+	without := recs[0].Clone()
+	without.Config = slices.DeleteFunc(without.Config, func(c benchfmt.Config) bool { return c.Key == "pew-runconditions" })
+	if IsRecordingShape([]*benchfmt.Result{without}) {
+		t.Fatal("recording without pew-runconditions accepted")
+	}
+	if IsRecording([]*benchfmt.Result{without}) {
+		t.Fatal("IsRecording accepted a recording without pew-runconditions")
 	}
 }
 

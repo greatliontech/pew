@@ -368,6 +368,171 @@ func TestMixedMachineWithinSide(t *testing.T) {
 	}
 }
 
+// condSet builds one benchmark side carrying a pew-runconditions value on top of
+// matching variant guards.
+func condSet(name, conditions string, units map[string][]float64) []*benchfmt.Result {
+	cfg := map[string]string{
+		"pkg":           "p",
+		"machine":       "m1",
+		"toolchain":     "go-test",
+		"buildconfig":   "build-test",
+		"runtimeconfig": "runtime-test",
+	}
+	if conditions != "" {
+		cfg["pew-runconditions"] = conditions
+	}
+	return benchResults(name, cfg, units)
+}
+
+const quietConds = "governor=performance turbo=off load1=0.03 throttled=false battery=false"
+
+// TestRunConditionsNoteStillCompares encodes the §10.1 / INV-9 contract: two
+// sides recorded under different run conditions get a differing-conditions note
+// AND a full comparison — the note surfaces, never gates, and the provenance key
+// must not fragment the benchproc grouping.
+func TestRunConditionsNoteStillCompares(t *testing.T) {
+	noisy := "governor=powersave turbo=on load1=6.41 throttled=false battery=false"
+	res := Compare(
+		condSet("BenchmarkX-8", quietConds, map[string][]float64{"sec/op": seq(1000, 8)}),
+		condSet("BenchmarkX-8", noisy, map[string][]float64{"sec/op": seq(1100, 8)}),
+		DefaultOptions(),
+	)
+	if len(res.Notes) != 1 || !strings.Contains(res.Notes[0], "run conditions differ") {
+		t.Fatalf("notes = %v, want one run-conditions-differ note", res.Notes)
+	}
+	if !strings.Contains(res.Notes[0], quietConds) || !strings.Contains(res.Notes[0], noisy) {
+		t.Errorf("note %q does not name both sides' recorded conditions", res.Notes[0])
+	}
+	row := secRow(t, res) // fails if the key fragmented grouping or the note blocked comparison
+	if !row.Regression {
+		t.Error("10% slowdown across differing conditions not flagged as regression")
+	}
+	if !res.Regressed() {
+		t.Error("Regressed() = false; the conditions note must not gate the exit criterion")
+	}
+	for _, tbl := range res.Tables {
+		if strings.Contains(tbl.Config, "pew-runconditions") {
+			t.Fatalf("run conditions leaked into comparison config: %q", tbl.Config)
+		}
+	}
+}
+
+// TestRunConditionsEqualOrLoadOnlyDifferenceSilent: equal conditions produce no
+// note, and load1 — continuous context — never triggers one by itself (§10.1).
+func TestRunConditionsEqualOrLoadOnlyDifferenceSilent(t *testing.T) {
+	loadOnly := "governor=performance turbo=off load1=2.97 throttled=false battery=false"
+	for name, newConds := range map[string]string{"equal": quietConds, "load1 only": loadOnly} {
+		t.Run(name, func(t *testing.T) {
+			res := Compare(
+				condSet("BenchmarkX-8", quietConds, map[string][]float64{"sec/op": seq(1000, 8)}),
+				condSet("BenchmarkX-8", newConds, map[string][]float64{"sec/op": seq(1100, 8)}),
+				DefaultOptions(),
+			)
+			if len(res.Notes) != 0 {
+				t.Fatalf("notes = %v, want none", res.Notes)
+			}
+			if !secRow(t, res).Regression {
+				t.Error("comparison row missing")
+			}
+		})
+	}
+}
+
+// TestRunConditionsUnknownVsObservedNotes: an unknown categorical field on one
+// side against an observed one on the other is a difference (fail-closed — a
+// match cannot be proven), while two identically-unknown sides are silent (e.g.
+// two non-Linux recordings).
+func TestRunConditionsUnknownVsObservedNotes(t *testing.T) {
+	allUnknown := "governor=unknown turbo=unknown load1=unknown throttled=unknown battery=unknown"
+	res := Compare(
+		condSet("BenchmarkX-8", allUnknown, map[string][]float64{"sec/op": seq(1000, 8)}),
+		condSet("BenchmarkX-8", quietConds, map[string][]float64{"sec/op": seq(1100, 8)}),
+		DefaultOptions(),
+	)
+	if len(res.Notes) != 1 || !strings.Contains(res.Notes[0], "run conditions differ") {
+		t.Fatalf("unknown-vs-observed notes = %v, want one differ note", res.Notes)
+	}
+	secRow(t, res) // still compared
+
+	same := Compare(
+		condSet("BenchmarkX-8", allUnknown, map[string][]float64{"sec/op": seq(1000, 8)}),
+		condSet("BenchmarkX-8", allUnknown, map[string][]float64{"sec/op": seq(1100, 8)}),
+		DefaultOptions(),
+	)
+	if len(same.Notes) != 0 {
+		t.Fatalf("identically-unknown sides noted: %v", same.Notes)
+	}
+	secRow(t, same)
+}
+
+// TestRunConditionsDuplicateFieldFailsClosed: a hand-edited value repeating a
+// categorical field is contradictory; the field collapses to unknown (mirroring
+// §5's duplicate-key posture) so neither occurrence silently equals an observed
+// value on the other side.
+func TestRunConditionsDuplicateFieldFailsClosed(t *testing.T) {
+	dup := "governor=performance governor=powersave turbo=off load1=0.03 throttled=false battery=false"
+	observed := "governor=powersave turbo=off load1=0.03 throttled=false battery=false"
+	res := Compare(
+		condSet("BenchmarkX-8", dup, map[string][]float64{"sec/op": seq(1000, 8)}),
+		condSet("BenchmarkX-8", observed, map[string][]float64{"sec/op": seq(1100, 8)}),
+		DefaultOptions(),
+	)
+	if len(res.Notes) != 1 || !strings.Contains(res.Notes[0], "run conditions differ") {
+		t.Fatalf("duplicate-field notes = %v, want one differ note (duplicate must not equal either occurrence)", res.Notes)
+	}
+	secRow(t, res) // still compared
+
+	// A malformed repeat must poison too: the occurrence bookkeeping runs
+	// before the token-validity filter, so "governor=powersave governor=" is
+	// unknown, never silently equal to an observed "powersave".
+	malformedDup := "governor=powersave governor= turbo=off load1=0.03 throttled=false battery=false"
+	res = Compare(
+		condSet("BenchmarkX-8", malformedDup, map[string][]float64{"sec/op": seq(1000, 8)}),
+		condSet("BenchmarkX-8", observed, map[string][]float64{"sec/op": seq(1100, 8)}),
+		DefaultOptions(),
+	)
+	if len(res.Notes) != 1 || !strings.Contains(res.Notes[0], "run conditions differ") {
+		t.Fatalf("malformed-duplicate notes = %v, want one differ note", res.Notes)
+	}
+	secRow(t, res)
+}
+
+// TestRunConditionsOneSidedAndMixed: a side missing the line against a side
+// carrying it is surfaced (§10.1), as is a side mixing distinct values
+// (hand-edited/merged input); both still compare. Two sides both without the
+// line are silent — there is nothing recorded to disagree about.
+func TestRunConditionsOneSidedAndMixed(t *testing.T) {
+	res := Compare(
+		condSet("BenchmarkX-8", "", map[string][]float64{"sec/op": seq(1000, 8)}),
+		condSet("BenchmarkX-8", quietConds, map[string][]float64{"sec/op": seq(1100, 8)}),
+		DefaultOptions(),
+	)
+	if len(res.Notes) != 1 || !strings.Contains(res.Notes[0], "run conditions unrecorded on base side") {
+		t.Fatalf("one-sided notes = %v, want unrecorded-on-base note", res.Notes)
+	}
+	secRow(t, res)
+
+	mixedBase := append(
+		condSet("BenchmarkX-8", quietConds, map[string][]float64{"sec/op": seq(1000, 4)}),
+		condSet("BenchmarkX-8", "governor=powersave turbo=off load1=0.03 throttled=false battery=false", map[string][]float64{"sec/op": seq(1004, 4)})...,
+	)
+	mixed := Compare(mixedBase, condSet("BenchmarkX-8", quietConds, map[string][]float64{"sec/op": seq(1100, 8)}), DefaultOptions())
+	if len(mixed.Notes) != 1 || !strings.Contains(mixed.Notes[0], "mixed run conditions") {
+		t.Fatalf("mixed notes = %v, want mixed-run-conditions note", mixed.Notes)
+	}
+	secRow(t, mixed)
+
+	neither := Compare(
+		condSet("BenchmarkX-8", "", map[string][]float64{"sec/op": seq(1000, 8)}),
+		condSet("BenchmarkX-8", "", map[string][]float64{"sec/op": seq(1100, 8)}),
+		DefaultOptions(),
+	)
+	if len(neither.Notes) != 0 {
+		t.Fatalf("condition-free sides noted: %v", neither.Notes)
+	}
+	secRow(t, neither)
+}
+
 // TestGatingScopesExit encodes the entailed invariant: --fail-on-regression
 // (Regressed) reflects only gated units. A B/op-only regression must not fail the
 // build under the default gate (sec/op), though it is still flagged in the table.

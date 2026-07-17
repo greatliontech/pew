@@ -10,9 +10,9 @@
 // Grouping mirrors benchstat: results are grouped into tables by their file
 // configuration (.config) and into rows by full benchmark name (.fullname). pew's
 // own provenance keys (commit, toolchain, machine, buildconfig, dirty,
-// pew-closure, pew-runtime, pew-runtime-inputs, pure) are projected away so that
-// differing provenance between the two sides does not fragment the grouping
-// (§10.1); the native keys go test emits
+// pew-runconditions, pew-closure, pew-runtime, pew-runtime-inputs, pure) are
+// projected away so that differing provenance between the two sides does not
+// fragment the grouping (§10.1); the native keys go test emits
 // (pkg, goos, goarch, cpu) are kept, so the same benchmark name in two different
 // packages is never merged.
 //
@@ -29,6 +29,7 @@ import (
 	"io"
 	"math"
 	"sort"
+	"strings"
 	"text/tabwriter"
 
 	"golang.org/x/perf/benchfmt"
@@ -42,7 +43,7 @@ import (
 // digest, and dirty flag) still line up for comparison (§10.1). Variant guards
 // are ignored here too so they do not fragment grouping, but are enforced
 // separately by compareGuards.
-const pewIgnore = "pew-format commit toolchain machine buildconfig runtimeconfig dirty pew-closure pew-runtime pew-runtime-inputs pew-purity pure"
+const pewIgnore = "pew-format commit toolchain machine buildconfig runtimeconfig dirty pew-runconditions pew-closure pew-runtime pew-runtime-inputs pew-purity pure"
 
 var compareGuards = []string{"machine", "toolchain", "buildconfig", "runtimeconfig"}
 
@@ -134,8 +135,12 @@ type group struct {
 	hasBase, hasNew bool
 	baseGuards      map[string]guardValue
 	newGuards       map[string]guardValue
-	units           []string // first-seen order, deduplicated
-	cells           map[string]*cell
+	// baseConds/newConds track the recorded `pew-runconditions` provenance per
+	// side. Unlike the guards it never blocks a comparison (spec §10.1, INV-9):
+	// a difference is surfaced as a note and the comparison proceeds.
+	baseConds, newConds guardValue
+	units               []string // first-seen order, deduplicated
+	cells               map[string]*cell
 }
 
 type guardValue struct {
@@ -200,6 +205,11 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 			for _, key := range compareGuards {
 				guards[key] = recordGuard(guards[key], r.GetConfig(key))
 			}
+			if isBase {
+				g.baseConds = recordGuard(g.baseConds, r.GetConfig("pew-runconditions"))
+			} else {
+				g.newConds = recordGuard(g.newConds, r.GetConfig("pew-runconditions"))
+			}
 			for _, v := range r.Values {
 				c := g.cells[v.Unit]
 				if c == nil {
@@ -246,6 +256,11 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 		if note, ok := g.guardNote(); ok {
 			res.Notes = append(res.Notes, note)
 			continue
+		}
+		// Run conditions are surfaced, not gated (spec §10.1): the note is
+		// appended and the comparison still proceeds.
+		if note, ok := g.conditionsNote(); ok {
+			res.Notes = append(res.Notes, note)
 		}
 
 		for _, unit := range sortUnits(g.units) {
@@ -331,6 +346,85 @@ func (g *group) guardNote() (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// conditionsNote surfaces run-condition provenance problems between the two
+// sides (spec §10.1): distinct values mixed within a side, the line missing on
+// one side only, or the sides differing in an observed categorical field. The
+// caller never blocks the comparison on it — run conditions are provenance, not
+// a guard (INV-9). Both sides lacking the line entirely is silent: there is
+// nothing recorded to disagree about.
+func (g *group) conditionsNote() (string, bool) {
+	base, newer := g.baseConds, g.newConds
+	if base.mixed || newer.mixed {
+		side := "base"
+		if !base.mixed {
+			side = "new"
+		}
+		return fmt.Sprintf("%s: mixed run conditions within the %s side", g.label(), side), true
+	}
+	baseHas := base.seen && !base.missing
+	newHas := newer.seen && !newer.missing
+	switch {
+	case !baseHas && !newHas:
+		return "", false
+	case !baseHas:
+		return fmt.Sprintf("%s: run conditions unrecorded on base side (new: %s)", g.label(), newer.value), true
+	case !newHas:
+		return fmt.Sprintf("%s: run conditions unrecorded on new side (base: %s)", g.label(), base.value), true
+	}
+	if conditionsDiffer(base.value, newer.value) {
+		return fmt.Sprintf("%s: run conditions differ (base: %s; new: %s)", g.label(), base.value, newer.value), true
+	}
+	return "", false
+}
+
+// conditionCategoricalFields are the recorded run-condition fields whose
+// difference triggers a note. load1 is deliberately absent (spec §10.1): a
+// continuous load average differs between almost any two runs, so it is
+// recorded context, never a trigger.
+var conditionCategoricalFields = []string{"governor", "turbo", "throttled", "battery"}
+
+// conditionsDiffer compares two recorded `pew-runconditions` values on their
+// categorical fields. Parsing is fail-closed for hand-edited recordings: a
+// missing or malformed field reads as "unknown", so garbage never silently
+// equals an observed value — and two identically-unknown sides (e.g. two
+// non-Linux recordings) do not differ.
+func conditionsDiffer(base, newer string) bool {
+	b, n := conditionCategorical(base), conditionCategorical(newer)
+	for _, field := range conditionCategoricalFields {
+		if b[field] != n[field] {
+			return true
+		}
+	}
+	return false
+}
+
+func conditionCategorical(value string) map[string]string {
+	out := make(map[string]string, len(conditionCategoricalFields))
+	for _, field := range conditionCategoricalFields {
+		out[field] = "unknown"
+	}
+	// A repeated or malformed occurrence of a tracked field collapses it to
+	// "unknown" (fail-closed, mirroring §5's duplicate-key posture) rather than
+	// letting any occurrence silently equal an observed value. The occurrence
+	// bookkeeping runs before the token-validity filter so a malformed repeat
+	// ("governor=powersave governor=") still poisons the field.
+	seen := map[string]bool{}
+	for _, token := range strings.Fields(value) {
+		key, v, ok := strings.Cut(token, "=")
+		if _, tracked := out[key]; !tracked {
+			continue
+		}
+		if seen[key] || !ok || v == "" {
+			seen[key] = true
+			out[key] = "unknown"
+			continue
+		}
+		seen[key] = true
+		out[key] = v
+	}
+	return out
 }
 
 // unitOrder is the preferred display order; unknown units follow alphabetically.

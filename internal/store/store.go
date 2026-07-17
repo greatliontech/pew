@@ -459,7 +459,7 @@ func IsRecordingShape(recs []*benchfmt.Result) bool {
 	for _, c := range recs[0].Config {
 		cfg[c.Key] = string(c.Value)
 	}
-	for _, key := range []string{"commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pew-closure", "pew-runtime", "pew-runtime-inputs"} {
+	for _, key := range []string{"commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pew-runconditions", "pew-closure", "pew-runtime", "pew-runtime-inputs"} {
 		if cfg[key] == "" {
 			return false
 		}
@@ -698,7 +698,7 @@ func rawFormatValid(data []byte) bool {
 
 func recordingConfigKey(key string) bool {
 	switch key {
-	case "pew-format", "commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pew-closure", "pew-runtime", "pew-runtime-inputs", "pew-purity", "pure":
+	case "pew-format", "commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pew-runconditions", "pew-closure", "pew-runtime", "pew-runtime-inputs", "pew-purity", "pure":
 		return true
 	default:
 		return false

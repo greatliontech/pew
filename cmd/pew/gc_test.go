@@ -28,6 +28,7 @@ func writeRecording(t *testing.T, st *store.Store, pkgRel, bench, label string) 
 			{Key: "buildconfig", Value: []byte("b1"), File: true},
 			{Key: "runtimeconfig", Value: []byte("r1"), File: true},
 			{Key: "dirty", Value: []byte("false"), File: true},
+			{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
 			{Key: "pew-closure", Value: []byte("cl1"), File: true},
 			{Key: "pew-runtime", Value: []byte("rt1"), File: true},
 			{Key: "pew-runtime-inputs", Value: []byte("manifest1"), File: true},
