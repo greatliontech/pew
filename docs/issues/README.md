@@ -6,6 +6,7 @@ close-out convention.
 
 | slug | summary | Lands |
 |------|---------|-------|
+| [bench-output-parse-interleaving](bench-output-parse-interleaving.md) | one corrupted `go test` bench line (stdout interleaved mid-measurement) hard-fails the whole package's completed run | when `pew run` over a real benchmark-heavy package next fails with a `benchfmt` syntax error, or before pew targets a package whose benchmarks write to stdout during measurement |
 | [buildconfig-completeness](buildconfig-completeness.md) | PGO profile content and CLI build-flag pass-throughs are absent from the buildconfig guard | when PGO benchmarks see real use, or `pew run` grows build-flag flags |
 | [json-output](json-output.md) | `-json` machine-readable output for `status`/`stat` | when pew is first wired into CI/scripting beyond exit-code gating |
 | [purity-directives](purity-directives.md) | impure benchmarks have no durable in-source form and must be re-specified per invocation | when `--impure` re-specification proves friction |
