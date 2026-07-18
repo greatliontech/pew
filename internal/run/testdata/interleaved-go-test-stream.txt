@@ -1,0 +1,27 @@
+goos: linux
+goarch: amd64
+pkg: github.com/greatliontech/protodb/internal/db
+cpu: Intel(R) Core(TM) Ultra 7 258V
+BenchmarkKVSeamGet/stack=embedded-8         	  128961	      1576 ns/op	     553 B/op	      10 allocs/op
+BenchmarkKVSeamGet/stack=embedded-8         	  134149	      1686 ns/op	     553 B/op	      10 allocs/op
+BenchmarkKVSeamGet/stack=embedded-8         	  136477	      1823 ns/op	     553 B/op	      10 allocs/op
+2026-07-18 03:26:27.524151 I | dragonboat: go version: go1.26.5-X:nodwarf5, linux/amd64
+2026-07-18 03:26:27.524177 I | dragonboat: dragonboat version: 4.0.0 (Dev)
+BenchmarkKVSeamCommit/stack=raft/batch=1-8         	   24052	     46355 ns/op	   47306 B/op	      48 allocs/op
+BenchmarkKVSeamCommit/stack=raft/batch=1-8         	2026-07-18 03:26:29.246771 I | dragonboat: go version: go1.26.5-X:nodwarf5, linux/amd64
+2026-07-18 03:26:29.246778 I | dragonboat: dragonboat version: 4.0.0 (Dev)
+2026-07-18 03:26:29.246781 W | config: mutual TLS disabled, communication is insecure
+2026-07-18 03:26:29.246789 I | config: using default LogDBConfig
+2026-07-18 03:26:29.246814 I | dragonboat: DeploymentID set to 1
+2026-07-18 03:26:30.710110 I | logdb: [00001:00001] completed LogDB compaction up to index 19465
+   22239	     50758 ns/op	   47375 B/op	      48 allocs/op
+BenchmarkKVSeamCommit/stack=raft/batch=1-8         	2026-07-18 03:26:30.854011 I | dragonboat: go version: go1.26.5-X:nodwarf5, linux/amd64
+2026-07-18 03:26:30.854019 I | dragonboat: dragonboat version: 4.0.0 (Dev)
+2026-07-18 03:26:30.854022 W | config: mutual TLS disabled, communication is insecure
+2026-07-18 03:26:30.854031 I | config: using default LogDBConfig
+2026-07-18 03:26:30.854059 I | dragonboat: DeploymentID set to 1
+2026-07-18 03:26:30.854477 I | dragonboat: LogDB info received, shard 0, busy false
+2026-07-18 03:26:32.294624 I | logdb: [00001:00001] completed LogDB compaction up to index 19466
+   23276	     48969 ns/op	   47340 B/op	      48 allocs/op
+PASS
+ok  	github.com/greatliontech/protodb/internal/db	20.560s

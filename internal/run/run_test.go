@@ -140,9 +140,12 @@ ok  	example/p	1.234s
 `
 
 func TestParseAndDemux(t *testing.T) {
-	results, err := Parse([]byte(benchOut))
+	results, corrupt, err := Parse([]byte(benchOut))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
+	}
+	if len(corrupt) != 0 {
+		t.Fatalf("clean stream flagged corrupt lines: %v", corrupt)
 	}
 	if len(results) != 3 {
 		t.Fatalf("got %d results, want 3 (PASS/ok lines must be ignored)", len(results))
@@ -172,6 +175,198 @@ func TestParseAndDemux(t *testing.T) {
 	}
 }
 
+// TestParseCollectsCorruptionFromInterleavedStream runs Parse over a stream
+// assembled verbatim from a real `go test -bench` capture of a package whose
+// benchmarks start a consensus node logging to stdout (protodb ./internal/db):
+// the framework prints the benchmark name without a newline, the dependency's
+// logger splices its line into the result line, and the measurement fields land
+// orphaned on their own line. One corrupted benchmark must not poison the
+// stream: the clean benchmark's samples parse, every corrupt line is collected
+// with its position, verbatim text, and attribution, and the sample floor
+// refuses only the corrupted benchmark.
+func TestParseCollectsCorruptionFromInterleavedStream(t *testing.T) {
+	out, err := os.ReadFile(filepath.Join("testdata", "interleaved-go-test-stream.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	results, corrupt, err := Parse(out)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	var names []string
+	for _, r := range results {
+		names = append(names, string(r.Name))
+	}
+	wantNames := []string{
+		"KVSeamGet/stack=embedded-8",
+		"KVSeamGet/stack=embedded-8",
+		"KVSeamGet/stack=embedded-8",
+		"KVSeamCommit/stack=raft/batch=1-8",
+	}
+	if !reflect.DeepEqual(names, wantNames) {
+		t.Errorf("parsed rows = %v, want %v", names, wantNames)
+	}
+
+	want := []struct {
+		line   int
+		orphan bool
+		prefix string
+	}{
+		{11, false, "BenchmarkKVSeamCommit/stack=raft/batch=1-8"},
+		{17, true, "   22239"},
+		{18, false, "BenchmarkKVSeamCommit/stack=raft/batch=1-8"},
+		{25, true, "   23276"},
+	}
+	if len(corrupt) != len(want) {
+		t.Fatalf("corrupt lines = %+v, want %d", corrupt, len(want))
+	}
+	for i, w := range want {
+		cl := corrupt[i]
+		if cl.Line != w.line || cl.Orphan != w.orphan || !strings.HasPrefix(cl.Text, w.prefix) {
+			t.Errorf("corrupt[%d] = %+v, want line %d orphan %v prefix %q", i, cl, w.line, w.orphan, w.prefix)
+		}
+		if cl.Bench != "BenchmarkKVSeamCommit" {
+			t.Errorf("corrupt[%d] attributed to %q, want BenchmarkKVSeamCommit", i, cl.Bench)
+		}
+		if cl.Cause == "" {
+			t.Errorf("corrupt[%d] has no cause", i)
+		}
+	}
+
+	audit := AuditStream(results, corrupt, 3, []string{"BenchmarkKVSeamCommit", "BenchmarkKVSeamGet"})
+	if audit.PackageCause != "" {
+		t.Errorf("attributable corruption raised package cause %q", audit.PackageCause)
+	}
+	if _, ok := audit.Refused["BenchmarkKVSeamGet"]; ok {
+		t.Errorf("clean benchmark refused: %v", audit.Refused["BenchmarkKVSeamGet"])
+	}
+	reasons := audit.Refused["BenchmarkKVSeamCommit"]
+	if len(reasons) != 5 { // 4 corrupt lines + the 1-of-3 sample deficit
+		t.Fatalf("BenchmarkKVSeamCommit reasons = %q, want 5", reasons)
+	}
+	if got := reasons[len(reasons)-1]; !strings.Contains(got, "1 of 3 samples") {
+		t.Errorf("deficit reason = %q, want 1 of 3 samples", got)
+	}
+}
+
+// TestParseOrphanedTailDetection pins the measurement-tail classifier: the
+// detached tail of a split result line is flagged, and every near-miss line the
+// go test stream legitimately produces is not.
+func TestParseOrphanedTailDetection(t *testing.T) {
+	for name, tc := range map[string]struct {
+		line   string
+		orphan bool
+	}{
+		"real tail":              {"   22239\t     50758 ns/op\t   47375 B/op\t      48 allocs/op", true},
+		"tail single metric":     {"1000000 1234 ns/op", true},
+		"pass line":              {"PASS", false},
+		"ok line":                {"ok  \texample/p\t1.234s", false},
+		"config line":            {"cpu: TestCPU", false},
+		"log line":               {"2026-07-18 03:26:29.246778 I | dragonboat: dragonboat version: 4.0.0 (Dev)", false},
+		"zero iterations":        {"0 1234 ns/op", false},
+		"negative iterations":    {"-5 1234 ns/op", false},
+		"no per-op unit":         {"12 34.5 MB/s", false},
+		"missing unit":           {"12 34.5", false},
+		"numeric unit":           {"12 34.5 6", false},
+		"non-numeric value":      {"12 fast ns/op", false},
+		"unit line":              {"Unit ns/op better=lower", false},
+		"benchmark line skipped": {"BenchmarkRun-8 1000 1234 ns/op", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out := []byte("BenchmarkAnchor-8 1 1 ns/op\n" + tc.line + "\n")
+			_, corrupt, err := Parse(out)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			var orphans []CorruptLine
+			for _, cl := range corrupt {
+				if cl.Orphan {
+					orphans = append(orphans, cl)
+				}
+			}
+			if got := len(orphans) == 1; got != tc.orphan {
+				t.Fatalf("orphan detection on %q = %v (corrupt %+v), want %v", tc.line, got, corrupt, tc.orphan)
+			}
+			if tc.orphan && orphans[0].Bench != "BenchmarkAnchor" {
+				t.Errorf("orphan attributed to %q, want the preceding BenchmarkAnchor", orphans[0].Bench)
+			}
+		})
+	}
+}
+
+// TestAuditStreamSampleFloor pins the per-benchmark floor (spec §9): every
+// result row carries exactly the demanded count, deviation in either direction
+// refuses the benchmark, attributed corruption refuses even a count-exact
+// benchmark (a spliced line that still parsed replaced a genuine sample), and
+// an orphaned tail attributable to no selected benchmark refuses the package.
+func TestAuditStreamSampleFloor(t *testing.T) {
+	selected := []string{"BenchmarkA", "BenchmarkB"}
+	rows := func(spec map[string]int) []*benchfmt.Result {
+		var out []*benchfmt.Result
+		for name, n := range spec {
+			for i := 0; i < n; i++ {
+				out = append(out, &benchfmt.Result{Name: benchfmt.Name(name)})
+			}
+		}
+		return out
+	}
+	t.Run("exact counts pass", func(t *testing.T) {
+		audit := AuditStream(rows(map[string]int{"A-8": 2, "A/sub-8": 2, "B-8": 2}), nil, 2, selected)
+		if len(audit.Refused) != 0 || audit.PackageCause != "" {
+			t.Fatalf("clean stream refused: %+v", audit)
+		}
+	})
+	t.Run("deficit refuses only the deficient benchmark", func(t *testing.T) {
+		audit := AuditStream(rows(map[string]int{"A-8": 2, "A/sub-8": 1, "B-8": 2}), nil, 2, selected)
+		if len(audit.Refused) != 1 || len(audit.Refused["BenchmarkA"]) != 1 {
+			t.Fatalf("refused = %+v, want only BenchmarkA", audit.Refused)
+		}
+	})
+	t.Run("surplus refuses", func(t *testing.T) {
+		audit := AuditStream(rows(map[string]int{"A-8": 3, "B-8": 2}), nil, 2, selected)
+		if len(audit.Refused["BenchmarkA"]) != 1 {
+			t.Fatalf("surplus row not refused: %+v", audit.Refused)
+		}
+	})
+	t.Run("attributed corruption refuses a count-exact benchmark", func(t *testing.T) {
+		corrupt := []CorruptLine{{Line: 7, Text: "x", Cause: "c", Bench: "BenchmarkA"}}
+		audit := AuditStream(rows(map[string]int{"A-8": 2, "B-8": 2}), corrupt, 2, selected)
+		if len(audit.Refused["BenchmarkA"]) != 1 || len(audit.Refused) != 1 {
+			t.Fatalf("refused = %+v, want only BenchmarkA", audit.Refused)
+		}
+		if audit.PackageCause != "" {
+			t.Fatalf("attributable corruption raised package cause %q", audit.PackageCause)
+		}
+	})
+	t.Run("unattributable orphan refuses the package", func(t *testing.T) {
+		corrupt := []CorruptLine{{Line: 7, Text: "1 2 ns/op", Cause: "orphaned", Orphan: true}}
+		audit := AuditStream(rows(map[string]int{"A-8": 2, "B-8": 2}), corrupt, 2, selected)
+		if audit.PackageCause == "" {
+			t.Fatal("unattributable orphan did not refuse the package")
+		}
+	})
+	t.Run("orphan attributed outside the selection refuses the package", func(t *testing.T) {
+		corrupt := []CorruptLine{{Line: 7, Text: "1 2 ns/op", Cause: "orphaned", Bench: "BenchmarkElsewhere", Orphan: true}}
+		audit := AuditStream(rows(map[string]int{"A-8": 2}), corrupt, 2, selected)
+		if audit.PackageCause == "" {
+			t.Fatal("orphan outside the selection did not refuse the package")
+		}
+	})
+	t.Run("unattributable non-orphan line is not a refusal", func(t *testing.T) {
+		corrupt := []CorruptLine{{Line: 7, Text: "Benchmarking things", Cause: "missing iteration count", Bench: "Benchmarking"}}
+		audit := AuditStream(rows(map[string]int{"A-8": 2, "B-8": 2}), corrupt, 2, selected)
+		if len(audit.Refused) != 0 || audit.PackageCause != "" {
+			t.Fatalf("junk skipped line escalated: %+v", audit)
+		}
+	})
+	t.Run("deficit outside the selection is ignored", func(t *testing.T) {
+		audit := AuditStream(rows(map[string]int{"A-8": 2, "Elsewhere-8": 1}), nil, 2, selected)
+		if len(audit.Refused) != 0 {
+			t.Fatalf("unselected deficit refused: %+v", audit.Refused)
+		}
+	})
+}
+
 func TestParseRejectsReservedFormatConfig(t *testing.T) {
 	for name, line := range map[string]string{
 		"format-space":  "pew-format: 2",
@@ -183,7 +378,7 @@ func TestParseRejectsReservedFormatConfig(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			out := []byte(line + "\nBenchmarkRun-8 1 1 ns/op\n")
-			if _, err := Parse(out); err == nil {
+			if _, _, err := Parse(out); err == nil {
 				t.Fatalf("reserved configuration %q accepted", line)
 			}
 		})

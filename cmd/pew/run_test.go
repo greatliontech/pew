@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -307,7 +308,7 @@ func TestRunPackageRecordsProvidedConditions(t *testing.T) {
 	conditions := runpkg.Conditions{Governor: "performance", Turbo: &turbo, Load1: &load, Throttled: &throttled, Battery: &battery}
 	var out bytes.Buffer
 	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}
-	if err := runPackage(&out, e, newGitStateCache(), rc, pkgs[0], env, conditions); err != nil {
+	if err := runPackage(&out, io.Discard, e, newGitStateCache(), rc, pkgs[0], env, conditions); err != nil {
 		t.Fatalf("runPackage: %v\nstdout:\n%s", err, out.String())
 	}
 	recs, err := store.New(benchDir).Read("", "BenchmarkWire", "")
@@ -357,6 +358,180 @@ func assertRunConditionsLine(t *testing.T, bench, value string) {
 				t.Errorf("%s load1 = %q, want a decimal", bench, v)
 			}
 		}
+	}
+}
+
+// TestRunPackageSalvagesCorruptStream drives the real corruption mechanism end
+// to end (spec §9 sample floor): a benchmark whose body writes a log line to
+// stdout splices it into the framework's un-newlined name print, corrupting
+// every one of its result lines. The corrupted benchmark must be refused with
+// the offending lines surfaced, while the package's clean benchmark records
+// normally — and its recording carries no salvage artifacts.
+func TestRunPackageSalvagesCorruptStream(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/corruptstream\n\ngo 1.26.4\n",
+		// The framework prints the first count-run's name and result together
+		// after it completes, so BenchmarkNoisy's first row survives intact and
+		// every later run is spliced: the refused benchmark holds a *partial*
+		// valid sample set, pinning that partial data is dropped, not recorded.
+		"bench_test.go": "package corruptstream\n\nimport (\n\t\"fmt\"\n\t\"testing\"\n)\n\n" +
+			"func BenchmarkClean(b *testing.B) {}\n" +
+			"func BenchmarkNoisy(b *testing.B) { fmt.Println(\"boot: node up, insecure transport\") }\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	benchDir := filepath.Join(t.TempDir(), "benchmarks")
+	// A refused benchmark's prior recording must survive untouched (spec §9).
+	priorRecording := []byte("goos: linux\nBenchmarkNoisy-8 1 99 ns/op\n")
+	if err := os.MkdirAll(benchDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(benchDir, "BenchmarkNoisy.txt"), priorRecording, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withWorkingDir(t, dir)
+	pkgs, err := resolvePackages([]string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pkgs) != 1 {
+		t.Fatalf("resolved %d packages, want 1", len(pkgs))
+	}
+	env := os.Environ()
+	e, err := newEngineWithEnv(pkgs[0].Module.Dir, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 2, Benchtime: "1x", Bench: "."}}
+	refusal := runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{})
+	if refusal == nil {
+		t.Fatalf("corrupted stream reported no error\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+	if !strings.Contains(refusal.Error(), "BenchmarkNoisy") || !strings.Contains(refusal.Error(), "boot: node up") {
+		t.Errorf("refusal error = %q, want the corrupted benchmark and the offending line", refusal)
+	}
+	if strings.Contains(refusal.Error(), "BenchmarkClean") {
+		t.Errorf("refusal error = %q, must not implicate the clean benchmark", refusal)
+	}
+	if !strings.Contains(out.String(), "recorded     example.com/corruptstream.BenchmarkClean") {
+		t.Errorf("clean benchmark not recorded; stdout:\n%s", out.String())
+	}
+	if !strings.Contains(errOut.String(), "corrupt benchmark output line") {
+		t.Errorf("corrupt lines not surfaced on stderr:\n%s", errOut.String())
+	}
+
+	st := store.New(benchDir)
+	recs, err := st.Read("", "BenchmarkClean", "")
+	if err != nil {
+		t.Fatalf("clean recording missing: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Fatalf("clean recording has %d samples, want the demanded 2", len(recs))
+	}
+	for _, rec := range recs {
+		for _, cfg := range rec.Config {
+			if cfg.Key == "boot" || strings.Contains(cfg.Key, "corrupt") || strings.Contains(string(cfg.Value), "node up") {
+				t.Errorf("salvage artifact in recording config: %s: %s", cfg.Key, cfg.Value)
+			}
+		}
+	}
+	// BenchmarkNoisy still parsed one valid row (its first count-run); recording
+	// that partial set would silently downgrade the demanded sample count.
+	if !strings.Contains(refusal.Error(), "1 of 2 samples") {
+		t.Errorf("refusal error = %q, want the 1-of-2 sample deficit named", refusal)
+	}
+	// Not recorded, and the prior recording survives byte-identical.
+	got, err := os.ReadFile(filepath.Join(benchDir, "BenchmarkNoisy.txt"))
+	if err != nil {
+		t.Fatalf("prior recording gone: %v", err)
+	}
+	if !bytes.Equal(got, priorRecording) {
+		t.Fatalf("refused benchmark's prior recording modified:\n%s", got)
+	}
+}
+
+// TestRunPackageRefusesUnattributableOrphan drives the package-refusal arm of
+// the spec §9 sample floor end to end: a detached-measurement-fields line with
+// no preceding benchmark name (foreign output printed before the first result)
+// means a sample was destroyed or replaced somewhere pew cannot localize, so
+// nothing at all may be recorded.
+func TestRunPackageRefusesUnattributableOrphan(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/orphantail\n\ngo 1.26.4\n",
+		// The framework flushes a benchmark body's first-run output before the
+		// stream's first result line, so BenchmarkAAATail's fake tail precedes
+		// every "Benchmark..." line: an unattributable orphan.
+		"bench_test.go": "package orphantail\n\nimport (\n\t\"fmt\"\n\t\"testing\"\n)\n\n" +
+			"func BenchmarkAAATail(b *testing.B) { fmt.Println(\"5 6 ns/op\") }\n" +
+			"func BenchmarkClean(b *testing.B) {}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	benchDir := filepath.Join(t.TempDir(), "benchmarks")
+	withWorkingDir(t, dir)
+	pkgs, err := resolvePackages([]string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pkgs) != 1 {
+		t.Fatalf("resolved %d packages, want 1", len(pkgs))
+	}
+	env := os.Environ()
+	e, err := newEngineWithEnv(pkgs[0].Module.Dir, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}
+	refusal := runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{})
+	if refusal == nil {
+		t.Fatalf("unattributable orphan reported no error\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+	if !strings.Contains(refusal.Error(), "not attributable") {
+		t.Errorf("refusal error = %q, want the unattributable-orphan cause", refusal)
+	}
+	if strings.Contains(out.String(), "recorded") {
+		t.Errorf("package-refused run recorded something:\n%s", out.String())
+	}
+	if entries, err := os.ReadDir(benchDir); err == nil && len(entries) > 0 {
+		t.Errorf("package-refused run left recordings: %v", entries)
 	}
 }
 

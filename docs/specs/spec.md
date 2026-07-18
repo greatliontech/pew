@@ -582,6 +582,39 @@ provenance is captured atomically with the run:
   from the machine fingerprint (§8), from every validity guard (§7), and from comparison grouping
   (§10.1): recordings differing only in run conditions validate and compare identically, with a
   differing-conditions note (§10.1) instead of a verdict.
+- **The `go test` stream is transient input, not a recording.** Benchmarks and their dependencies
+  may write to stdout at any point — including between the framework's un-newlined benchmark-name
+  print and its result fields — so the stream pew parses can carry foreign bytes spliced into a
+  result line, leaving the line's measurement fields orphaned on a line of their own. pew reads
+  the stream tolerantly and fails closed **per benchmark**, never per line:
+  - A line claiming a benchmark result that the parser cannot read (a result line with foreign
+    bytes spliced into it) and any orphaned measurement-fields line (an iteration count plus
+    value/unit pairs with no benchmark name — the detached tail of a spliced result line) is
+    never recorded and never silently dropped: each is surfaced verbatim with its stream line
+    number. Foreign lines of any other shape are outside this corruption surface and take the
+    text format's own reading (unrecognized lines are skipped; `key: value`-shaped lines read as
+    configuration).
+  - **Sample floor.** A recorded benchmark carries, for every result row it produced, exactly the
+    demanded `--count` samples. A top-level benchmark with any row above or below that count, or
+    with corruption evidence attributed to it (an unparseable line naming it, an orphaned
+    measurement-fields line following its output), is **refused**: not recorded, its prior
+    recording left untouched, the refusal reported with the offending lines — while the package's
+    other benchmarks record normally wherever the corruption is attributable, and the run still
+    exits non-zero. An orphaned measurement-fields line attributable to no benchmark of the run
+    refuses the whole package (a sample was destroyed or replaced somewhere pew cannot localize),
+    and a selected benchmark left with no parseable rows and no attributed evidence fails the
+    package (indistinguishable from a benchmark that never ran).
+  - A `go test` exit failure still records nothing for the package — the process is suspect, not
+    merely its transcript. The reserved-key refusal (§5) is unchanged and fail-closed.
+  - Recordings carry no salvage artifacts: corrupt-line reports, counts, and refusal reasons are
+    command output only, never persisted.
+  - *Detection boundary:* a spliced line that still parses as a well-formed result row is
+    textually indistinguishable from a genuine one, and a foreign unterminated write can prepend
+    bytes to a detached tail so it evades orphan detection. Detection is therefore best-effort
+    over a text stream: the sample floor catches every corruption that changes a row's count and
+    orphan evidence catches tail-preserving fabrication, but a splice that both fabricates a
+    parseable row and masks its detached tail is undetectable — the same exposure every consumer
+    of the text format has.
 - Records provenance (§5), computes the run-commit closure hash (§7), and records explicit incomplete
   runtime-input evidence (`pew-runtime*`, §7.8) at run time.
 - Captures one ordinary measurement view and every benchmark fingerprint before execution. The
@@ -796,3 +829,18 @@ Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred
   staleness failure (§1) reproduced at the gate itself. *Kind:* clause-explicit (§10.1). *Anchor
   tests:* empty store under the flag ⇒ exit `2` with diagnostic; all candidates skipped ⇒ exit `2`
   with per-cause tally; partial skip with a clean compared subset ⇒ exit `0`.
+- **INV-11 — Recording sample completeness.** A recording produced by `pew run` carries exactly
+  the demanded `--count` samples for every result row; a benchmark whose stream output shows
+  corruption evidence (unparseable lines naming it, orphaned measurement fields, sample-count
+  deviation) is refused rather than recorded (§9 sample floor); localizable corruption in one
+  benchmark's output never discards another benchmark's completed measurements — only the §5
+  reserved-key refusal and §9's unattributable-corruption cases refuse a whole package — and no
+  corrupt line's content is ever recorded, as measurement data or as salvage artifact.
+  *Violation:* a dependency's logger splices one line into one result row and either (a) the whole
+  package's completed run — ~30 minutes of untouched benchmarks — is discarded, or (b) the
+  affected benchmark records silently with fewer samples than demanded, and `pew stat` later
+  compares a degenerate sample set as statistics-grade while every guard holds. *Kind:* entailed
+  (§9 statistics-grade defaults + §5 provenance honesty). *Anchor tests:* a stream captured from a
+  real consensus-node-logging run ⇒ the affected benchmark refused with the spliced line reported
+  verbatim, the clean benchmark recorded with its full sample set; an orphaned-fields line with no
+  attributable benchmark ⇒ the package refused.

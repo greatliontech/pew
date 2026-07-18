@@ -109,7 +109,7 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 		}
 		// Like status, a per-package failure (e.g. one that does not build) is
 		// reported and does not abort the rest of the tree.
-		runErr := runPackage(w, e, gc, rc, p, env, conditions)
+		runErr := runPackage(w, errw, e, gc, rc, p, env, conditions)
 		if runErr != nil {
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, runErr)
 			failures = append(failures, p.ImportPath)
@@ -167,7 +167,7 @@ func (c *gitStateCache) recordWrites(repoRoot string, paths []string) {
 	}
 }
 
-func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig, p pkgMeta, env []string, conditions run.Conditions) error {
+func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig, p pkgMeta, env []string, conditions run.Conditions) error {
 	benches, err := selectedBenchmarks(p)
 	if err != nil {
 		return err
@@ -261,13 +261,36 @@ func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig,
 	if err != nil {
 		return err
 	}
-	results, err := run.Parse(out)
+	// The stream is transient input, not a recording (spec §9): interleaved
+	// foreign stdout output corrupts individual result lines, so corruption is
+	// surfaced per line and enforced per benchmark — never fatal per line.
+	results, corrupt, err := run.Parse(out)
 	if err != nil {
 		return err
 	}
+	for _, cl := range corrupt {
+		fmt.Fprintf(errw, "pew: warning: corrupt benchmark output line %d: %q (%s)\n", cl.Line, cl.Text, cl.Cause)
+	}
+	audit := run.AuditStream(results, corrupt, opts.Count, runBenches)
+	if audit.PackageCause != "" {
+		return fmt.Errorf("benchmark output corrupted: %s", audit.PackageCause)
+	}
+	refused := make([]string, 0, len(audit.Refused))
+	for bench := range audit.Refused {
+		refused = append(refused, bench)
+	}
+	sort.Strings(refused)
 
 	groups := run.Demux(results, nil)
-	if err := requireBenchmarkGroups(runBenches, groups); err != nil {
+	recordable := make([]string, 0, len(runBenches))
+	for _, bench := range runBenches {
+		if _, ok := audit.Refused[bench]; ok {
+			delete(groups, bench)
+			continue
+		}
+		recordable = append(recordable, bench)
+	}
+	if err := requireBenchmarkGroups(recordable, groups); err != nil {
 		return err
 	}
 	if err := view.Validate(ctx); err != nil {
@@ -343,6 +366,14 @@ func runPackage(w io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig,
 	sort.Strings(written)
 	for _, name := range written {
 		fmt.Fprintf(w, "recorded     %s.%s\n", p.ImportPath, name)
+	}
+	if len(refused) > 0 {
+		details := make([]string, 0, len(refused))
+		for _, bench := range refused {
+			details = append(details, bench+": "+strings.Join(audit.Refused[bench], "; "))
+		}
+		return fmt.Errorf("output corruption refused %d benchmark(s) (%d recorded): %s",
+			len(refused), len(written), strings.Join(details, " | "))
 	}
 	return nil
 }
