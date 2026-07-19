@@ -17,11 +17,37 @@ import (
 // recording states exactly the conditions the warn/--strict gate evaluated —
 // there is no second read that could diverge from the first.
 type Conditions struct {
-	Governor  string   // cpufreq scaling governor; "" = not observed
+	Governor  string   // cpufreq scaling governor, "mixed" on differing policies; "" = not observed
 	Turbo     *bool    // cpu turbo/boost enabled; nil = not observed
 	Load1     *float64 // 1-minute load average; nil = not observed
-	Throttled *bool    // thermal throttling observed; nil = not observed
+	Throttled *bool    // thermal throttling during the measurement (counter delta); nil = not observed
 	Battery   *bool    // running on battery power; nil = not observed
+}
+
+// ThrottleSnapshot maps a thermal-throttle counter file to its cumulative
+// count. The counters count events since boot, so a single snapshot carries no
+// run information; two snapshots bracketing a measurement do.
+type ThrottleSnapshot map[string]uint64
+
+// Delta reports whether any counter increased between the base snapshot and
+// now: true when one did (the run was throttled), false when at least one
+// counter is present on both sides and none moved, nil when nothing is
+// comparable (unobserved, never guessed quiet).
+func (s ThrottleSnapshot) Delta(now ThrottleSnapshot) *bool {
+	var observed *bool
+	for path, base := range s {
+		cur, ok := now[path]
+		if !ok {
+			continue
+		}
+		if cur > base {
+			t := true
+			return &t
+		}
+		quiet := false
+		observed = &quiet
+	}
+	return observed
 }
 
 const conditionUnknown = "unknown"
@@ -63,10 +89,12 @@ func conditionBool(v *bool) string {
 	return strconv.FormatBool(*v)
 }
 
-// Warnings derives the advisory quiesce warnings (spec §9) from the
+// Warnings derives the advisory pre-run quiesce warnings (spec §9) from the
 // observation. Only observed noisy signals warn: an unknown signal is neither
 // quiet nor noisy, so it produces no warning (and a platform with no signals —
-// the zero Conditions — produces none at all).
+// the zero Conditions — produces none at all). Throttling has no pre-run
+// warning: it is run-scoped evidence (a counter delta across the measurement,
+// spec §9), warned where it is observed — after the package's run.
 func (c Conditions) Warnings() []string {
 	var warns []string
 	if c.Governor != "" && c.Governor != "performance" {
@@ -80,9 +108,6 @@ func (c Conditions) Warnings() []string {
 	}
 	if c.Turbo != nil && *c.Turbo {
 		warns = append(warns, "cpu turbo/boost is enabled")
-	}
-	if c.Throttled != nil && *c.Throttled {
-		warns = append(warns, "thermal throttling observed")
 	}
 	return warns
 }

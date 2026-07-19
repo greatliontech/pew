@@ -15,22 +15,57 @@ var (
 )
 
 // ObserveConditions reads the Linux sysfs/procfs signals for governor,
-// AC/battery, load average, turbo/boost, and thermal throttling into one
-// Conditions snapshot (spec §9). The snapshot is both the quiesce-warning input
-// and the recorded `pew-runconditions` provenance; a signal that cannot be read
-// stays unobserved (recorded as the explicit unknown marker), never guessed.
+// AC/battery, load average, and turbo/boost into one Conditions snapshot
+// (spec §9). The snapshot is both the quiesce-warning input and the recorded
+// `pew-runconditions` provenance; a signal that cannot be read stays
+// unobserved (recorded as the explicit unknown marker), never guessed.
+// Throttling is deliberately absent here: it is run-scoped evidence, observed
+// as a counter delta around each package's measurement (SnapshotThrottle) —
+// a boot-cumulative counter says nothing about this run.
 func ObserveConditions() Conditions {
-	c := Conditions{}
-	if g, err := os.ReadFile(sysPath("devices/system/cpu/cpu0/cpufreq/scaling_governor")); err == nil {
-		c.Governor = strings.TrimSpace(string(g))
+	c := Conditions{
+		Governor: observeGovernor(),
+		Battery:  observeBattery(),
+		Turbo:    observeTurbo(),
 	}
-	c.Battery = observeBattery()
 	if la, ok := load1(); ok {
 		c.Load1 = &la
 	}
-	c.Turbo = observeTurbo()
-	c.Throttled = observeThrottled()
 	return c
+}
+
+// observeGovernor reads every cpufreq policy's scaling governor: a box that is
+// uniform records the value, differing policies record the explicit "mixed"
+// marker (never policy0's value standing in for cores it doesn't govern), and
+// no exposed policy falls back to the legacy per-cpu path. An exposed policy
+// whose governor cannot be read leaves the whole signal unobserved: with one
+// policy dark, neither uniformity nor a mix is provable.
+func observeGovernor() string {
+	matches, _ := filepath.Glob(sysPath("devices/system/cpu/cpufreq/policy*/scaling_governor"))
+	if len(matches) == 0 {
+		if g, err := os.ReadFile(sysPath("devices/system/cpu/cpu0/cpufreq/scaling_governor")); err == nil {
+			return strings.TrimSpace(string(g))
+		}
+		return ""
+	}
+	governors := map[string]bool{}
+	for _, m := range matches {
+		b, err := os.ReadFile(m)
+		if err != nil {
+			return ""
+		}
+		g := strings.TrimSpace(string(b))
+		if g == "" {
+			return ""
+		}
+		governors[g] = true
+	}
+	if len(governors) == 1 {
+		for g := range governors {
+			return g
+		}
+	}
+	return "mixed"
 }
 
 func sysPath(elem string) string {
@@ -61,13 +96,13 @@ func observeBattery() *bool {
 	return observed
 }
 
-// observeTurbo reads the two sysfs turbo signals. Turbo counts as enabled when
-// either exposed signal says so (`intel_pstate/no_turbo` == 0 or
-// `cpufreq/boost` == 1); as disabled when at least one is exposed and neither
-// says enabled; and as unobserved when neither is exposed with a parseable
-// value.
+// observeTurbo reads the two sysfs turbo signals with driver precedence:
+// `intel_pstate/no_turbo` belongs to the platform driver actually governing
+// the CPU, so when it exposes a parseable value its verdict is final —
+// `cpufreq/boost` is consulted only when intel_pstate says nothing. The old
+// either-signal-on rule could report turbo enabled on a machine whose
+// authoritative driver had it off.
 func observeTurbo() *bool {
-	var observed *bool
 	if b, err := os.ReadFile(sysPath("devices/system/cpu/intel_pstate/no_turbo")); err == nil {
 		switch strings.TrimSpace(string(b)) {
 		case "0":
@@ -75,7 +110,7 @@ func observeTurbo() *bool {
 			return &t
 		case "1":
 			f := false
-			observed = &f
+			return &f
 		}
 	}
 	if b, err := os.ReadFile(sysPath("devices/system/cpu/cpufreq/boost")); err == nil {
@@ -85,29 +120,29 @@ func observeTurbo() *bool {
 			return &t
 		case "0":
 			f := false
-			observed = &f
+			return &f
 		}
 	}
-	return observed
+	return nil
 }
 
-// observeThrottled reports whether any exposed CPU thermal-throttle counter is
-// non-zero; with no parseable counter exposed the signal is unobserved.
-func observeThrottled() *bool {
-	var observed *bool
+// SnapshotThrottle reads every exposed CPU thermal-throttle counter. Two
+// snapshots bracketing a measurement yield the run-scoped throttled verdict
+// via Delta — the counters are boot-cumulative, so only an increase within
+// the bracket says anything about the run.
+func SnapshotThrottle() ThrottleSnapshot {
+	var snap ThrottleSnapshot
 	for _, f := range globRead(sysPath("devices/system/cpu/cpu*/thermal_throttle/*_throttle_count")) {
 		count, err := strconv.ParseUint(strings.TrimSpace(f.data), 10, 64)
 		if err != nil {
 			continue
 		}
-		if count > 0 {
-			t := true
-			return &t
+		if snap == nil {
+			snap = ThrottleSnapshot{}
 		}
-		quiet := false
-		observed = &quiet
+		snap[f.path] = count
 	}
-	return observed
+	return snap
 }
 
 type fileData struct{ path, data string }

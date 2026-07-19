@@ -25,6 +25,27 @@ type runConfig struct {
 	opts                 run.Options
 	strict, staleOnly    bool
 	pure, impure         map[string]bool // benchmark names flagged --assume-pure / --impure
+	// throttle snapshots the thermal-throttle counters bracketing each
+	// package's measurement (spec §9); nil means run.SnapshotThrottle. A seam
+	// so tests control the observed delta deterministically.
+	throttle func() run.ThrottleSnapshot
+	// execute runs one go-test invocation; nil means run.Execute. A seam so
+	// tests can observe invocation order against the throttle bracket.
+	execute func(moduleDir, pin string, env, args []string) ([]byte, error)
+}
+
+func (rc runConfig) snapshotThrottle() run.ThrottleSnapshot {
+	if rc.throttle != nil {
+		return rc.throttle()
+	}
+	return run.SnapshotThrottle()
+}
+
+func (rc runConfig) executeGo(moduleDir, pin string, env, args []string) ([]byte, error) {
+	if rc.execute != nil {
+		return rc.execute(moduleDir, pin, env, args)
+	}
+	return run.Execute(moduleDir, pin, env, args)
 }
 
 func newRunCmd() *cobra.Command {
@@ -241,12 +262,38 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 		fingerprints[subject.Symbol] = fp
 	}
 
+	// Build the test binary before the throttle bracket opens: compilation is
+	// a thermal-event source of its own, and the recorded throttled verdict
+	// covers the measurement, not the build (spec §9). The artifact is
+	// discarded — the build cache is what the measurement run reuses.
+	warmup, err := os.CreateTemp("", "pew-testbin-*")
+	if err != nil {
+		return err
+	}
+	warmupPath := warmup.Name()
+	_ = warmup.Close()
+	defer os.Remove(warmupPath)
+	if _, err := rc.executeGo(p.Module.Dir, "", env, run.BuildArgs(p.ImportPath, warmupPath)); err != nil {
+		return err
+	}
 	// A benchmark failure makes `go test` exit non-zero and discards the whole
 	// package's run (the successful benches too) — a suspect package records
 	// nothing rather than a partial set.
-	out, err := run.Execute(p.Module.Dir, rc.pin, env, run.TestArgs(p.ImportPath, opts))
+	throttleBase := rc.snapshotThrottle()
+	out, err := rc.executeGo(p.Module.Dir, rc.pin, env, run.TestArgs(p.ImportPath, opts))
 	if err != nil {
 		return err
+	}
+	// Throttling is run-scoped evidence (spec §9): the recorded value is the
+	// counter delta across exactly this package's measurement, warned here —
+	// the only moment it is observable — and fatal under --strict, refusing
+	// the suspect measurement before anything is recorded.
+	conditions.Throttled = throttleBase.Delta(rc.snapshotThrottle())
+	if conditions.Throttled != nil && *conditions.Throttled {
+		fmt.Fprintf(errw, "pew: warning: thermal throttling occurred during %s measurement\n", p.ImportPath)
+		if rc.strict {
+			return fmt.Errorf("run: %s: thermal throttling during measurement (--strict)", p.ImportPath)
+		}
 	}
 	runtimeObservation, err := runtimeinput.IncompleteEnv(
 		p.Module.Dir,

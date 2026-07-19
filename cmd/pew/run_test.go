@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -303,11 +304,18 @@ func TestRunPackageRecordsProvidedConditions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turbo, throttled, battery := true, false, false
+	turbo, battery := true, false
 	load := 1.25
-	conditions := runpkg.Conditions{Governor: "performance", Turbo: &turbo, Load1: &load, Throttled: &throttled, Battery: &battery}
+	conditions := runpkg.Conditions{Governor: "performance", Turbo: &turbo, Load1: &load, Battery: &battery}
 	var out bytes.Buffer
-	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}
+	// The recorded throttled field is the per-package measurement-bracket
+	// delta (spec §9), not part of the provided pre-run observation: a stable
+	// fake counter records an observed false.
+	rc := runConfig{
+		benchDir: benchDir,
+		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
+		throttle: func() runpkg.ThrottleSnapshot { return runpkg.ThrottleSnapshot{"c0": 5} },
+	}
 	if err := runPackage(&out, io.Discard, e, newGitStateCache(), rc, pkgs[0], env, conditions); err != nil {
 		t.Fatalf("runPackage: %v\nstdout:\n%s", err, out.String())
 	}
@@ -317,8 +325,140 @@ func TestRunPackageRecordsProvidedConditions(t *testing.T) {
 	}
 	want := "governor=performance turbo=on load1=1.25 throttled=false battery=false"
 	if got := recs[0].GetConfig("pew-runconditions"); got != want {
-		t.Fatalf("recorded conditions = %q, want the provided observation %q", got, want)
+		t.Fatalf("recorded conditions = %q, want the provided observation with the bracket delta %q", got, want)
 	}
+}
+
+// TestRunPackageRecordsThrottleDelta pins spec §9's run-scoped throttling: a
+// counter moving across the package's measurement bracket records
+// throttled=true and warns after the measurement; under --strict the suspect
+// measurement is refused with nothing recorded.
+func TestRunPackageRecordsThrottleDelta(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":        "module example.com/throttlewire\n\ngo 1.26.4\n",
+		"bench_test.go": "package throttlewire\n\nimport \"testing\"\n\nfunc BenchmarkHot(b *testing.B) {}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	withWorkingDir(t, dir)
+	pkgs, err := resolvePackages([]string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := os.Environ()
+	e, err := newEngineWithEnv(pkgs[0].Module.Dir, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	movingCounter := func() func() runpkg.ThrottleSnapshot {
+		n := uint64(5)
+		return func() runpkg.ThrottleSnapshot {
+			n += 2
+			return runpkg.ThrottleSnapshot{"c0": n}
+		}
+	}
+
+	t.Run("records delta and warns", func(t *testing.T) {
+		benchDir := filepath.Join(t.TempDir(), "benchmarks")
+		var out, errOut bytes.Buffer
+		rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}, throttle: movingCounter()}
+		if err := runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}); err != nil {
+			t.Fatalf("runPackage: %v", err)
+		}
+		recs, err := store.New(benchDir).Read("", "BenchmarkHot", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := recs[0].GetConfig("pew-runconditions"); !strings.Contains(got, "throttled=true") {
+			t.Fatalf("recorded conditions = %q, want throttled=true from the bracket delta", got)
+		}
+		if !strings.Contains(errOut.String(), "thermal throttling occurred during example.com/throttlewire measurement") {
+			t.Fatalf("stderr = %q, want the post-measurement throttling warning", errOut.String())
+		}
+	})
+
+	t.Run("strict refuses the measurement", func(t *testing.T) {
+		benchDir := filepath.Join(t.TempDir(), "benchmarks")
+		// The refused benchmark's prior recording must survive untouched
+		// (spec §9).
+		st := store.New(benchDir)
+		prior := []byte("goos: linux\nBenchmarkHot-8 1 99 ns/op\n")
+		priorPath, err := st.Path("", "BenchmarkHot", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(priorPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(priorPath, prior, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var out, errOut bytes.Buffer
+		rc := runConfig{benchDir: benchDir, strict: true, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}, throttle: movingCounter()}
+		err = runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{})
+		if err == nil || !strings.Contains(err.Error(), "thermal throttling during measurement") {
+			t.Fatalf("err = %v, want the strict throttling refusal", err)
+		}
+		got, err := os.ReadFile(priorPath)
+		if err != nil {
+			t.Fatalf("prior recording gone: %v", err)
+		}
+		if !bytes.Equal(got, prior) {
+			t.Fatalf("refused measurement modified the prior recording:\n%s", got)
+		}
+	})
+
+	t.Run("build precedes the bracket", func(t *testing.T) {
+		// The recorded verdict covers the measurement, not the build
+		// (spec §9): the compile invocation must complete before the first
+		// bracketing snapshot, and the measurement run sit strictly inside
+		// the bracket.
+		var events []string
+		benchDir := filepath.Join(t.TempDir(), "benchmarks")
+		rc := runConfig{
+			benchDir: benchDir,
+			opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
+			throttle: func() runpkg.ThrottleSnapshot {
+				events = append(events, "snapshot")
+				return runpkg.ThrottleSnapshot{"c0": 1}
+			},
+			execute: func(moduleDir, pin string, env, args []string) ([]byte, error) {
+				for _, a := range args {
+					if a == "-c" {
+						events = append(events, "build")
+						return nil, nil
+					}
+				}
+				events = append(events, "measure")
+				return []byte("goos: linux\ngoarch: amd64\npkg: example.com/throttlewire\ncpu: T\nBenchmarkHot-8 1 5 ns/op\nPASS\n"), nil
+			},
+		}
+		if err := runPackage(io.Discard, io.Discard, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}); err != nil {
+			t.Fatalf("runPackage: %v", err)
+		}
+		want := []string{"build", "snapshot", "measure", "snapshot"}
+		if !reflect.DeepEqual(events, want) {
+			t.Fatalf("invocation order = %v, want %v", events, want)
+		}
+	})
 }
 
 // assertRunConditionsLine checks a produced pew-runconditions value (spec §9):

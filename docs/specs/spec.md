@@ -570,13 +570,29 @@ provenance is captured atomically with the run:
   scheduler-migration variance but is platform-specific and footgun-prone (core choice, SMT
   siblings, containers/VMs), so forcing it on would be the surprising default. The first knob to
   enable for serious runs.
-- **Quiesce pre-checks WARN by default; `--strict` promotes them to hard-gates.** Checks:
-  on-battery, non-`performance` governor, high load average, turbo, thermal throttling. Warn-not-gate
+- **Quiesce pre-checks WARN by default; `--strict` promotes them to hard-gates.** Pre-run checks:
+  on-battery, non-`performance` governor, high load average, turbo. Warn-not-gate
   because hard-gating blocks legitimate quick runs and pew often can't fix the condition anyway
   (setting the governor needs root); the warning fires at the right moment — about to record a bad
   run.
-  On Linux, turbo/boost is checked via exposed `intel_pstate/no_turbo` or `cpufreq/boost` sysfs state,
-  and thermal throttling via exposed CPU `thermal_throttle/*_throttle_count` counters.
+  On Linux: the governor is read across **every** exposed cpufreq policy — a uniform box records
+  the value, differing policies record (and warn as) the explicit `mixed` marker, never one
+  policy's value standing in for cores it doesn't govern; an exposed policy whose governor cannot
+  be read, or reads blank, leaves the whole signal unobserved (with one policy dark, neither
+  uniformity nor a mix is provable); with no policy exposed the legacy per-cpu path is the fallback. Turbo is read
+  with driver precedence: an exposed parseable `intel_pstate/no_turbo` is authoritative (it
+  belongs to the platform driver actually governing the CPU) and `cpufreq/boost` is consulted
+  only in its absence — conflicting signals never resolve toward enabled.
+  **Thermal throttling is run-scoped evidence, not a pre-check.** The CPU
+  `thermal_throttle/*_throttle_count` counters are cumulative since boot, so their standing value
+  says nothing about this run; pew compiles the package's test binary **before** the bracket
+  opens (compilation is a thermal-event source of its own — the discarded artifact warms the
+  build cache the measurement run reuses; the measured invocation still performs its own link of
+  the cached objects, the far smaller residual inside the bracket), then snapshots the counters
+  bracketing the measurement run and records the delta verdict: `throttled=true` iff a counter increased within the bracket,
+  `false` when counters were comparable and still, `unknown` when none were. A throttled package
+  warns right after its measurement — the only moment the evidence exists — and under `--strict`
+  is **refused**: not recorded, its prior recording untouched, the run exits non-zero.
 - **Run conditions are recorded as provenance, never identity.** The observation that produces the
   quiesce warnings is also recorded in-band as the mandatory `pew-runconditions` config line — one
   per recording, uniform per invocation:
@@ -584,10 +600,13 @@ provenance is captured atomically with the run:
   with any unobservable signal recorded as the explicit field value `unknown` (a platform with no
   quiesce signals — non-Linux today — records every field `unknown` rather than omitting the line:
   an unobserved condition is stated, never implied, so a missing line always means a
-  pre-run-conditions producer, not a quiet run). The recorded values and the warn/`--strict` gate
-  derive from one pre-run observation, taken once per `pew run` invocation before execution, so the
-  gate and the recording can never disagree about what was observed; mid-run drift is not
-  re-observed (drift is caught by the statistics, §8). A governor value that is not a plain token
+  pre-run-conditions producer, not a quiet run). Every field except `throttled` derives, with the
+  warn/`--strict` gate, from one pre-run observation taken once per `pew run` invocation before
+  execution — uniform per invocation, so the gate and the recording can never disagree about what
+  was observed, and mid-run drift is not re-observed (drift is caught by the statistics, §8).
+  `throttled` is the exception by construction: it is the per-package measurement-bracket delta
+  above, so it may differ between packages of one invocation and is exactly as run-scoped as the
+  measurement it annotates. A governor value that is not a plain token
   (`[A-Za-z0-9_.-]+`) is *recorded* as `unknown` — field values never carry separators that could
   corrupt the line's `key=value` structure — while the advisory warning may still name the raw
   value (warnings are stderr text, not persisted structure). The line answers the audit question "was this number

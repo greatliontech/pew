@@ -46,7 +46,9 @@ func TestConditionsStringSanitizesGovernorToken(t *testing.T) {
 
 // TestConditionsWarningsOnlyObservedNoisySignals: unknown signals never warn
 // (the zero Conditions warns nothing — the non-Linux behavior), observed quiet
-// signals never warn, observed noisy ones each warn.
+// signals never warn, observed noisy ones each warn. Throttled never warns
+// here: it is run-scoped evidence warned after the measurement (spec §9), not
+// a pre-run signal.
 func TestConditionsWarningsOnlyObservedNoisySignals(t *testing.T) {
 	if warns := (Conditions{}).Warnings(); len(warns) != 0 {
 		t.Fatalf("zero conditions warned: %v", warns)
@@ -61,7 +63,6 @@ func TestConditionsWarningsOnlyObservedNoisySignals(t *testing.T) {
 		"running on battery",
 		"high load average (10000.00)",
 		"cpu turbo/boost is enabled",
-		"thermal throttling observed",
 	}
 	if got := noisy.Warnings(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("noisy warnings = %v, want %v", got, want)

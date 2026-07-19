@@ -347,6 +347,14 @@ func BenchName(resultName string) string {
 	return "Benchmark" + base
 }
 
+// BuildArgs compiles a package's test binary into out without running it —
+// the pre-measurement warmup that keeps compilation outside the throttle
+// bracket (spec §9): the build is a thermal-event source of its own, and the
+// recorded verdict covers the measurement, not the build.
+func BuildArgs(importPath, out string) []string {
+	return []string{"test", "-c", "-o", out, importPath}
+}
+
 // ProvenanceConfig returns the in-band provenance lines in spec §5 order: the
 // measured commit and dirty flag from pew's git layer, the gofresh guard
 // values, and the observed run conditions (§9 — provenance only, never a guard,
