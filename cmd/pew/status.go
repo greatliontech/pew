@@ -220,8 +220,10 @@ func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, 
 // always re-runs unless a guard already staled it, so any non-stale verdict becomes
 // unverifiable "impure". --assume-pure (pure:true) is the author suppressing the
 // remaining unverifiability after every hashable guard held, so unverifiable
-// becomes valid. The in-code //gofresh:pure directive channel is applied inside the
-// engine itself (newEngine).
+// becomes valid — except an engine verdict carrying the //gofresh:external
+// directive's reason: the in-code external declaration is not a blind spot the
+// caller may vouch away (§7.5), exactly as the in-code //gofresh:pure channel is
+// applied inside the engine itself (newEngineForPkg).
 func applyPurity(v gofresh.Verdict, pure string) gofresh.Verdict {
 	switch pure {
 	case "false":
@@ -229,7 +231,7 @@ func applyPurity(v gofresh.Verdict, pure string) gofresh.Verdict {
 			return gofresh.Verdict{Status: gofresh.Unverifiable, Reason: "impure"}
 		}
 	case "true":
-		if v.Status == gofresh.Unverifiable {
+		if v.Status == gofresh.Unverifiable && v.Reason != "external directive" {
 			return gofresh.Verdict{Status: gofresh.Valid}
 		}
 	}

@@ -29,6 +29,10 @@ func TestApplyPurity(t *testing.T) {
 		{"impure demotes unverifiable", unverV, "false", gofresh.Verdict{Status: gofresh.Unverifiable, Reason: "impure"}},
 		{"impure never overrides stale", staleV, "false", staleV},
 		{"assume-pure lifts unverifiable", unverV, "true", validV},
+		// The //gofresh:external directive's verdict is the author's in-code
+		// external-state declaration (spec §7.5): not a blind spot the caller
+		// may vouch away, so assume-pure never upgrades it.
+		{"assume-pure never lifts external directive", gofresh.Verdict{Status: gofresh.Unverifiable, Reason: "external directive"}, "true", gofresh.Verdict{Status: gofresh.Unverifiable, Reason: "external directive"}},
 		{"assume-pure never lifts stale", staleV, "true", staleV},
 		{"assume-pure leaves valid alone", validV, "true", validV},
 	}

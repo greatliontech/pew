@@ -396,8 +396,11 @@ detection is impossible (§3 non-goal), so unlike INV-1's source-soundness it ca
 The set above is deliberately **small and high-confidence**: under-flagging is the documented
 boundary, while *over*-flagging is the real cost (a benchmark reading a fixed fixture in setup would
 be marked `unverifiable` → forced rerun), recovered by `--assume-pure` (§7.5). The complement for
-benchmarks the author *knows* read external state — a user-declarable `--impure` marker that always
-re-runs — folds into the CLI surface (§12).
+benchmarks the author *knows* read external state has two channels with the same semantics as the
+pure side: the per-invocation `--impure` marker (folds into the CLI surface, §12) and the durable
+`//gofresh:external` directive on the declaration, honored inside the shared engine (gofresh
+`REQ-external-directive`) — either always re-runs the benchmark while a failing hashable guard
+still reports `stale`.
 
 ### 7.4 Analysis requirements
 
@@ -450,9 +453,11 @@ the benchmark declaration travels with the code — written once, reviewed in co
 every consumer of the shared gofresh engine (gofresh `REQ-purity-directive`). The exact Gofresh
 attribution used by capture is recorded as `pew-purity`; source equality can prove it unchanged, but
 an old recording with no attribution re-runs rather than acquiring historical evidence. Precedence:
-`--impure` (§7.3) beats both —
-it is an explicit declaration of external state, applied after the engine verdict, so it forces a
-re-run even for a directive-pure benchmark.
+an external-state declaration beats every purity assertion. `--impure` (§7.3) is applied after the
+engine verdict and forces a re-run even for a directive-pure benchmark; the `//gofresh:external`
+directive is enforced inside the engine (a declaration carrying both directives is refused there,
+gofresh `REQ-external-precedence`), and `--assume-pure` never upgrades its verdict — the in-code
+external declaration is not a blind spot the caller may vouch away.
 
 ### 7.6 What changes vs what is recomputed
 
@@ -790,8 +795,9 @@ Four commands; names follow the `go test` / benchstat idiom.
     intersects the independent `--bench` selection and never adds or records an excluded benchmark.
   - hygiene: `--count` (10), `--benchtime` (1s), `--pin`, `--strict` (§9)
   - storage: `--bench-dir <dir>` (default `<module>/benchmarks`), `--label <name>` (§6);
-    purity overrides: `--assume-pure <bench>` (§7.5), `--impure <bench>` (§7.3). The pure
-    assertion also has a durable in-code form, `//gofresh:pure` (§7.5); the impure one does not.
+    purity overrides: `--assume-pure <bench>` (§7.5), `--impure <bench>` (§7.3). Both assertions
+    also have durable in-code forms honored by the shared engine: `//gofresh:pure` and
+    `//gofresh:external` (§7.3, §7.5).
 - **`pew status [packages]`** — per-benchmark verdict: `valid` / `stale ⟨reason⟩` /
   `unverifiable ⟨reason⟩` / `unrecorded`. `--stale` filters to non-valid (scriptable; feeds
   `run --stale`). Supports `--bench-dir <dir>` and `--label <name>` (§6).

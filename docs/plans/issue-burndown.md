@@ -8,7 +8,7 @@ future improvement (`docs/issues/remote-bench-execution.md`), not part of this p
 - [x] 3. Stale-shape recording visibility: surface shape-failing recordings in `stat`; report/remove in `gc`
 - [x] 4. Quiesce signal fidelity: all-policy governor scan, throttle-counter delta, `no_turbo` precedence (§9)
 - [x] 5. Buildconfig completeness: PGO profile content guarded; per-package tension resolved
-- [ ] 6. Durable impure directive: gofresh grammar + engine/caller decision, pew adoption
+- [x] 6. Durable impure directive: gofresh grammar + engine/caller decision, pew adoption
 - [ ] 7. `pew stat --explain`: recorded-vs-current guard view, manifest-decoded input naming
 - [ ] 8. `-json` output for `status`/`stat`
 - [ ] 9. Close-out gate
