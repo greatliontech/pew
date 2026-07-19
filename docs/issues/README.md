@@ -13,7 +13,6 @@ close-out convention.
 | [remote-bench-execution](remote-bench-execution.md) | run measurements on a dedicated homelab bench machine: gRPC-over-SSH `pew agent`, machine lease, off-box builds, calibration drift-vet | when a dedicated bench machine is provisioned and measurements first need to run on it |
 | [quiesce-signal-fidelity](quiesce-signal-fidelity.md) | governor read from cpu0 only, boot-cumulative throttle counters, conflicting turbo signals resolve toward enabled | when a recorded run-conditions value or quiesce warning is observed wrong on a real machine |
 | [stat-explain](stat-explain.md) | implement the spec-reserved `pew stat --explain` guard/input view | when guard-failure opacity bites in real use |
-| [stale-shape-recording-visibility](stale-shape-recording-visibility.md) | recordings failing the current shape are silently invisible to `stat` (all modes when both sides predate it) and to `gc` (never removed, never reported) | when the recording shape next changes, or a silently invisible recording confuses a real invocation |
 
 ## In-spec upgrade paths (tracked inline, not here)
 

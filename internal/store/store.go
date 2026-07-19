@@ -448,6 +448,26 @@ func IsRecording(recs []*benchfmt.Result) bool {
 	return cfg["pew-format-invalid"] != "true" && formatCount == 1 && cfg["pew-format"] == "1"
 }
 
+// IsPewMarked reports whether parsed results carry any pew-owned (`pew-`
+// prefixed) configuration key. Benchmark output can never define such keys
+// (they are refused before storage, spec §5), so the marker separates pew
+// recordings of any era — current shape or predating a mandatory field —
+// from arbitrary benchmark files that happen to match the storage layout.
+func IsPewMarked(recs []*benchfmt.Result) bool {
+	if len(recs) == 0 {
+		return false
+	}
+	for _, c := range recs[0].Config {
+		// File:true only: Parse injects the reader-side pew-format-invalid
+		// annotation as internal (File:false) config, and an annotation about
+		// a file must never count as the file carrying a pew key itself.
+		if c.File && strings.HasPrefix(c.Key, "pew-") {
+			return true
+		}
+	}
+	return false
+}
+
 // IsRecordingShape reports whether results carry Pew provenance independent
 // of the format discriminator. It distinguishes stale pre-format recordings
 // from arbitrary benchmark files without interpreting their fingerprint.

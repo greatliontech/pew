@@ -689,7 +689,14 @@ flags real-but-trivial changes; a floor without significance flags noise.
   stderr naming its cause. In a partial comparison the compared subset alone governs the exit;
   skipped benchmarks surface as warnings/notes, never silently. Without `--fail-on-regression` an
   empty comparison stays informational (exit `0`), and the "no recorded benchmarks to compare" line
-  names why when the cause is determinable from the inventoried recordings.
+  names why when the cause is determinable from the inventoried recordings. A recording that fails
+  the format shape check (§5) is still **inventoried**: it surfaces as a per-side stale-format
+  warning and counts in the empty-comparison cause, never as an absent recording — immediately
+  after a format change, "everything stale (format)" and "nothing recorded" are different
+  diagnoses and must read differently. Only pew-marked recordings are inventoried (a pew-owned
+  `pew-` key, §12 gc's same discrimination): a foreign benchmark file at a layout path never
+  inventories a comparison key on its own; one sitting at a key another side's genuine recording
+  inventoried is excluded from comparison by the per-side check and surfaces in its warning.
 - Comparison projects *away* pew's own provenance keys (`commit`, `pew-closure`, …) so differing
   metadata doesn't fragment the benchstat grouping, and separately requires non-empty equal
   `machine`, `toolchain`, `buildconfig`, and `runtimeconfig` — never comparing across machine
@@ -758,7 +765,17 @@ Four commands; names follow the `go test` / benchstat idiom.
   explanation view over `pew-closure` and `pew-runtime*`. Supports `--bench-dir <dir>` and
   `--label <name>`.
 - **`pew gc`** — remove stored results for benchmarks no longer present in the code. Supports
-  `--bench-dir <dir>`.
+  `--bench-dir <dir>`. A pew recording that fails the current format (§5) is never silently
+  skipped: when its benchmark is also gone from the source it is removed like any other orphan (an
+  old-shape recording can never be reused — regeneration is the only path, and there is nothing
+  left to regenerate); when its benchmark still exists it is kept and reported as stale (format),
+  pointing at `pew run`. What counts as a pew recording here is the pew marker: any pew-owned
+  (`pew-`-prefixed) configuration key, which benchmark output can never define (§5) — a
+  layout-matching file without one is foreign and ignored, whatever its shape. A recording file
+  that cannot be read or parsed at all is kept and reported with its error — removal never acts
+  on unread content. A package whose benchmark-source scan fails keeps all its recordings behind
+  the reported scan error: the error line is those recordings' report, and per-recording
+  dispositions resume once the scan succeeds.
 
 (`pew list` dropped — `status` is the inventory-plus-verdict view.) Every flag value is a **default,
 configurable** (§10.1); the correctness guards (§7) are not flags.

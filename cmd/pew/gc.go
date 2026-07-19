@@ -51,6 +51,7 @@ func runGC(w io.Writer, benchDir string) error {
 		protected map[string]bool
 	}
 	groups := map[string]*gcGroup{}
+	reported := 0
 	for _, p := range pkgs {
 		if p.Module.Dir == "" {
 			continue
@@ -68,6 +69,7 @@ func runGC(w io.Writer, benchDir string) error {
 		benches, exists, err := sourceBenchmarks(p.Dir)
 		if err != nil {
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
+			reported++
 			g.protected[pkgRel] = true
 			continue
 		}
@@ -89,37 +91,52 @@ func runGC(w io.Writer, benchDir string) error {
 		}
 	}
 
-	var removed []string
+	var removed, kept []string
 	for dir, g := range groups {
 		st := store.New(dir)
-		if err := addStoreOnlySourceBenchmarks(st, g.moduleDir, g.live, g.protected); err != nil {
+		n, err := addStoreOnlySourceBenchmarks(w, st, g.moduleDir, g.live, g.protected)
+		if err != nil {
 			return err
 		}
-		gone, err := gcStore(st, g.live, g.protected)
+		reported += n
+		gone, held, err := gcStore(st, g.live, g.protected)
 		if err != nil {
 			return err
 		}
 		removed = append(removed, gone...)
+		kept = append(kept, held...)
 	}
 	sort.Strings(removed)
+	sort.Strings(kept)
 	for _, name := range removed {
 		fmt.Fprintf(w, "removed      %s\n", name)
 	}
-	if len(removed) == 0 {
+	for _, line := range kept {
+		fmt.Fprintln(w, line)
+	}
+	// The clean-store trailer would contradict any removal, kept-report, or
+	// reported scan error above it.
+	if len(removed) == 0 && len(kept) == 0 && reported == 0 {
 		fmt.Fprintln(w, "gc: no stale recordings")
 	}
 	return nil
 }
 
-func gcStore(st *store.Store, live map[string]map[string]bool, protected map[string]bool) ([]string, error) {
+func gcStore(st *store.Store, live map[string]map[string]bool, protected map[string]bool) (removed, kept []string, err error) {
 	recs, err := st.ListCandidates()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var removed []string
 	for _, r := range recs {
-		parsed, err := st.Read(r.PkgRel, r.Bench, r.Label)
-		if err != nil || !store.IsRecordingShape(parsed) {
+		parsed, readErr := st.Read(r.PkgRel, r.Bench, r.Label)
+		if readErr != nil {
+			// Removal never acts on unread content (spec §12): report and keep.
+			kept = append(kept, fmt.Sprintf("%-12s %s  (kept: %v)", "error", recordingDisplay(r), readErr))
+			continue
+		}
+		if !store.IsPewMarked(parsed) {
+			// A layout-matching file with no pew-owned key is foreign, not an
+			// old-shape recording — ignored, per the command contract.
 			continue
 		}
 		if protected[r.PkgRel] {
@@ -127,24 +144,36 @@ func gcStore(st *store.Store, live map[string]map[string]bool, protected map[str
 		}
 		benches, ok := live[r.PkgRel]
 		if ok && benches[r.Bench] {
+			// A live benchmark's stale-format recording regenerates on the
+			// next `pew run`; gc reports it rather than hiding it (spec §12).
+			if !store.IsRecording(parsed) {
+				kept = append(kept, fmt.Sprintf("%-12s %s  (kept: benchmark still in source; stale format — re-run `pew run`)", "stale-format", recordingDisplay(r)))
+			}
 			continue
 		}
 		if err := st.Remove(r); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		removed = append(removed, recordingDisplay(r))
 	}
-	return removed, nil
+	return removed, kept, nil
 }
 
-func addStoreOnlySourceBenchmarks(st *store.Store, moduleDir string, live map[string]map[string]bool, protected map[string]bool) error {
+// addStoreOnlySourceBenchmarks returns how many package scan errors it
+// reported to w.
+func addStoreOnlySourceBenchmarks(w io.Writer, st *store.Store, moduleDir string, live map[string]map[string]bool, protected map[string]bool) (reported int, err error) {
 	recs, err := st.ListCandidates()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	for _, r := range recs {
+		// Shape-failing pew recordings still anchor their package's source
+		// scan: without it, a live benchmark's old-shape recording would look
+		// orphaned and be removed instead of reported (spec §12). Foreign
+		// files don't anchor scans; unreadable files stay skipped — gcStore
+		// keeps and reports them.
 		parsed, err := st.Read(r.PkgRel, r.Bench, r.Label)
-		if err != nil || !store.IsRecordingShape(parsed) {
+		if err != nil || !store.IsPewMarked(parsed) {
 			continue
 		}
 		if _, ok := live[r.PkgRel]; ok || protected[r.PkgRel] {
@@ -152,6 +181,10 @@ func addStoreOnlySourceBenchmarks(st *store.Store, moduleDir string, live map[st
 		}
 		benches, exists, err := sourceBenchmarks(filepath.Join(moduleDir, filepath.FromSlash(r.PkgRel)))
 		if err != nil {
+			// The error line is the report for every recording this package
+			// keeps (spec §12): protection is never silent.
+			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", r.PkgRel, err)
+			reported++
 			protected[r.PkgRel] = true
 			continue
 		}
@@ -159,7 +192,7 @@ func addStoreOnlySourceBenchmarks(st *store.Store, moduleDir string, live map[st
 			live[r.PkgRel] = benches
 		}
 	}
-	return nil
+	return reported, nil
 }
 
 func currentModuleDir() (string, error) {

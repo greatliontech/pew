@@ -467,6 +467,184 @@ func TestAddRefInventoryReportsMalformedHistoricalRecording(t *testing.T) {
 	}
 }
 
+// stripRecordingKey rewrites a stored recording without one config line,
+// simulating a recording written before that field became mandatory.
+func stripRecordingKey(t *testing.T, path, key string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, key+":") {
+			out = append(out, line)
+		}
+	}
+	writeFile(t, path, strings.Join(out, "\n"))
+}
+
+// TestStatSurfacesOldShapeRecordingsAutoMode pins spec §10.1's visibility
+// contract at the exact moment a format change lands: the working tree and
+// HEAD both hold recordings predating a mandatory field, so every candidate
+// fails the shape check. The old-shape recordings must be inventoried — the
+// empty comparison names the stale-format tally and the per-side warning
+// fires — never reported as "no recordings on either side".
+func TestStatSurfacesOldShapeRecordingsAutoMode(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statoldshape\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	// HEAD carries no recording at all: the old-shape recording exists only
+	// in the working tree, so its visibility rests entirely on the
+	// working-tree inventory branch.
+	commitAll(t, repo, "no-recordings")
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	writeStatRecording(t, st, "pkg", "BenchmarkOld", 100)
+	oldPath, err := st.Path("pkg", "BenchmarkOld", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stripRecordingKey(t, oldPath, "pew-runconditions")
+
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}
+	if err := runStat(&out, &errOut, sc, nil); err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if strings.Contains(out.String(), "no recordings on either side") {
+		t.Fatalf("old-shape recordings reported as absent:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "stale format: 1") {
+		t.Fatalf("empty comparison does not name the stale-format cause:\n%s", out.String())
+	}
+	if !strings.Contains(errOut.String(), "stale (format)") {
+		t.Fatalf("no per-side stale-format warning:\n%s", errOut.String())
+	}
+}
+
+// TestStatSurfacesOldShapeRecordingsABMode is the same visibility contract in
+// A/B mode: both refs hold only old-shape recordings.
+func TestStatSurfacesOldShapeRecordingsABMode(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statoldab\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	writeStatRecording(t, st, "pkg", "BenchmarkOld", 100)
+	oldPath, err := st.Path("pkg", "BenchmarkOld", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stripRecordingKey(t, oldPath, "pew-runconditions")
+	refA := commitAll(t, repo, "a")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n\n// changed\n")
+	refB := commitAll(t, repo, "b")
+
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}
+	if err := runStat(&out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if strings.Contains(out.String(), "no recordings on either side") {
+		t.Fatalf("old-shape recordings reported as absent:\n%s", out.String())
+	}
+	// Both sides' files are stale: the tally counts recording files, and each
+	// side warns — neither file goes unmentioned (spec §10.1 per-side).
+	if !strings.Contains(out.String(), "stale format: 2") {
+		t.Fatalf("empty comparison does not count both stale files:\n%s", out.String())
+	}
+	if !strings.Contains(errOut.String(), refA.String()) || !strings.Contains(errOut.String(), refB.String()) {
+		t.Fatalf("per-side warnings do not name both refs:\n%s", errOut.String())
+	}
+}
+
+// TestStatCountsBothDirtySides mirrors the stale-format per-side contract for
+// dirty baselines: an A/B where both refs resolve to dirty recordings warns
+// each side and tallies each file — "dirty recording: 2", neither side silent.
+func TestStatCountsBothDirtySides(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statdirtyab\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	writeStatRecording(t, st, "pkg", "BenchmarkDirty", 100)
+	dirtyPath, err := st.Path("pkg", "BenchmarkDirty", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(dirtyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dirtyPath, strings.Replace(string(data), "dirty: false", "dirty: true", 1))
+	refA := commitAll(t, repo, "a")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n\n// changed\n")
+	refB := commitAll(t, repo, "b")
+
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}
+	if err := runStat(&out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if !strings.Contains(out.String(), "dirty recording: 2") {
+		t.Fatalf("empty comparison does not count both dirty files:\n%s", out.String())
+	}
+	if !strings.Contains(errOut.String(), "baseline "+refA.String()) || !strings.Contains(errOut.String(), "new side "+refB.String()) {
+		t.Fatalf("per-side dirty warnings incomplete:\n%s", errOut.String())
+	}
+}
+
+// TestStatIgnoresForeignLayoutFiles pins the foreign-file boundary of the
+// §10.1 inventory: a benchmark file with no pew-owned key at a layout path
+// never inventories a comparison key, so an otherwise-empty store still
+// reports "no recordings on either side" with no stale-format warning.
+func TestStatIgnoresForeignLayoutFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statforeign\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	foreignPath, err := st.Path("pkg", "BenchmarkForeign", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, foreignPath, "goos: linux\nBenchmarkForeign-8 1 100 sec/op\n")
+	commitAll(t, repo, "foreign")
+
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}
+	if err := runStat(&out, &errOut, sc, nil); err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if !strings.Contains(out.String(), "no recordings on either side") {
+		t.Fatalf("foreign file inventoried a key:\n%s", out.String())
+	}
+	if strings.Contains(errOut.String(), "stale (format)") {
+		t.Fatalf("foreign file mislabeled stale (format):\n%s", errOut.String())
+	}
+}
+
 func withWorkingDir(t *testing.T, dir string) {
 	t.Helper()
 	oldWD, err := os.Getwd()

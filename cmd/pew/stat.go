@@ -119,18 +119,19 @@ func (e *nothingComparedError) Error() string {
 // name its cause (spec §10.1): the informational view prints it, and under
 // --fail-on-regression the failure carries it.
 type statTally struct {
-	inventoried int // recording keys with at least one readable side
-	staleFormat int // skipped: a side is stale (format)
-	dirty       int // skipped: a ref-resolved side is a dirty recording
+	inventoried int // comparison keys with at least one readable side
+	staleFormat int // skipped: recording files failing shape/format, per file
+	dirty       int // skipped: dirty ref-resolved recording files, per file
 }
 
 // emptyReason names why a comparison produced no gated rows: nothing recorded,
 // every candidate skipped (with per-cause counts, spanning both runStat's own
 // skips and the compare pipeline's uncompared notes), or metrics compared but
-// none on a gated unit. The skip causes carry two denominations — stale
-// format / dirty count recording files, while the compare-pipeline causes
-// count benchmarks (one file's sub-benchmarks fan out to several) — so the
-// wording names each and never implies the counts sum to the recording total.
+// none on a gated unit. The counts carry three denominations — the preamble
+// counts comparison keys, stale format / dirty count recording files (both
+// sides of a key can fail), and the compare-pipeline causes count benchmarks
+// (one file's sub-benchmarks fan out to several) — so the wording names each
+// and never implies the counts sum to one total.
 func (t statTally) emptyReason(res *compare.Result, gateUnits map[string]bool) string {
 	if n := res.ComparedRows(); n > 0 {
 		return fmt.Sprintf("%d metric(s) compared, none on a gated unit (%s)", n, gateUnitList(gateUnits))
@@ -150,9 +151,9 @@ func (t statTally) emptyReason(res *compare.Result, gateUnits map[string]bool) s
 	add(res.GuardMismatch, "guard-mismatched benchmarks")
 	add(res.NoCommonUnit, "benchmarks with no shared metric unit")
 	if len(parts) == 0 {
-		return fmt.Sprintf("%d recording(s) yielded no comparison", t.inventoried)
+		return fmt.Sprintf("%d comparison key(s) yielded no comparison", t.inventoried)
 	}
-	return fmt.Sprintf("%d recording(s) found, none compared (%s)", t.inventoried, strings.Join(parts, "; "))
+	return fmt.Sprintf("%d comparison key(s) found, none compared (%s)", t.inventoried, strings.Join(parts, "; "))
 }
 
 func gateUnitList(units map[string]bool) string {
@@ -283,52 +284,44 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 				continue // never recorded on either side — nothing to say
 			}
 			tally.inventoried++
-			if baseOK {
-				if !store.IsRecordingShape(baseRecs) {
-					fmt.Fprintf(errw, "pew: warning: baseline %s:%s is stale (format); skipping — re-run `pew run`\n", bl.baseRef, key.bench)
-					tally.staleFormat++
-					continue
-				}
-				if _, _, ok := fingerprintFromConfig(baseRecs[0].Config); !ok {
-					fmt.Fprintf(errw, "pew: warning: baseline %s:%s is stale (format); skipping — re-run `pew run`\n", bl.baseRef, key.bench)
-					tally.staleFormat++
-					continue
-				}
+			// Each side's stale-format state warns and tallies independently
+			// (spec §10.1 per-side; the tally counts recording files), so with
+			// both sides stale neither file goes unmentioned.
+			baseStale := baseOK && !recordingCurrent(baseRecs)
+			newStale := newOK && !recordingCurrent(newRecs)
+			if baseStale {
+				fmt.Fprintf(errw, "pew: warning: baseline %s:%s is stale (format); skipping — re-run `pew run`\n", bl.baseRef, key.bench)
+				tally.staleFormat++
 			}
-			if newOK {
-				if !store.IsRecordingShape(newRecs) {
-					side := bl.newRef
-					if side == "" {
-						side = "working-tree"
-					}
-					fmt.Fprintf(errw, "pew: warning: %s recording %s.%s is stale (format); skipping — re-run `pew run`\n", side, key.pkgRel, key.bench)
-					tally.staleFormat++
-					continue
+			if newStale {
+				side := bl.newRef
+				if side == "" {
+					side = "working-tree"
 				}
-				if _, _, ok := fingerprintFromConfig(newRecs[0].Config); !ok {
-					side := bl.newRef
-					if side == "" {
-						side = "working-tree"
-					}
-					fmt.Fprintf(errw, "pew: warning: %s recording %s.%s is stale (format); skipping — re-run `pew run`\n", side, key.pkgRel, key.bench)
-					tally.staleFormat++
-					continue
-				}
+				fmt.Fprintf(errw, "pew: warning: %s recording %s.%s is stale (format); skipping — re-run `pew run`\n", side, key.pkgRel, key.bench)
+				tally.staleFormat++
+			}
+			if baseStale || newStale {
+				continue
 			}
 			// A dirty recording's commit does not faithfully describe its source
 			// (§5), so it is never usable as a baseline (§5, §10: "Pinned refs must
 			// resolve to non-dirty recordings"). A baseline always comes from a ref
 			// (base side in every mode; the new side too in A/B); the working-tree
 			// side (newRef=="") is the code under test and may be dirty. Skip a
-			// dirty baseline rather than report a verdict against unfaithful numbers.
-			if baseOK && isDirty(baseRecs) {
+			// dirty baseline rather than report a verdict against unfaithful
+			// numbers — each dirty side warns and tallies, like stale format.
+			baseDirty := baseOK && isDirty(baseRecs)
+			newDirty := newOK && bl.newRef != "" && isDirty(newRecs)
+			if baseDirty {
 				fmt.Fprintf(errw, "pew: warning: baseline %s:%s is a dirty recording; skipping (spec §10)\n", bl.baseRef, key.bench)
 				tally.dirty++
-				continue
 			}
-			if newOK && bl.newRef != "" && isDirty(newRecs) {
+			if newDirty {
 				fmt.Fprintf(errw, "pew: warning: new side %s:%s is a dirty recording; skipping (spec §10)\n", bl.newRef, key.bench)
 				tally.dirty++
+			}
+			if baseDirty || newDirty {
 				continue
 			}
 			if checkStale && newOK {
@@ -336,13 +329,10 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 				if !ok {
 					fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s has no current benchmark declaration; comparison may not reflect HEAD — re-run `pew run`\n", key.pkgRel, key.bench)
 				} else {
-					// Best-effort: a check failure warns but never blocks the comparison.
-					fp, pure, formatOK := fingerprintFromConfig(newRecs[0].Config)
-					if !formatOK {
-						fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is stale (format) — re-run `pew run`\n", key.pkgRel, key.bench)
-						tally.staleFormat++
-						continue
-					}
+					// Best-effort: a check failure warns but never blocks the
+					// comparison. The per-side stale-format gate above already
+					// guarantees a decodable fingerprint on this side.
+					fp, pure, _ := fingerprintFromConfig(newRecs[0].Config)
 					subj := gofresh.Subject{Package: cur.importPath, Symbol: key.bench}
 					engine := engines[cur.moduleDir]
 					if engine == nil {
@@ -606,11 +596,15 @@ func addStatInventory(m *statModule, bl baseline, label string) error {
 			return err
 		}
 		for _, r := range recs {
+			// Shape-failing pew recordings are inventoried too (spec §10.1):
+			// the per-side checks warn and tally them, so "everything stale
+			// (format)" never reads as "nothing recorded". Unmarked files at
+			// layout paths are foreign and stay ignored.
 			parsed, ok, err := m.readSide("", r.PkgRel, r.Bench, r.Label)
 			if err != nil {
 				return err
 			}
-			if ok && store.IsRecordingShape(parsed) && r.Label == label {
+			if ok && store.IsPewMarked(parsed) && r.Label == label {
 				m.keys[statKey{pkgRel: r.PkgRel, bench: r.Bench, label: r.Label}] = true
 			}
 		}
@@ -629,11 +623,15 @@ func addRefInventory(m *statModule, ref, label string) error {
 		if !ok || r.Label != label {
 			continue
 		}
-		recs, sideOK, err := m.readSide(ref, r.PkgRel, r.Bench, r.Label)
+		// Shape-failing pew recordings are inventoried too (spec §10.1): the
+		// per-side checks warn and tally them, so "everything stale (format)"
+		// never reads as "nothing recorded". Unmarked files at layout paths
+		// are foreign and stay ignored.
+		recsSide, sideOK, err := m.readSide(ref, r.PkgRel, r.Bench, r.Label)
 		if err != nil {
 			return err
 		}
-		if !sideOK || !store.IsRecordingShape(recs) {
+		if !sideOK || !store.IsPewMarked(recsSide) {
 			continue
 		}
 		m.keys[statKey{pkgRel: r.PkgRel, bench: r.Bench, label: r.Label}] = true
@@ -656,6 +654,17 @@ func sortedStatKeys(keys map[statKey]bool) []statKey {
 		return out[i].label < out[j].label
 	})
 	return out
+}
+
+// recordingCurrent reports whether a side's recording carries the current
+// shape and a decodable format-1 fingerprint — the bar for entering a
+// comparison; anything below it is stale (format).
+func recordingCurrent(recs []*benchfmt.Result) bool {
+	if !store.IsRecordingShape(recs) {
+		return false
+	}
+	_, _, ok := fingerprintFromConfig(recs[0].Config)
+	return ok
 }
 
 // isDirty reports whether a recording was made on a dirty working tree (§5). The
