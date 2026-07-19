@@ -36,21 +36,26 @@ func newStatusCmd() *cobra.Command {
 	var label string
 	var staleOnly bool
 	var explain bool
+	var jsonOut bool
 	cmd := &cobra.Command{
 		Use:   "status [packages]",
 		Short: "Report each benchmark as valid / stale / unverifiable / unrecorded",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if explain && jsonOut {
+				return fmt.Errorf("status: --explain and -json are mutually exclusive (the explanation is a human view)")
+			}
 			patterns := args
 			if len(patterns) == 0 {
 				patterns = []string{"./..."}
 			}
-			return runStatus(cmd.OutOrStdout(), benchDir, label, staleOnly, explain, patterns)
+			return runStatus(cmd.OutOrStdout(), benchDir, label, staleOnly, explain, jsonOut, patterns)
 		},
 	}
 	cmd.Flags().StringVar(&benchDir, "bench-dir", "", "stored-recordings directory (default <module>/benchmarks); an explicit value applies to every package")
 	cmd.Flags().StringVar(&label, "label", "", "variant label to check (spec §6); empty = the unlabeled recording")
 	cmd.Flags().BoolVar(&staleOnly, "stale", false, "show only benchmarks that need re-running (non-valid)")
 	cmd.Flags().BoolVar(&explain, "explain", false, "explain each non-valid verdict: recorded vs current guard/input values (spec §12)")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit one JSON object per row (spec §12, --json)")
 	return cmd
 }
 
@@ -99,7 +104,7 @@ func buildEngine(moduleDir string, env []string, pgo string) (*gofresh.Engine, e
 	return gofresh.New(opts...)
 }
 
-func runStatus(w io.Writer, benchDir, label string, staleOnly, explain bool, patterns []string) error {
+func runStatus(w io.Writer, benchDir, label string, staleOnly, explain, jsonOut bool, patterns []string) error {
 	pkgs, err := resolvePackages(patterns)
 	if err != nil {
 		return err
@@ -111,19 +116,26 @@ func runStatus(w io.Writer, benchDir, label string, staleOnly, explain bool, pat
 		// A per-package failure (an unreadable PGO profile, a sibling that
 		// does not compile) is reported as a row and does not abort status of
 		// the rest of the tree.
+		reportErr := func(err error) {
+			if jsonOut {
+				_ = writeJSONLine(w, statusJSONRow{Package: p.ImportPath, Error: err.Error()})
+				return
+			}
+			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
+		}
 		e, _, err := newEngineForPkg(p, os.Environ())
 		if err != nil {
-			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
+			reportErr(err)
 			continue
 		}
-		if err := statusPackage(w, e, benchDir, label, staleOnly, explain, p); err != nil {
-			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
+		if err := statusPackage(w, e, benchDir, label, staleOnly, explain, jsonOut, p); err != nil {
+			reportErr(err)
 		}
 	}
 	return nil
 }
 
-func statusPackage(w io.Writer, e *gofresh.Engine, benchDir, label string, staleOnly bool, explain bool, p pkgMeta) error {
+func statusPackage(w io.Writer, e *gofresh.Engine, benchDir, label string, staleOnly bool, explain, jsonOut bool, p pkgMeta) error {
 	benches, err := selectedBenchmarks(p)
 	if err != nil {
 		return err
@@ -143,6 +155,12 @@ func statusPackage(w io.Writer, e *gofresh.Engine, benchDir, label string, stale
 			return err
 		}
 		if staleOnly && v == verdictValid {
+			continue
+		}
+		if jsonOut {
+			if err := writeJSONLine(w, statusJSONRow{Package: p.ImportPath, Benchmark: b, Label: label, Verdict: string(v), Reason: reason}); err != nil {
+				return err
+			}
 			continue
 		}
 		name := b

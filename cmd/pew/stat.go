@@ -29,6 +29,7 @@ type statConfig struct {
 	opts             compare.Options
 	failOnRegression bool
 	explain          bool
+	jsonOut          bool
 }
 
 func newStatCmd() *cobra.Command {
@@ -58,6 +59,9 @@ refs and working-tree store.`,
 			if err := validateOptions(sc.opts); err != nil {
 				return err
 			}
+			if sc.explain && sc.jsonOut {
+				return fmt.Errorf("stat: --explain and -json are mutually exclusive (the explanation is a human view)")
+			}
 			return runStat(cmd.OutOrStdout(), cmd.ErrOrStderr(), sc, args)
 		},
 	}
@@ -69,6 +73,7 @@ refs and working-tree store.`,
 	f.Float64Var(&sc.opts.Confidence, "confidence", sc.opts.Confidence, "confidence level for summary intervals")
 	f.BoolVar(&sc.failOnRegression, "fail-on-regression", false, "exit non-zero if a gated metric regresses")
 	f.BoolVar(&sc.explain, "explain", false, "explain skipped comparisons and stale working-tree recordings: guard/input values side by side (spec §12)")
+	f.BoolVar(&sc.jsonOut, "json", false, "emit one JSON object per comparison row/note (spec §12, --json)")
 	f.StringVar(&gate, "gate", "sec/op", "comma-separated units whose regression fails the build (sec/op, B/op, allocs/op)")
 	return cmd
 }
@@ -402,7 +407,11 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 	}
 
 	res := compare.Compare(baseAll, newAll, sc.opts)
-	if len(res.Tables) == 0 && len(res.Notes) == 0 {
+	if sc.jsonOut {
+		if err := writeStatJSON(w, res, func() string { return tally.emptyReason(res, sc.opts.GateUnits) }); err != nil {
+			return err
+		}
+	} else if len(res.Tables) == 0 && len(res.Notes) == 0 {
 		fmt.Fprintln(w, "no recorded benchmarks to compare:", tally.emptyReason(res, sc.opts.GateUnits))
 	} else if err := res.WriteText(w); err != nil {
 		return err

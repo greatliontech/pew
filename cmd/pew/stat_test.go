@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -674,8 +676,20 @@ func writeStatRecording(t *testing.T, st *store.Store, pkgRel, bench string, val
 
 func writeStatRecordingConditions(t *testing.T, st *store.Store, pkgRel, bench string, value float64, conditions string) {
 	t.Helper()
+	writeStatRecordingSamplesConditions(t, st, pkgRel, bench, value, 8, conditions)
+}
+
+// writeStatRecordingSamples writes a recording with an explicit sample count —
+// degenerate counts exercise benchmath's non-finite confidence intervals.
+func writeStatRecordingSamples(t *testing.T, st *store.Store, pkgRel, bench string, value float64, samples int) {
+	t.Helper()
+	writeStatRecordingSamplesConditions(t, st, pkgRel, bench, value, samples, "governor=performance turbo=off load1=0.03 throttled=false battery=false")
+}
+
+func writeStatRecordingSamplesConditions(t *testing.T, st *store.Store, pkgRel, bench string, value float64, samples int, conditions string) {
+	t.Helper()
 	var recs []*benchfmt.Result
-	for i := range 8 {
+	for i := range samples {
 		recs = append(recs, &benchfmt.Result{
 			Name:  benchfmt.Name(bench),
 			Iters: 1,
@@ -1172,5 +1186,184 @@ func TestStatExplainWorkingTreeStaleness(t *testing.T) {
 	}
 	if !strings.Contains(got, "recorded") || !strings.Contains(got, "current") || !strings.Contains(got, "toolchain") || !strings.Contains(got, "NO") {
 		t.Fatalf("no recorded-vs-current explanation under the warning:\n%s", got)
+	}
+}
+
+// TestStatJSONRowsAndEmpty pins spec §12's stat -json shape: comparison rows
+// as {"kind":"row",...} with summaries and the gating verdict, and an empty
+// comparison as one {"kind":"empty"} object naming the cause.
+func TestStatJSONRowsAndEmpty(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statjson\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	writeStatRecording(t, st, "pkg", "BenchmarkJSON", 100)
+	// One-sided: present at refA only — must surface as a kind:note line.
+	writeStatRecording(t, st, "pkg", "BenchmarkOnly", 50)
+	// Zero-center baseline (one constant zero sample): deltaPct must render
+	// as null, not NaN.
+	writeStatRecordingSamples(t, st, "pkg", "BenchmarkZero", 0, 1)
+	refA := commitAll(t, repo, "a")
+	writeStatRecordingSamples(t, st, "pkg", "BenchmarkZero", 5, 1)
+	writeStatRecording(t, st, "pkg", "BenchmarkJSON", 130)
+	only, err := st.Path("pkg", "BenchmarkOnly", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(only); err != nil {
+		t.Fatal(err)
+	}
+	refB := commitAll(t, repo, "b")
+
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), jsonOut: true}
+	if err := runStat(&out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	var rows, notes int
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		var row struct {
+			Kind      string `json:"kind"`
+			Unit      string `json:"unit"`
+			Benchmark string `json:"benchmark"`
+			Base      struct{ Center float64 }
+			New       struct{ Center float64 }
+			DeltaPct  *float64 `json:"deltaPct"`
+			Gated     bool     `json:"gated"`
+			P         float64  `json:"p"`
+		}
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("line %q is not JSON: %v", line, err)
+		}
+		if row.Kind == "note" {
+			notes++
+			continue
+		}
+		if row.Kind != "row" {
+			continue
+		}
+		if !strings.Contains(row.Benchmark, "JSON") {
+			continue
+		}
+		rows++
+		if row.Unit != "sec/op" || row.Base.Center <= 0 || row.New.Center <= 0 {
+			t.Fatalf("row %q malformed", line)
+		}
+		if row.DeltaPct == nil || *row.DeltaPct < 20 {
+			t.Fatalf("row %q deltaPct = %v, want ~30%%", line, row.DeltaPct)
+		}
+		if !row.Gated {
+			t.Fatalf("sec/op row not gated: %q", line)
+		}
+	}
+	if rows == 0 {
+		t.Fatalf("no comparison rows in:\n%s", out.String())
+	}
+	if notes == 0 {
+		t.Fatalf("one-sided benchmark produced no kind:note line:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), `"deltaPct":null`) {
+		t.Fatalf("zero-center baseline did not render deltaPct null:\n%s", out.String())
+	}
+
+	// The empty comparison emits one kind:empty object naming the cause.
+	empty := t.TempDir()
+	writeFile(t, filepath.Join(empty, "go.mod"), "module example.com/statjsonempty\n\ngo 1.26.4\n")
+	repo2, err := gogit.PlainInit(empty, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, repo2, "empty")
+	withWorkingDir(t, empty)
+	out.Reset()
+	errOut.Reset()
+	if err := runStat(&out, &errOut, statConfig{opts: compare.DefaultOptions(), jsonOut: true}, nil); err != nil {
+		t.Fatalf("runStat empty: %v", err)
+	}
+	var e struct {
+		Kind   string `json:"kind"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out.String())), &e); err != nil {
+		t.Fatalf("empty output %q is not one JSON object: %v", out.String(), err)
+	}
+	if e.Kind != "empty" || !strings.Contains(e.Reason, "no recordings") {
+		t.Fatalf("empty object = %+v, want kind empty naming the cause", e)
+	}
+}
+
+// TestStatJSONNullBoundsOnDegenerateSamples pins §12's non-finite handling: a
+// side below benchmath's finite-CI sample minimum reports lo/hi as null (JSON
+// cannot carry Inf) with the cause riding warnings, and the run still renders
+// every row rather than erroring mid-stream.
+func TestStatJSONNullBoundsOnDegenerateSamples(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statjsoninf\n\ngo 1.26.4\n")
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	writeStatRecordingSamples(t, st, "pkg", "BenchmarkTiny", 100, 1)
+	refA := commitAll(t, repo, "a")
+	writeStatRecordingSamples(t, st, "pkg", "BenchmarkTiny", 120, 1)
+	refB := commitAll(t, repo, "b")
+
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), jsonOut: true}
+	if err := runStat(&out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	var sawNull bool
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		var row struct {
+			Kind string `json:"kind"`
+			Base struct {
+				Lo *float64 `json:"lo"`
+				Hi *float64 `json:"hi"`
+			} `json:"base"`
+			Warnings []string `json:"warnings"`
+		}
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("line %q is not JSON: %v", line, err)
+		}
+		if row.Kind == "row" && row.Base.Lo == nil && row.Base.Hi == nil {
+			// The keys must be PRESENT as null (stable field shape, §12) —
+			// unmarshal cannot tell null from absent, the raw text can.
+			if !strings.Contains(line, `"lo":null`) || !strings.Contains(line, `"hi":null`) {
+				t.Fatalf("non-finite bounds omitted instead of null: %q", line)
+			}
+			sawNull = true
+			if len(row.Warnings) == 0 {
+				t.Fatalf("null bounds without a warning naming the cause: %q", line)
+			}
+		}
+	}
+	if !sawNull {
+		t.Fatalf("degenerate sample produced no null-bounds row:\n%s", out.String())
+	}
+}
+
+// TestJSONExplainMutuallyExclusive pins §12's flag exclusion at the command
+// surface for both commands.
+func TestJSONExplainMutuallyExclusive(t *testing.T) {
+	for _, args := range [][]string{
+		{"status", "--json", "--explain"},
+		{"stat", "--json", "--explain"},
+	} {
+		cmd := newRootCmd()
+		cmd.SetArgs(args)
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Fatalf("%v: err = %v, want the mutual-exclusion refusal", args, err)
+		}
 	}
 }

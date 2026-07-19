@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,7 +59,7 @@ func TestStatusPackageUsesLabel(t *testing.T) {
 	p.Module.Dir = "."
 
 	var out strings.Builder
-	if err := statusPackage(&out, e, st.Root, "x", false, false, p); err != nil {
+	if err := statusPackage(&out, e, st.Root, "x", false, false, false, p); err != nil {
 		t.Fatalf("statusPackage labeled: %v", err)
 	}
 	if got := out.String(); !strings.Contains(got, "valid") || !strings.Contains(got, bench) {
@@ -66,7 +67,7 @@ func TestStatusPackageUsesLabel(t *testing.T) {
 	}
 
 	out.Reset()
-	if err := statusPackage(&out, e, st.Root, "", false, false, p); err != nil {
+	if err := statusPackage(&out, e, st.Root, "", false, false, false, p); err != nil {
 		t.Fatalf("statusPackage unlabeled: %v", err)
 	}
 	if got := out.String(); !strings.Contains(got, "unrecorded") {
@@ -137,7 +138,7 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 
 	write("")
 	var out strings.Builder
-	if err := statusPackage(&out, e, st.Root, "", false, false, p); err != nil {
+	if err := statusPackage(&out, e, st.Root, "", false, false, false, p); err != nil {
 		t.Fatalf("statusPackage: %v", err)
 	}
 	if got := out.String(); !strings.Contains(got, "unverifiable") || !strings.Contains(got, "external directive") {
@@ -148,7 +149,7 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 	// author's in-code external declaration.
 	write("true")
 	out.Reset()
-	if err := statusPackage(&out, e, st.Root, "", false, false, p); err != nil {
+	if err := statusPackage(&out, e, st.Root, "", false, false, false, p); err != nil {
 		t.Fatalf("statusPackage assume-pure: %v", err)
 	}
 	if got := out.String(); !strings.Contains(got, "unverifiable") || !strings.Contains(got, "external directive") {
@@ -200,7 +201,7 @@ func TestStatusExplainNamesTheMovingGuard(t *testing.T) {
 	p.Module.Dir = "."
 
 	var out strings.Builder
-	if err := statusPackage(&out, e, st.Root, "", false, true, p); err != nil {
+	if err := statusPackage(&out, e, st.Root, "", false, true, false, p); err != nil {
 		t.Fatalf("statusPackage explain: %v", err)
 	}
 	got := out.String()
@@ -220,5 +221,105 @@ func TestStatusExplainNamesTheMovingGuard(t *testing.T) {
 		if !strings.Contains(got, row) {
 			t.Fatalf("explanation missing the %s row:\n%s", row, got)
 		}
+	}
+}
+
+// TestStatusJSONRows pins spec §12's status -json shape: one JSON object per
+// row with stable field names, the same verdicts the text view reports.
+func TestStatusJSONRows(t *testing.T) {
+	e, _, err := newEngineAt(".", ".", false, os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
+	st := store.New(t.TempDir())
+	p := pkgMeta{ImportPath: pkg, Dir: "../../internal/fixtures/bench", TestGoFiles: []string{"bench_test.go"}}
+	p.Module.Path = "github.com/greatliontech/pew"
+	p.Module.Dir = "."
+
+	var out strings.Builder
+	if err := statusPackage(&out, e, st.Root, "", false, false, true, p); err != nil {
+		t.Fatalf("statusPackage json: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) == 0 {
+		t.Fatal("no JSON rows")
+	}
+	seen := map[string]bool{}
+	for _, line := range lines {
+		var row struct {
+			Package   string `json:"package"`
+			Benchmark string `json:"benchmark"`
+			Verdict   string `json:"verdict"`
+			Reason    string `json:"reason"`
+			Label     string `json:"label"`
+		}
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("row %q is not JSON: %v", line, err)
+		}
+		if row.Package != pkg || row.Benchmark == "" || row.Verdict == "" {
+			t.Fatalf("row %q missing required fields", line)
+		}
+		seen[row.Verdict] = true
+	}
+	if !seen["unrecorded"] {
+		t.Fatalf("empty store yielded verdicts %v, want unrecorded rows", seen)
+	}
+}
+
+// TestStatusJSONLabelAndErrorRows pins the remaining §12 status --json
+// clauses: a labeled run carries the label field (omitted when empty — the
+// unlabeled rows never mention it), and a package whose benchmark
+// declarations cannot be read emits a {package, error} object.
+func TestStatusJSONLabelAndErrorRows(t *testing.T) {
+	e, _, err := newEngineAt(".", ".", false, os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
+	st := store.New(t.TempDir())
+	p := pkgMeta{ImportPath: pkg, Dir: "../../internal/fixtures/bench", TestGoFiles: []string{"bench_test.go"}}
+	p.Module.Path = "github.com/greatliontech/pew"
+	p.Module.Dir = "."
+
+	var out strings.Builder
+	if err := statusPackage(&out, e, st.Root, "x", false, false, true, p); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"label":"x"`) {
+		t.Fatalf("labeled rows omit the label:\n%s", out.String())
+	}
+	out.Reset()
+	if err := statusPackage(&out, e, st.Root, "", false, false, true, p); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), `"label"`) {
+		t.Fatalf("unlabeled rows carry a label field:\n%s", out.String())
+	}
+
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":      "module example.com/statusjsonerr\n\ngo 1.26.4\n",
+		"p.go":        "package p\n",
+		"bad_test.go": "package p\n\nfunc Benchmark {\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	withWorkingDir(t, dir)
+	out.Reset()
+	if err := runStatus(&out, "", "", false, false, true, []string{"."}); err != nil {
+		t.Fatalf("runStatus: %v", err)
+	}
+	var row struct {
+		Package string `json:"package"`
+		Error   string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out.String())), &row); err != nil {
+		t.Fatalf("error output %q is not one JSON object: %v", out.String(), err)
+	}
+	if row.Package == "" || row.Error == "" {
+		t.Fatalf("error row = %+v, want package and error", row)
 	}
 }

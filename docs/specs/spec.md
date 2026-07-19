@@ -826,6 +826,19 @@ Four commands; names follow the `go test` / benchstat idiom.
   the reported scan error: the error line is those recordings' report, and per-recording
   dispositions resume once the scan succeeds.
 
+**Machine-readable output.** `status --json` and `stat --json` emit one JSON object per line; the
+field names are public surface and stable. `status` rows carry `package`, `benchmark`, `label`
+(omitted when empty), `verdict`, `reason` (omitted when empty); a per-package failure emits
+`{package, error}`. `stat` emits comparison rows as
+`{"kind":"row", config, unit, benchmark, base:{center,lo,hi,confidence}, new:{…}, p, deltaPct,
+regression, gated, warnings}` (`deltaPct` is `null` when the baseline center is zero; a side's
+`lo`/`hi` are `null` when its confidence interval is non-finite — the sample-count cause rides
+`warnings`; `config`/`warnings` omitted when empty), each not-compared note as
+`{"kind":"note", text}`, and an empty comparison as one `{"kind":"empty", reason}` object
+carrying the same cause the text view names — the §10.1 exit-status contract is unchanged either way. Internal values (guard digests,
+closure hashes) are deliberately excluded: they belong to `--explain`'s human view, and the two
+flags are mutually exclusive. The text renderer remains the default.
+
 (`pew list` dropped — `status` is the inventory-plus-verdict view.) Every flag value is a **default,
 configurable** (§10.1); the correctness guards (§7) are not flags.
 
