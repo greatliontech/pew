@@ -105,6 +105,19 @@ before guard or purity interpretation. Duplicate rejection applies to every reco
 table above plus `pew-closure` and the per-benchmark `pure` line (§7.5) — not only `pew-format`:
 a recording that repeats any of them is `stale (format)`.
 Format governs interpretation rather than measurement identity and is projected from comparisons.
+
+**The recording key set is closed** (INV-12). Stream-derived configuration keys other than the four
+the toolchain itself emits (`goos`, `goarch`, `pkg`, `cpu`) are dropped before storage, each
+distinct dropped key reported with a warning naming the key and its first observed value. The
+benchmark-format reader treats any stdout line whose first word is lowercase, space-free, and
+colon-terminated as configuration, so a dependency's logger (`raft: appending entries`) would
+otherwise record transient log text as durable configuration and fragment comparison grouping
+(§10.1) — a benchmark silently falling out of comparison because a dependency logged once.
+Deliberately emitted custom benchmark configuration is therefore **not** a supported recording
+input; supporting it is a spec change, not a pass-through. `pew run` stores recordings whose
+configuration keys are drawn only from the closed set: the toolchain's four, the §5
+provenance/guard keys, `pew-closure`, and the per-benchmark `pure` line. This is a producer
+contract — read paths do not police historical recordings for foreign keys.
 `pew-purity` is benchmark-specific despite the surrounding uniform provenance keys and is omitted
 when capture used no purity assertion; omission is the canonical no-attribution encoding.
 
@@ -844,3 +857,13 @@ Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred
   real consensus-node-logging run ⇒ the affected benchmark refused with the spliced line reported
   verbatim, the clean benchmark recorded with its full sample set; an orphaned-fields line with no
   attributable benchmark ⇒ the package refused.
+- **INV-12 — The recording key set is closed.** Every recording `pew run` stores carries
+  file-configuration keys drawn only from the closed set of §5: the toolchain's four stream keys,
+  pew's provenance/guard/manifest keys, `pew-closure`, and `pure`; every other stream-derived
+  configuration key is dropped before storage with a warning. *Violation:* a benchmark dependency logs one `key: value`-shaped line to
+  stdout; the key is recorded as durable configuration in this run but is absent from the baseline;
+  §10.1's config grouping fragments and the benchmark drops out of comparison one-sided — a
+  regression hides behind a log line while every other invariant holds. *Kind:* entailed (§5
+  self-describing artifacts + §10.1 grouping). *Anchor tests:* a stream carrying `raft: appending
+  entries` ⇒ the key is stripped from every result and reported once; the composed run-path config
+  serializes only closed-set keys.

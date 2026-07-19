@@ -469,6 +469,82 @@ func TestRunPackageSalvagesCorruptStream(t *testing.T) {
 	}
 }
 
+// TestRunPackageDropsForeignStreamConfig drives spec §5's closed recording key
+// set (INV-12) end to end: a package whose init logs a `key: value`-shaped
+// line before the benchmark header emits a standalone stream line that the
+// benchmark-format reader takes as file configuration — no corruption, so
+// nothing else refuses it. The run must record the benchmark without the
+// foreign key and name the dropped key on stderr.
+func TestRunPackageDropsForeignStreamConfig(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/foreignconfig\n\ngo 1.26.4\n",
+		"bench_test.go": "package foreignconfig\n\nimport (\n\t\"fmt\"\n\t\"testing\"\n)\n\n" +
+			"func init() { fmt.Println(\"raft: appending entries\") }\n" +
+			"func BenchmarkClean(b *testing.B) {}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	benchDir := filepath.Join(t.TempDir(), "benchmarks")
+	withWorkingDir(t, dir)
+	pkgs, err := resolvePackages([]string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := os.Environ()
+	e, err := newEngineWithEnv(pkgs[0].Module.Dir, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 2, Benchtime: "1x", Bench: "."}}
+	if err := runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}); err != nil {
+		t.Fatalf("runPackage: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), `dropping stream configuration key "raft"`) {
+		t.Errorf("dropped key not named on stderr:\n%s", errOut.String())
+	}
+	st := store.New(benchDir)
+	recs, err := st.Read("", "BenchmarkClean", "")
+	if err != nil {
+		t.Fatalf("recording missing: %v", err)
+	}
+	// The recording's keys must be drawn only from spec §5's closed set
+	// (INV-12) — this reads back what the real run path composed and wrote,
+	// so a provenance key added anywhere along it surfaces here.
+	closed := map[string]bool{
+		"goos": true, "goarch": true, "pkg": true, "cpu": true,
+		"pew-format": true, "commit": true, "toolchain": true, "machine": true,
+		"buildconfig": true, "runtimeconfig": true, "dirty": true,
+		"pew-runconditions": true, "pew-runtime": true, "pew-runtime-inputs": true,
+		"pew-closure": true, "pew-purity": true, "pure": true,
+	}
+	for _, rec := range recs {
+		for _, cfg := range rec.Config {
+			if !closed[cfg.Key] {
+				t.Errorf("recorded key %q outside spec §5's closed set (value %q)", cfg.Key, cfg.Value)
+			}
+		}
+	}
+}
+
 // TestRunPackageRefusesUnattributableOrphan drives the package-refusal arm of
 // the spec §9 sample floor end to end: a detached-measurement-fields line with
 // no preceding benchmark name (foreign output printed before the first result)

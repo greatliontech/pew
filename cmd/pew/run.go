@@ -264,12 +264,15 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 	// The stream is transient input, not a recording (spec §9): interleaved
 	// foreign stdout output corrupts individual result lines, so corruption is
 	// surfaced per line and enforced per benchmark — never fatal per line.
-	results, corrupt, err := run.Parse(out)
+	results, corrupt, dropped, err := run.Parse(out)
 	if err != nil {
 		return err
 	}
 	for _, cl := range corrupt {
 		fmt.Fprintf(errw, "pew: warning: corrupt benchmark output line %d: %q (%s)\n", cl.Line, cl.Text, cl.Cause)
+	}
+	for _, dc := range dropped {
+		fmt.Fprintf(errw, "pew: warning: dropping stream configuration key %q (value %q): not a toolchain benchmark key (spec §5)\n", dc.Key, dc.Value)
 	}
 	audit := run.AuditStream(results, corrupt, opts.Count, runBenches)
 	if audit.PackageCause != "" {

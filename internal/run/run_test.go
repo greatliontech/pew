@@ -140,12 +140,15 @@ ok  	example/p	1.234s
 `
 
 func TestParseAndDemux(t *testing.T) {
-	results, corrupt, err := Parse([]byte(benchOut))
+	results, corrupt, dropped, err := Parse([]byte(benchOut))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 	if len(corrupt) != 0 {
 		t.Fatalf("clean stream flagged corrupt lines: %v", corrupt)
+	}
+	if len(dropped) != 0 {
+		t.Fatalf("toolchain-only stream dropped configuration: %v", dropped)
 	}
 	if len(results) != 3 {
 		t.Fatalf("got %d results, want 3 (PASS/ok lines must be ignored)", len(results))
@@ -175,6 +178,88 @@ func TestParseAndDemux(t *testing.T) {
 	}
 }
 
+// TestParseDropsForeignStreamConfig pins spec §5's closed recording key set
+// (INV-12): a dependency logging a lowercase colon-terminated first word
+// (`raft: appending entries`) is read by benchfmt as a file configuration
+// line, and without the strip every later result — and the stored recording —
+// would carry transient log text as durable configuration, fragmenting `stat`
+// grouping. The foreign key must be dropped from every result and reported
+// exactly once; the toolchain's own keys survive.
+func TestParseDropsForeignStreamConfig(t *testing.T) {
+	stream := `goos: linux
+goarch: amd64
+pkg: example/p
+cpu: TestCPU
+raft: appending entries
+BenchmarkRun-8 1000000 1234 ns/op
+warning: slow disk
+raft: appending entries
+BenchmarkOther-8 200000 6000 ns/op
+PASS
+ok  	example/p	1.234s
+`
+	results, corrupt, dropped, err := Parse([]byte(stream))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(corrupt) != 0 {
+		t.Fatalf("config-shaped log lines flagged corrupt: %+v", corrupt)
+	}
+	wantDropped := []DroppedConfig{
+		{Key: "raft", Value: "appending entries"},
+		{Key: "warning", Value: "slow disk"},
+	}
+	if !reflect.DeepEqual(dropped, wantDropped) {
+		t.Fatalf("dropped = %+v, want %+v", dropped, wantDropped)
+	}
+	if len(results) != 2 {
+		t.Fatalf("got %d results, want 2", len(results))
+	}
+	for _, r := range results {
+		for _, c := range r.Config {
+			if c.File && !toolchainConfigKey(c.Key) {
+				t.Errorf("result %s still carries foreign config %s: %s", r.Name, c.Key, c.Value)
+			}
+		}
+	}
+	if _, ok := results[0].ConfigIndex("goos"); !ok {
+		t.Error("toolchain goos config lost in the strip")
+	}
+}
+
+// TestRecordingConfigKeySetIsClosed is INV-12's anchor: composing a parsed
+// stream (foreign keys stripped) with everything the run path appends yields
+// serializable (File:true) config drawn only from the closed set — the
+// toolchain's four keys, pew's provenance and guard keys, and `pure`. The
+// store writer emits exactly the File:true entries, so this key set is what a
+// recording can ever contain.
+func TestRecordingConfigKeySetIsClosed(t *testing.T) {
+	stream := "goos: linux\npkg: example/p\nraft: x\nBenchmarkRun-8 100 5 ns/op\n"
+	results, _, _, err := Parse([]byte(stream))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	extra := ProvenanceConfig("c1", false, guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"}, Conditions{})
+	extra = append(extra, RuntimeConfig("rt", "manifest")...)
+	extra = append(extra, ClosureConfig("cl"), GofreshPurityConfig("d"), PureConfig("true"))
+	closed := map[string]bool{
+		"goos": true, "goarch": true, "pkg": true, "cpu": true,
+		"pew-format": true, "commit": true, "toolchain": true, "machine": true,
+		"buildconfig": true, "runtimeconfig": true, "dirty": true,
+		"pew-runconditions": true, "pew-runtime": true, "pew-runtime-inputs": true,
+		"pew-closure": true, "pew-purity": true, "pure": true,
+	}
+	for _, group := range Demux(results, extra) {
+		for _, r := range group {
+			for _, c := range r.Config {
+				if c.File && !closed[c.Key] {
+					t.Errorf("recording would carry key %q outside the closed set", c.Key)
+				}
+			}
+		}
+	}
+}
+
 // TestParseCollectsCorruptionFromInterleavedStream runs Parse over a stream
 // assembled verbatim from a real `go test -bench` capture of a package whose
 // benchmarks start a consensus node logging to stdout (protodb ./internal/db):
@@ -189,7 +274,7 @@ func TestParseCollectsCorruptionFromInterleavedStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	results, corrupt, err := Parse(out)
+	results, corrupt, _, err := Parse(out)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -274,7 +359,7 @@ func TestParseOrphanedTailDetection(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			out := []byte("BenchmarkAnchor-8 1 1 ns/op\n" + tc.line + "\n")
-			_, corrupt, err := Parse(out)
+			_, corrupt, _, err := Parse(out)
 			if err != nil {
 				t.Fatalf("Parse: %v", err)
 			}
@@ -378,7 +463,7 @@ func TestParseRejectsReservedFormatConfig(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			out := []byte(line + "\nBenchmarkRun-8 1 1 ns/op\n")
-			if _, _, err := Parse(out); err == nil {
+			if _, _, _, err := Parse(out); err == nil {
 				t.Fatalf("reserved configuration %q accepted", line)
 			}
 		})

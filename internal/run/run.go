@@ -96,11 +96,34 @@ type CorruptLine struct {
 	Orphan bool   // a detached measurement tail: a sample was destroyed or replaced
 }
 
+// DroppedConfig is a stream-derived file-configuration key outside the
+// toolchain's benchmark keys (spec §5): a `key: value`-shaped stdout line —
+// typically a dependency's logger — that benchfmt read as configuration. It is
+// dropped before storage; recording it would fragment `stat` grouping on
+// transient log text.
+type DroppedConfig struct {
+	Key   string
+	Value string // the first observed value, for the warning
+}
+
+// toolchainConfigKey reports whether key is one of the file-configuration
+// lines `go test` itself emits — the only stream-derived keys a recording may
+// carry (spec §5).
+func toolchainConfigKey(key string) bool {
+	switch key {
+	case "goos", "goarch", "pkg", "cpu":
+		return true
+	default:
+		return false
+	}
+}
+
 // Parse reads benchmark-format output into results, collecting rather than
 // failing on lines corrupted by interleaved foreign output (the parser treats
 // syntax errors as per-record, by design). Reserved provenance keys in the
-// output remain a hard error (spec §5: refused before storage).
-func Parse(out []byte) ([]*benchfmt.Result, []CorruptLine, error) {
+// output remain a hard error (spec §5: refused before storage); other foreign
+// configuration keys are stripped from every result and reported as dropped.
+func Parse(out []byte) ([]*benchfmt.Result, []CorruptLine, []DroppedConfig, error) {
 	lines := bytes.Split(out, []byte{'\n'})
 	for _, line := range lines {
 		colon := bytes.IndexByte(line, ':')
@@ -109,7 +132,7 @@ func Parse(out []byte) ([]*benchfmt.Result, []CorruptLine, error) {
 		}
 		key := string(line[:colon])
 		if strings.HasPrefix(key, "pew-") || reservedConfigKey(key) {
-			return nil, nil, fmt.Errorf("run: benchmark output uses reserved %s configuration", key)
+			return nil, nil, nil, fmt.Errorf("run: benchmark output uses reserved %s configuration", key)
 		}
 	}
 	r := benchfmt.NewReader(bytes.NewReader(out), "go test")
@@ -124,11 +147,35 @@ func Parse(out []byte) ([]*benchfmt.Result, []CorruptLine, error) {
 		}
 	}
 	if err := r.Err(); err != nil {
-		return nil, nil, fmt.Errorf("run: read benchmark output: %w", err)
+		return nil, nil, nil, fmt.Errorf("run: read benchmark output: %w", err)
 	}
+	dropped := stripForeignConfig(results)
 	corrupt = append(corrupt, orphanedTails(lines)...)
 	sort.SliceStable(corrupt, func(i, j int) bool { return corrupt[i].Line < corrupt[j].Line })
-	return results, corrupt, nil
+	return results, corrupt, dropped, nil
+}
+
+// stripForeignConfig removes every stream-derived file-configuration entry
+// outside the toolchain's benchmark keys from each result, in place, and
+// returns the distinct dropped keys in first-observation order.
+func stripForeignConfig(results []*benchfmt.Result) []DroppedConfig {
+	var dropped []DroppedConfig
+	seen := map[string]bool{}
+	for _, r := range results {
+		kept := r.Config[:0]
+		for _, c := range r.Config {
+			if c.File && !toolchainConfigKey(c.Key) {
+				if !seen[c.Key] {
+					seen[c.Key] = true
+					dropped = append(dropped, DroppedConfig{Key: c.Key, Value: string(c.Value)})
+				}
+				continue
+			}
+			kept = append(kept, c)
+		}
+		r.Config = kept
+	}
+	return dropped
 }
 
 func corruptAt(lines [][]byte, n int, cause string) CorruptLine {
