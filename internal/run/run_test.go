@@ -178,6 +178,136 @@ func TestParseAndDemux(t *testing.T) {
 	}
 }
 
+// TestPGOInput pins spec §9's PGO resolution: an explicit -pgo=<path> names a
+// profile for any package; under auto/absent only a tested *main* package's
+// default.pgo applies; off suppresses everything; the digest covers the
+// profile's bytes; later flags win; relative paths resolve against the module
+// root; a profile the compile will consume but pew cannot read fails closed —
+// as does the empty `-pgo=` path, which fails every build.
+func TestPGOInput(t *testing.T) {
+	dir := t.TempDir()
+	pkgDir := filepath.Join(dir, "cmd", "tool")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	abs := filepath.Join(dir, "p.pgo")
+	if err := os.WriteFile(abs, []byte("profile-a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "default.pgo"), []byte("default-profile"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, tc := range map[string]struct {
+		goflags string
+		mainPkg bool
+		want    string // "" = none, "digest" = some pgo: digest, "error" = fail
+	}{
+		"library, no flags":              {goflags: "", want: ""},
+		"library, auto":                  {goflags: "-pgo=auto", want: ""},
+		"main, no flags, default.pgo":    {goflags: "", mainPkg: true, want: "digest"},
+		"main, auto, default.pgo":        {goflags: "-pgo=auto", mainPkg: true, want: "digest"},
+		"main, off suppresses default":   {goflags: "-pgo=off", mainPkg: true, want: ""},
+		"main, explicit beats default":   {goflags: "-pgo=" + abs, mainPkg: true, want: "digest"},
+		"other flags only":               {goflags: "-tags=exp -race", want: ""},
+		"absolute path":                  {goflags: "-pgo=" + abs, want: "digest"},
+		"relative path":                  {goflags: "-pgo=p.pgo", want: "digest"},
+		"last flag wins":                 {goflags: "-pgo=" + abs + " -pgo=off", want: ""},
+		"unreadable profile":             {goflags: "-pgo=missing.pgo", want: "error"},
+		"empty -pgo= path fails closed":  {goflags: "-pgo=", want: "error"},
+		"main without default, no flags": {goflags: "", mainPkg: true, want: "none-without-default"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			pd := pkgDir
+			if tc.want == "none-without-default" {
+				pd = t.TempDir()
+				tc.want = ""
+			}
+			got, err := PGOInput(dir, pd, tc.mainPkg, tc.goflags)
+			switch tc.want {
+			case "error":
+				if err == nil {
+					t.Fatalf("PGOInput = %q, want fail-closed error", got)
+				}
+			case "":
+				if err != nil || got != "" {
+					t.Fatalf("PGOInput = %q, %v, want no profile", got, err)
+				}
+			case "digest":
+				if err != nil || !strings.HasPrefix(got, "pgo:") {
+					t.Fatalf("PGOInput = %q, %v, want a pgo: digest", got, err)
+				}
+			}
+		})
+	}
+
+	// The digest tracks content for both channels.
+	explicitA, err := PGOInput(dir, pkgDir, false, "-pgo=p.pgo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultA, err := PGOInput(dir, pkgDir, true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(abs, []byte("profile-b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "default.pgo"), []byte("default-profile-2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	explicitB, err := PGOInput(dir, pkgDir, false, "-pgo=p.pgo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultB, err := PGOInput(dir, pkgDir, true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explicitA == explicitB {
+		t.Fatal("explicit profile content change did not move the digest")
+	}
+	if defaultA == defaultB {
+		t.Fatal("default.pgo content change did not move the digest")
+	}
+}
+
+// TestEffectiveGoflags pins the resolution channel (spec §9): GOFLAGS written
+// to the go env file (`go env -w`) applies to builds without any process
+// environment entry, so pew must read the effective value through `go env` —
+// scanning the process env alone would miss a profile configured that way.
+func TestEffectiveGoflags(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/goflagsprobe\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	goenv := filepath.Join(t.TempDir(), "goenv.cfg")
+	if err := os.WriteFile(goenv, []byte("GOFLAGS=-pgo=env-file.pgo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var env []string
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GOFLAGS=") && !strings.HasPrefix(entry, "GOENV=") {
+			env = append(env, entry)
+		}
+	}
+	fromFile, err := EffectiveGoflags(dir, append(env, "GOENV="+goenv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fromFile != "-pgo=env-file.pgo" {
+		t.Fatalf("EffectiveGoflags = %q, want the env-file value", fromFile)
+	}
+	// The process variable wins over the file, per the go command.
+	fromEnv, err := EffectiveGoflags(dir, append(env, "GOENV="+goenv, "GOFLAGS=-pgo=proc.pgo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fromEnv != "-pgo=proc.pgo" {
+		t.Fatalf("EffectiveGoflags = %q, want the process value", fromEnv)
+	}
+}
+
 // TestParseDropsForeignStreamConfig pins spec §5's closed recording key set
 // (INV-12): a dependency logging a lowercase colon-terminated first word
 // (`raft: appending entries`) is read by benchfmt as a file configuration

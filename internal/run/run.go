@@ -4,7 +4,9 @@ package run
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -345,6 +347,77 @@ func BenchName(resultName string) string {
 		base = base[:i] // drop the "-<gomaxprocs>" suffix (the only '-' in a func name)
 	}
 	return "Benchmark" + base
+}
+
+// EffectiveGoflags resolves the GOFLAGS the go command will actually apply in
+// moduleDir under env — `go env` folds the process variable and the go env
+// file (`go env -w`) with go's own precedence, so a profile configured through
+// either channel is seen. Scanning the process env alone misses the env file.
+func EffectiveGoflags(moduleDir string, env []string) (string, error) {
+	cmd := exec.Command("go", "env", "GOFLAGS")
+	cmd.Dir = moduleDir
+	cmd.Env = env
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("run: go env GOFLAGS: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// PGOInput resolves the PGO profile a go-test invocation of one package will
+// consume under the effective GOFLAGS, and returns its content digest as a
+// gofresh build input ("pgo:<hex>"), or "" when no profile applies. Two
+// channels reach a measurement (spec §9): an explicit `-pgo=<path>` flag, and
+// — under `auto` or an absent flag — a tested *main* package's default.pgo
+// (`go test` synthesizes the test main from the package under test, and a
+// package-main's profile is consumed; a library package's never is). A profile
+// that will be consumed but cannot be read fails closed — the digest must
+// cover the exact bytes the compile consumes, and a guessed or partial value
+// could hold a buildconfig digest still while generated code moves.
+func PGOInput(moduleDir, pkgDir string, mainPkg bool, goflags string) (string, error) {
+	profile := ""
+	found := false
+	// The last -pgo flag wins, matching the go command's own resolution.
+	for _, f := range strings.Fields(goflags) {
+		if v, ok := strings.CutPrefix(f, "-pgo="); ok {
+			profile = v
+			found = true
+		}
+	}
+	path := ""
+	switch {
+	case profile == "off":
+		return "", nil
+	case found && profile != "" && profile != "auto":
+		path = profile
+		if !filepath.IsAbs(path) {
+			// The go command resolves a relative -pgo against its working
+			// directory, which pew pins to the module root.
+			path = filepath.Join(moduleDir, path)
+		}
+	case found && profile == "":
+		// `-pgo=` names the empty path; every build under it fails, so the
+		// engine fails closed here rather than minting a digest-less guard.
+		return "", fmt.Errorf("run: GOFLAGS names an empty -pgo= profile path")
+	default:
+		// auto or absent: only a tested main package's default.pgo applies.
+		if !mainPkg || pkgDir == "" {
+			return "", nil
+		}
+		candidate := filepath.Join(pkgDir, "default.pgo")
+		if _, err := os.Stat(candidate); err != nil {
+			if os.IsNotExist(err) {
+				return "", nil
+			}
+			return "", fmt.Errorf("run: probing %s: %w", candidate, err)
+		}
+		path = candidate
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("run: reading PGO profile %s: %w", path, err)
+	}
+	return fmt.Sprintf("pgo:%x", sha256.Sum256(data)), nil
 }
 
 // BuildArgs compiles a package's test binary into out without running it —

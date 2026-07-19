@@ -6,7 +6,6 @@ close-out convention.
 
 | slug | summary | Lands |
 |------|---------|-------|
-| [buildconfig-completeness](buildconfig-completeness.md) | PGO profile content and CLI build-flag pass-throughs are absent from the buildconfig guard | when PGO benchmarks see real use, or `pew run` grows build-flag flags |
 | [json-output](json-output.md) | `-json` machine-readable output for `status`/`stat` | when pew is first wired into CI/scripting beyond exit-code gating |
 | [purity-directives](purity-directives.md) | impure benchmarks have no durable in-source form and must be re-specified per invocation | when `--impure` re-specification proves friction |
 | [recorded-config-trust](recorded-config-trust.md) | whitelisted toolchain-key values are spoofable in-stream; historical foreign keys unpoliced at read time | when a spoofed value or foreign-key fragmentation is observed, or when read-side recording validation is next designed |

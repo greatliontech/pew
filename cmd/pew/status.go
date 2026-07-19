@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -53,6 +54,7 @@ func newStatusCmd() *cobra.Command {
 
 type pkgMeta struct {
 	ImportPath   string
+	Name         string
 	Dir          string
 	TestGoFiles  []string
 	XTestGoFiles []string
@@ -62,14 +64,37 @@ type pkgMeta struct {
 	}
 }
 
-// newEngine roots one immutable Gofresh configuration at a module. Views discover
-// purity directives from their own selected source.
-func newEngine(moduleDir string) (*gofresh.Engine, error) {
-	return gofresh.New(gofresh.WithDir(moduleDir))
+// newEngineForPkg roots one immutable Gofresh configuration at a package's
+// module. Views discover purity directives from their own selected source. The
+// package's effective PGO profile — explicit -pgo in the effective GOFLAGS, or
+// a tested main package's default.pgo — rides in as a content-digest build
+// input, so the buildconfig guard moves when the profile's bytes do, not
+// merely when the flag string does (spec §5/§9); a profile the compile will
+// consume but pew cannot read fails closed here. The resolved input is
+// returned beside the engine so the producer can revalidate it before writing.
+func newEngineForPkg(p pkgMeta, env []string) (*gofresh.Engine, string, error) {
+	return newEngineAt(p.Module.Dir, p.Dir, p.Name == "main", env)
 }
 
-func newEngineWithEnv(moduleDir string, env []string) (*gofresh.Engine, error) {
-	return gofresh.New(gofresh.WithDir(moduleDir), gofresh.WithEnv(env...))
+func newEngineAt(moduleDir, pkgDir string, mainPkg bool, env []string) (*gofresh.Engine, string, error) {
+	goflags, err := runpkg.EffectiveGoflags(moduleDir, env)
+	if err != nil {
+		return nil, "", err
+	}
+	pgo, err := runpkg.PGOInput(moduleDir, pkgDir, mainPkg, goflags)
+	if err != nil {
+		return nil, "", err
+	}
+	e, err := buildEngine(moduleDir, env, pgo)
+	return e, pgo, err
+}
+
+func buildEngine(moduleDir string, env []string, pgo string) (*gofresh.Engine, error) {
+	opts := []gofresh.Option{gofresh.WithDir(moduleDir), gofresh.WithEnv(env...)}
+	if pgo != "" {
+		opts = append(opts, gofresh.WithBuildInputs(pgo))
+	}
+	return gofresh.New(opts...)
 }
 
 func runStatus(w io.Writer, benchDir, label string, staleOnly bool, patterns []string) error {
@@ -81,12 +106,14 @@ func runStatus(w io.Writer, benchDir, label string, staleOnly bool, patterns []s
 		if p.Module.Dir == "" {
 			continue // not in a module (e.g. a stdlib pattern) — nothing to record
 		}
-		e, err := newEngine(p.Module.Dir)
+		// A per-package failure (an unreadable PGO profile, a sibling that
+		// does not compile) is reported as a row and does not abort status of
+		// the rest of the tree.
+		e, _, err := newEngineForPkg(p, os.Environ())
 		if err != nil {
-			return err
+			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
+			continue
 		}
-		// A per-package failure (e.g. a sibling that does not compile) is reported
-		// as a row and does not abort status of the rest of the tree.
 		if err := statusPackage(w, e, benchDir, label, staleOnly, p); err != nil {
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
 		}

@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"testing"
@@ -220,7 +222,7 @@ func TestRunRecordsIncompleteRuntimeEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runRun: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
 	}
-	e, err := newEngine(dir)
+	e, _, err := newEngineAt(dir, dir, false, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +302,7 @@ func TestRunPackageRecordsProvidedConditions(t *testing.T) {
 		t.Fatalf("resolved %d packages, want 1", len(pkgs))
 	}
 	env := os.Environ()
-	e, err := newEngineWithEnv(pkgs[0].Module.Dir, env)
+	e, _, err := newEngineForPkg(pkgs[0], env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +318,7 @@ func TestRunPackageRecordsProvidedConditions(t *testing.T) {
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 		throttle: func() runpkg.ThrottleSnapshot { return runpkg.ThrottleSnapshot{"c0": 5} },
 	}
-	if err := runPackage(&out, io.Discard, e, newGitStateCache(), rc, pkgs[0], env, conditions); err != nil {
+	if err := runPackage(&out, io.Discard, e, newGitStateCache(), rc, pkgs[0], env, conditions, ""); err != nil {
 		t.Fatalf("runPackage: %v\nstdout:\n%s", err, out.String())
 	}
 	recs, err := store.New(benchDir).Read("", "BenchmarkWire", "")
@@ -364,7 +366,7 @@ func TestRunPackageRecordsThrottleDelta(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	e, err := newEngineWithEnv(pkgs[0].Module.Dir, env)
+	e, _, err := newEngineForPkg(pkgs[0], env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +382,7 @@ func TestRunPackageRecordsThrottleDelta(t *testing.T) {
 		benchDir := filepath.Join(t.TempDir(), "benchmarks")
 		var out, errOut bytes.Buffer
 		rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}, throttle: movingCounter()}
-		if err := runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}); err != nil {
+		if err := runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
 			t.Fatalf("runPackage: %v", err)
 		}
 		recs, err := store.New(benchDir).Read("", "BenchmarkHot", "")
@@ -413,7 +415,7 @@ func TestRunPackageRecordsThrottleDelta(t *testing.T) {
 		}
 		var out, errOut bytes.Buffer
 		rc := runConfig{benchDir: benchDir, strict: true, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}, throttle: movingCounter()}
-		err = runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{})
+		err = runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, "")
 		if err == nil || !strings.Contains(err.Error(), "thermal throttling during measurement") {
 			t.Fatalf("err = %v, want the strict throttling refusal", err)
 		}
@@ -451,7 +453,7 @@ func TestRunPackageRecordsThrottleDelta(t *testing.T) {
 				return []byte("goos: linux\ngoarch: amd64\npkg: example.com/throttlewire\ncpu: T\nBenchmarkHot-8 1 5 ns/op\nPASS\n"), nil
 			},
 		}
-		if err := runPackage(io.Discard, io.Discard, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}); err != nil {
+		if err := runPackage(io.Discard, io.Discard, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
 			t.Fatalf("runPackage: %v", err)
 		}
 		want := []string{"build", "snapshot", "measure", "snapshot"}
@@ -498,6 +500,280 @@ func assertRunConditionsLine(t *testing.T, bench, value string) {
 				t.Errorf("%s load1 = %q, want a decimal", bench, v)
 			}
 		}
+	}
+}
+
+// TestRunPackagePGOContentMovesBuildconfig pins spec §5/§9's PGO content
+// guarding end to end: two runs under the same GOFLAGS -pgo flag string but
+// different profile bytes record different buildconfig digests — the guard
+// covers the content the compile consumed, not the flag text. An unreadable
+// named profile fails engine construction closed.
+func TestRunPackagePGOContentMovesBuildconfig(t *testing.T) {
+	var probeEnv []string
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GOFLAGS=") {
+			probeEnv = append(probeEnv, entry)
+		}
+	}
+	probeEnv = append(probeEnv, "GOFLAGS=-pgo=missing.pgo")
+	if _, _, err := newEngineAt(t.TempDir(), t.TempDir(), false, probeEnv); err == nil {
+		t.Fatal("unreadable named profile did not fail closed")
+	}
+
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":        "module example.com/pgowire\n\ngo 1.26.4\n",
+		"bench_test.go": "package pgowire\n\nimport \"testing\"\n\nfunc BenchmarkPGO(b *testing.B) {}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	profA, profB := generateCPUProfile(t), generateCPUProfile(t)
+	if bytes.Equal(profA, profB) {
+		t.Skip("two generated CPU profiles were byte-identical")
+	}
+	profPath := filepath.Join(dir, "prof.pgo")
+	if err := os.WriteFile(profPath, profA, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	withWorkingDir(t, dir)
+	pkgs, err := resolvePackages([]string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var env []string
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GOFLAGS=") {
+			env = append(env, entry)
+		}
+	}
+	env = append(env, "GOFLAGS=-pgo=prof.pgo")
+
+	record := func(benchDir string) string {
+		t.Helper()
+		e, pgoInput, err := newEngineForPkg(pkgs[0], env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}
+		if err := runPackage(&out, io.Discard, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, pgoInput); err != nil {
+			t.Fatalf("runPackage: %v\nstdout:\n%s", err, out.String())
+		}
+		recs, err := store.New(benchDir).Read("", "BenchmarkPGO", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		bc := recs[0].GetConfig("buildconfig")
+		if bc == "" {
+			t.Fatal("recording missing buildconfig")
+		}
+		return bc
+	}
+
+	bcA := record(filepath.Join(t.TempDir(), "benchmarks"))
+	bcARepeat := record(filepath.Join(t.TempDir(), "benchmarks"))
+	if bcA != bcARepeat {
+		t.Fatalf("same profile bytes moved buildconfig: %q vs %q", bcA, bcARepeat)
+	}
+	if err := os.WriteFile(profPath, profB, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if bcB := record(filepath.Join(t.TempDir(), "benchmarks")); bcB == bcA {
+		t.Fatalf("profile content change left buildconfig unmoved: %q", bcB)
+	}
+}
+
+// generateCPUProfile produces a small valid pprof profile — PGO tests need
+// bytes the compile genuinely consumes, so a garbage stand-in cannot serve.
+func generateCPUProfile(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := pprof.StartCPUProfile(&buf); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(20 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		_ = sha256.Sum256(buf.Bytes())
+	}
+	pprof.StopCPUProfile()
+	return buf.Bytes()
+}
+
+// TestRunPackageDefaultPGOMovesBuildconfig pins the second §9 PGO channel: a
+// tested main package's default.pgo is consumed under the default -pgo=auto,
+// so its content digest must ride the recorded buildconfig — regenerating the
+// profile moves the guard with no flag change anywhere.
+func TestRunPackageDefaultPGOMovesBuildconfig(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":        "module example.com/pgomain\n\ngo 1.26.4\n",
+		"main.go":       "package main\n\nfunc main() {}\n",
+		"bench_test.go": "package main\n\nimport \"testing\"\n\nfunc BenchmarkMain(b *testing.B) {}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	profA, profB := generateCPUProfile(t), generateCPUProfile(t)
+	if bytes.Equal(profA, profB) {
+		t.Skip("two generated CPU profiles were byte-identical")
+	}
+	profPath := filepath.Join(dir, "default.pgo")
+	if err := os.WriteFile(profPath, profA, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	withWorkingDir(t, dir)
+	pkgs, err := resolvePackages([]string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkgs[0].Name != "main" {
+		t.Fatalf("resolved package name %q, want main", pkgs[0].Name)
+	}
+	var env []string
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GOFLAGS=") {
+			env = append(env, entry)
+		}
+	}
+
+	record := func(benchDir string) string {
+		t.Helper()
+		e, pgoInput, err := newEngineForPkg(pkgs[0], env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pgoInput == "" {
+			t.Fatal("tested main package's default.pgo yielded no build input")
+		}
+		var out bytes.Buffer
+		rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}
+		if err := runPackage(&out, io.Discard, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, pgoInput); err != nil {
+			t.Fatalf("runPackage: %v\nstdout:\n%s", err, out.String())
+		}
+		recs, err := store.New(benchDir).Read("", "BenchmarkMain", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return recs[0].GetConfig("buildconfig")
+	}
+
+	bcA := record(filepath.Join(t.TempDir(), "benchmarks"))
+	if err := os.WriteFile(profPath, profB, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The profile is untracked-content-relevant but the tree state moved:
+	// commit the new profile so the producer's repository-state checks pass.
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("profile-b", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(2, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	if bcB := record(filepath.Join(t.TempDir(), "benchmarks")); bcB == bcA || bcB == "" {
+		t.Fatalf("default.pgo content change left buildconfig unmoved: %q", bcB)
+	}
+}
+
+// TestRunPackageRefusesPGOProfileDrift pins the §9 producer revalidation: a
+// profile edited between guard capture and the recording write makes the
+// recorded digest describe bytes the compile never consumed, so the package
+// is refused and nothing is recorded.
+func TestRunPackageRefusesPGOProfileDrift(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":        "module example.com/pgodrift\n\ngo 1.26.4\n",
+		"bench_test.go": "package pgodrift\n\nimport \"testing\"\n\nfunc BenchmarkDrift(b *testing.B) {}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	profA, profB := generateCPUProfile(t), generateCPUProfile(t)
+	if bytes.Equal(profA, profB) {
+		t.Skip("two generated CPU profiles were byte-identical")
+	}
+	profPath := filepath.Join(dir, "prof.pgo")
+	if err := os.WriteFile(profPath, profA, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	withWorkingDir(t, dir)
+	pkgs, err := resolvePackages([]string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var env []string
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GOFLAGS=") {
+			env = append(env, entry)
+		}
+	}
+	env = append(env, "GOFLAGS=-pgo=prof.pgo")
+	e, pgoInput, err := newEngineForPkg(pkgs[0], env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Drift lands after guard capture: the digest the engine folded into
+	// buildconfig no longer matches the bytes the measured compile consumes.
+	if err := os.WriteFile(profPath, profB, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	benchDir := filepath.Join(t.TempDir(), "benchmarks")
+	var out bytes.Buffer
+	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}
+	err = runPackage(&out, io.Discard, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, pgoInput)
+	if err == nil || !strings.Contains(err.Error(), "effective PGO input changed") {
+		t.Fatalf("err = %v, want the PGO drift refusal", err)
+	}
+	if _, err := store.New(benchDir).Read("", "BenchmarkDrift", ""); err == nil {
+		t.Fatal("drifted-profile measurement was recorded")
 	}
 }
 
@@ -556,13 +832,13 @@ func TestRunPackageSalvagesCorruptStream(t *testing.T) {
 		t.Fatalf("resolved %d packages, want 1", len(pkgs))
 	}
 	env := os.Environ()
-	e, err := newEngineWithEnv(pkgs[0].Module.Dir, env)
+	e, _, err := newEngineForPkg(pkgs[0], env)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
 	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 2, Benchtime: "1x", Bench: "."}}
-	refusal := runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{})
+	refusal := runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, "")
 	if refusal == nil {
 		t.Fatalf("corrupted stream reported no error\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
 	}
@@ -649,13 +925,13 @@ func TestRunPackageDropsForeignStreamConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	e, err := newEngineWithEnv(pkgs[0].Module.Dir, env)
+	e, _, err := newEngineForPkg(pkgs[0], env)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
 	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 2, Benchtime: "1x", Bench: "."}}
-	if err := runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}); err != nil {
+	if err := runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
 		t.Fatalf("runPackage: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if !strings.Contains(errOut.String(), `dropping stream configuration key "raft"`) {
@@ -730,13 +1006,13 @@ func TestRunPackageRefusesUnattributableOrphan(t *testing.T) {
 		t.Fatalf("resolved %d packages, want 1", len(pkgs))
 	}
 	env := os.Environ()
-	e, err := newEngineWithEnv(pkgs[0].Module.Dir, env)
+	e, _, err := newEngineForPkg(pkgs[0], env)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
 	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}
-	refusal := runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{})
+	refusal := runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, "")
 	if refusal == nil {
 		t.Fatalf("unattributable orphan reported no error\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
 	}

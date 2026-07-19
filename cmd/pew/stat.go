@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/greatliontech/pew/internal/compare"
 	"github.com/greatliontech/pew/internal/gitblob"
 	"github.com/greatliontech/pew/internal/gotool"
+	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 	"github.com/spf13/cobra"
 	"golang.org/x/mod/modfile"
@@ -182,6 +184,8 @@ type statKey struct {
 type currentBench struct {
 	importPath string
 	moduleDir  string
+	pkgDir     string
+	mainPkg    bool
 }
 
 type statModule struct {
@@ -258,11 +262,14 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 	// When the new side is the working-tree recording (auto/pinned), a recording
 	// that is stale for HEAD does not reflect current code, so its "new" numbers
 	// are misleading — warn (don't block), pointing at `pew run`. The engine is
-	// only needed for that check, so it is built only then — via newEngine, so
-	// stat honors //gofresh:pure directives exactly as status and run do (§7.5:
-	// every consumer of the shared engine). In A/B mode both sides are historical
-	// recordings and no staleness check applies.
-	engines := map[string]*gofresh.Engine{}
+	// only needed for that check, so it is built only then — through the shared
+	// construction path, so stat honors //gofresh:pure directives and the
+	// per-package PGO build input exactly as status and run do (§7.5, §9).
+	// Engines are cached per (module, PGO input): packages of one module whose
+	// effective profiles differ need different guard inputs.
+	type engineKey struct{ moduleDir, pgo string }
+	engines := map[engineKey]*gofresh.Engine{}
+	goflagsByModule := map[string]string{}
 	var tally statTally
 
 	for _, m := range modules {
@@ -334,13 +341,32 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 					// guarantees a decodable fingerprint on this side.
 					fp, pure, _ := fingerprintFromConfig(newRecs[0].Config)
 					subj := gofresh.Subject{Package: cur.importPath, Symbol: key.bench}
-					engine := engines[cur.moduleDir]
+					goflags, ok := goflagsByModule[cur.moduleDir]
+					if !ok {
+						goflags, err = runpkg.EffectiveGoflags(cur.moduleDir, os.Environ())
+						if err != nil {
+							fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, err)
+							baseAll = append(baseAll, baseRecs...)
+							newAll = append(newAll, newRecs...)
+							continue
+						}
+						goflagsByModule[cur.moduleDir] = goflags
+					}
+					pgo, pgoErr := runpkg.PGOInput(cur.moduleDir, cur.pkgDir, cur.mainPkg, goflags)
+					if pgoErr != nil {
+						fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, pgoErr)
+						baseAll = append(baseAll, baseRecs...)
+						newAll = append(newAll, newRecs...)
+						continue
+					}
+					ek := engineKey{moduleDir: cur.moduleDir, pgo: pgo}
+					engine := engines[ek]
 					if engine == nil {
-						engine, err = newEngine(cur.moduleDir)
+						engine, err = buildEngine(cur.moduleDir, os.Environ(), pgo)
 						if err != nil {
 							return err
 						}
-						engines[cur.moduleDir] = engine
+						engines[ek] = engine
 					}
 					if v, e := engine.Check(context.Background(), fp, subj, cur.moduleDir); e != nil {
 						fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, e)
@@ -443,7 +469,7 @@ func statModules(pkgs []pkgMeta, sc statConfig, errw io.Writer) ([]*statModule, 
 		}
 		pkgRel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, p.Module.Path), "/")
 		for _, b := range benches {
-			m.current[statKey{pkgRel: pkgRel, bench: b, label: sc.label}] = currentBench{importPath: p.ImportPath, moduleDir: p.Module.Dir}
+			m.current[statKey{pkgRel: pkgRel, bench: b, label: sc.label}] = currentBench{importPath: p.ImportPath, moduleDir: p.Module.Dir, pkgDir: p.Dir, mainPkg: p.Name == "main"}
 		}
 	}
 	mods := make([]*statModule, 0, len(byDir))

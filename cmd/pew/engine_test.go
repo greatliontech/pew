@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
@@ -13,9 +14,9 @@ import (
 func TestNewEngineHonorsDirectives(t *testing.T) {
 	const pkg = "github.com/greatliontech/pew/internal/fixtures/purebench"
 	const bench = "BenchmarkPureRead"
-	e, err := newEngine(".")
+	e, _, err := newEngineAt(".", ".", false, os.Environ())
 	if err != nil {
-		t.Fatalf("newEngine: %v", err)
+		t.Fatalf("newEngineAt: %v", err)
 	}
 	subj := gofresh.Subject{Package: pkg, Symbol: bench}
 	fp, err := e.CaptureFor(t.Context(), subj, ".", gofresh.Measurement)

@@ -257,7 +257,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 		t.Fatal(err)
 	}
 	withWorkingDir(t, dir)
-	e, err := newEngine(dir)
+	e, _, err := newEngineAt(dir, dir, false, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -124,13 +124,16 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 		if p.Module.Dir == "" {
 			continue
 		}
-		e, err := newEngineWithEnv(p.Module.Dir, env)
+		// Like status, a per-package failure (e.g. one that does not build, or
+		// an unreadable PGO profile) is reported and does not abort the rest
+		// of the tree.
+		e, pgoInput, err := newEngineForPkg(p, env)
 		if err != nil {
-			return err
+			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
+			failures = append(failures, p.ImportPath)
+			continue
 		}
-		// Like status, a per-package failure (e.g. one that does not build) is
-		// reported and does not abort the rest of the tree.
-		runErr := runPackage(w, errw, e, gc, rc, p, env, conditions)
+		runErr := runPackage(w, errw, e, gc, rc, p, env, conditions, pgoInput)
 		if runErr != nil {
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, runErr)
 			failures = append(failures, p.ImportPath)
@@ -188,7 +191,7 @@ func (c *gitStateCache) recordWrites(repoRoot string, paths []string) {
 	}
 }
 
-func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig, p pkgMeta, env []string, conditions run.Conditions) error {
+func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig, p pkgMeta, env []string, conditions run.Conditions, pgoInput string) error {
 	benches, err := selectedBenchmarks(p)
 	if err != nil {
 		return err
@@ -401,6 +404,20 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 	}
 	if err := view.Validate(ctx); err != nil {
 		return err
+	}
+	// The PGO profile is a build input outside the git-tracked source
+	// snapshots, so it gets its own pre-write revalidation: the recorded
+	// buildconfig must describe the exact bytes the measured compile consumed.
+	goflagsAtWrite, err := run.EffectiveGoflags(p.Module.Dir, env)
+	if err != nil {
+		return err
+	}
+	pgoAtWrite, err := run.PGOInput(p.Module.Dir, p.Dir, p.Name == "main", goflagsAtWrite)
+	if err != nil {
+		return err
+	}
+	if pgoAtWrite != pgoInput {
+		return fmt.Errorf("effective PGO input changed during the benchmark run")
 	}
 	stateAtWrite, err := gitblob.Snapshot(p.Module.Dir)
 	if err != nil {

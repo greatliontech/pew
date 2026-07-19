@@ -79,8 +79,9 @@ A stored result is a **canonical Go benchmark-format file** (§1 canonical spec)
 rides in-band as the format's own `key: value` **configuration lines** — the format's sanctioned
 extension point — so files stay self-describing and `benchstat`-readable.
 
-Toolchain already emits `goos`, `goarch`, `pkg`, `cpu`. pew adds (uniform per run, therefore
-global config lines):
+Toolchain already emits `goos`, `goarch`, `pkg`, `cpu`. pew adds, as global config lines —
+uniform per run except `buildconfig`, whose value is per-package wherever the applicable PGO
+profile differs between packages (§9):
 
 | key                  | meaning                                                       | source-of-truth? |
 |----------------------|---------------------------------------------------------------|------------------|
@@ -88,7 +89,7 @@ global config lines):
 | `commit`             | full SHA of HEAD at run time                                  | yes              |
 | `toolchain`          | `go version` output (compiler/runtime identity)               | yes              |
 | `machine`            | machine fingerprint id (§8)                                   | yes              |
-| `buildconfig`        | digest of build tags + relevant GOFLAGS/gcflags + cgo + PGO  | yes              |
+| `buildconfig`        | digest of build tags + relevant GOFLAGS/gcflags + cgo + PGO profile **content** | yes |
 | `runtimeconfig`      | digest of Go runtime-config env (GOGC/GODEBUG/GOMEMLIMIT/GOMAXPROCS), §7 | yes  |
 | `dirty`              | `true` if the working tree had uncommitted changes at run    | yes              |
 | `pew-runconditions`  | observed transient run conditions at run time (§9)           | yes              |
@@ -566,6 +567,22 @@ provenance is captured atomically with the run:
   change generated code (`-tags`, `-gcflags`, `-ldflags`, PGO, cgo/compiler env, architecture
   feature env) must be represented in the `buildconfig` guard (§7) before pew exposes or changes
   their handling; otherwise a build-input change could produce a false `valid` recording.
+  **PGO is guarded by profile content, not flag string.** Two channels put a profile into a pew
+  measurement, and both are content-guarded per package: an explicit `-pgo=<path>` in the
+  **effective** GOFLAGS — resolved through `go env`, so a value written to the go env file
+  (`go env -w`) counts exactly like the process variable — and, under `-pgo=auto` or an absent
+  flag (the default), a tested **main** package's `default.pgo`: `go test` synthesizes the test
+  main from the package under test, and a package-main's profile is consumed while a library
+  package's never is. The applicable profile's content digest feeds the guard — the digest moves
+  when the profile's bytes change, not merely when the flag string does — so `buildconfig` may
+  differ across the packages of one run wherever the applicable profile does: a tested main
+  package's `default.pgo`, or one relative `-pgo` path resolving against different module roots
+  in a multi-module run; each recording self-describes either way. A profile the compile will consume but pew cannot read
+  fails the operation closed (as does the empty `-pgo=` path, which fails every build): a guessed
+  or partial value could hold `buildconfig` still while generated code moves. Relative profile
+  paths resolve against the module root, where pew runs the go command. The profile is a build
+  input outside the git-tracked source snapshots, so the producer revalidates its digest
+  immediately before writing a recording and refuses the package on drift.
 - **CPU pinning is opt-in** (`--pin`, Linux `taskset`/cpuset), **off by default** — it cuts
   scheduler-migration variance but is platform-specific and footgun-prone (core choice, SMT
   siblings, containers/VMs), so forcing it on would be the surprising default. The first knob to
