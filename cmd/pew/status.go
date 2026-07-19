@@ -35,6 +35,7 @@ func newStatusCmd() *cobra.Command {
 	var benchDir string
 	var label string
 	var staleOnly bool
+	var explain bool
 	cmd := &cobra.Command{
 		Use:   "status [packages]",
 		Short: "Report each benchmark as valid / stale / unverifiable / unrecorded",
@@ -43,12 +44,13 @@ func newStatusCmd() *cobra.Command {
 			if len(patterns) == 0 {
 				patterns = []string{"./..."}
 			}
-			return runStatus(cmd.OutOrStdout(), benchDir, label, staleOnly, patterns)
+			return runStatus(cmd.OutOrStdout(), benchDir, label, staleOnly, explain, patterns)
 		},
 	}
 	cmd.Flags().StringVar(&benchDir, "bench-dir", "", "stored-recordings directory (default <module>/benchmarks); an explicit value applies to every package")
 	cmd.Flags().StringVar(&label, "label", "", "variant label to check (spec §6); empty = the unlabeled recording")
 	cmd.Flags().BoolVar(&staleOnly, "stale", false, "show only benchmarks that need re-running (non-valid)")
+	cmd.Flags().BoolVar(&explain, "explain", false, "explain each non-valid verdict: recorded vs current guard/input values (spec §12)")
 	return cmd
 }
 
@@ -97,7 +99,7 @@ func buildEngine(moduleDir string, env []string, pgo string) (*gofresh.Engine, e
 	return gofresh.New(opts...)
 }
 
-func runStatus(w io.Writer, benchDir, label string, staleOnly bool, patterns []string) error {
+func runStatus(w io.Writer, benchDir, label string, staleOnly, explain bool, patterns []string) error {
 	pkgs, err := resolvePackages(patterns)
 	if err != nil {
 		return err
@@ -114,14 +116,14 @@ func runStatus(w io.Writer, benchDir, label string, staleOnly bool, patterns []s
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
 			continue
 		}
-		if err := statusPackage(w, e, benchDir, label, staleOnly, p); err != nil {
+		if err := statusPackage(w, e, benchDir, label, staleOnly, explain, p); err != nil {
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
 		}
 	}
 	return nil
 }
 
-func statusPackage(w io.Writer, e *gofresh.Engine, benchDir, label string, staleOnly bool, p pkgMeta) error {
+func statusPackage(w io.Writer, e *gofresh.Engine, benchDir, label string, staleOnly bool, explain bool, p pkgMeta) error {
 	benches, err := selectedBenchmarks(p)
 	if err != nil {
 		return err
@@ -136,7 +138,7 @@ func statusPackage(w io.Writer, e *gofresh.Engine, benchDir, label string, stale
 	st := store.New(dir)
 	pkgRel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, p.Module.Path), "/")
 	for _, b := range benches {
-		v, reason, err := checkOne(st, e, p.ImportPath, pkgRel, p.Module.Dir, b, label)
+		v, reason, fp, err := checkOne(st, e, p.ImportPath, pkgRel, p.Module.Dir, b, label)
 		if err != nil {
 			return err
 		}
@@ -154,6 +156,13 @@ func statusPackage(w io.Writer, e *gofresh.Engine, benchDir, label string, stale
 			line += "  (" + reason + ")"
 		}
 		fmt.Fprintln(w, line)
+		// fp.MaximalClosure is non-empty iff the format check passed: shape
+		// validation requires a pew-closure key, so the empty sentinel is
+		// exactly the unrecorded/stale-format/error set, which has nothing
+		// decodable to tabulate.
+		if explain && v != verdictValid && v != verdictUnrecorded && fp.MaximalClosure != "" {
+			explainRecordAgainstCurrent(w, e, p.Module.Dir, p.ImportPath, b, fp, os.Environ())
+		}
 	}
 	return nil
 }
@@ -162,27 +171,30 @@ func statusPackage(w io.Writer, e *gofresh.Engine, benchDir, label string, stale
 // and stat's working-tree staleness warning. The engine recomputes the current
 // closure and guards (the SSA load is the dominant cost; an unrecorded benchmark
 // needs no analysis, so the store is read first).
-func checkOne(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, bench, label string) (verdict, string, error) {
+func checkOne(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, bench, label string) (verdict, string, gofresh.Fingerprint, error) {
 	recs, err := st.Read(pkgRel, bench, label)
 	switch {
 	case errors.Is(err, store.ErrNotRecorded):
-		return verdictUnrecorded, "", nil
+		return verdictUnrecorded, "", gofresh.Fingerprint{}, nil
 	case err != nil:
-		return "", "", err
+		return "", "", gofresh.Fingerprint{}, err
 	}
 	if !store.IsRecordingShape(recs) {
-		return verdictStale, "format", nil
+		return verdictStale, "format", gofresh.Fingerprint{}, nil
 	}
 	fp, pure, ok := fingerprintFromConfig(recs[0].Config)
 	if !ok {
-		return verdictStale, "format", nil
+		return verdictStale, "format", gofresh.Fingerprint{}, nil
 	}
 	v, err := e.Check(context.Background(), fp, gofresh.Subject{Package: pkgPath, Symbol: bench}, moduleDir)
 	if err != nil {
-		return "", "", err
+		return "", "", gofresh.Fingerprint{}, err
 	}
 	v = applyPurity(v, pure)
-	return verdict(v.Status), v.Reason, nil
+	// The fingerprint the verdict was decided over rides back so an
+	// explanation view describes the same recording — never a re-read that a
+	// concurrent run could have replaced.
+	return verdict(v.Status), v.Reason, fp, nil
 }
 
 // fingerprintFromConfig reads the recorded fingerprint out of a recording's config

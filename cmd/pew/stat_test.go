@@ -839,7 +839,7 @@ func TestRunConditionsDoNotAffectValidity(t *testing.T) {
 	write("unknown", "governor=unknown turbo=unknown load1=unknown throttled=unknown battery=unknown")
 
 	for _, label := range []string{"quiet", "noisy", "unknown"} {
-		v, reason, err := checkOne(st, e, pkg, "", ".", bench, label)
+		v, reason, _, err := checkOne(st, e, pkg, "", ".", bench, label)
 		if err != nil {
 			t.Fatalf("checkOne(%s): %v", label, err)
 		}
@@ -918,7 +918,7 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 	if err := st.Write("", bench, "", recs); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	v, reason, err := checkOne(st, e, pkg, "", ".", bench, "")
+	v, reason, _, err := checkOne(st, e, pkg, "", ".", bench, "")
 	if err != nil {
 		t.Fatalf("checkOne: %v", err)
 	}
@@ -946,7 +946,7 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 	if err := st.Write("", bench, "imp", impRecs); err != nil {
 		t.Fatalf("Write imp: %v", err)
 	}
-	v, reason, err = checkOne(st, e, pkg, "", ".", bench, "imp")
+	v, reason, _, err = checkOne(st, e, pkg, "", ".", bench, "imp")
 	if err != nil {
 		t.Fatalf("checkOne imp: %v", err)
 	}
@@ -1097,5 +1097,80 @@ func TestExitCode(t *testing.T) {
 	}
 	if got := exitCode(fmt.Errorf("wrapped: %w", &nothingComparedError{reason: "x"})); got != 2 {
 		t.Errorf("exitCode(wrapped nothing compared) = %d, want 2", got)
+	}
+}
+
+// TestStatExplainShowsSideBySideGuards pins spec §12's stat --explain: an A/B
+// whose sides disagree on a guard prints the recorded values side by side,
+// naming the moving guard behind the one-word mismatch note.
+func TestStatExplainShowsSideBySideGuards(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statexplain\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	writeStatRecording(t, st, "pkg", "BenchmarkGuard", 100)
+	refA := commitAll(t, repo, "a")
+	// The new side's buildconfig moves: recorded values must land side by side.
+	path, err := st.Path("pkg", "BenchmarkGuard", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, strings.Replace(string(data), "buildconfig: b1", "buildconfig: b2", 1))
+	refB := commitAll(t, repo, "b")
+
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), explain: true}
+	if err := runStat(&out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	got := errOut.String()
+	if !strings.Contains(got, "guard mismatch between") {
+		t.Fatalf("no explanation header:\n%s", got)
+	}
+	if !strings.Contains(got, "buildconfig") || !strings.Contains(got, "b1") || !strings.Contains(got, "b2") || !strings.Contains(got, "NO") {
+		t.Fatalf("side-by-side table does not name the moving guard:\n%s", got)
+	}
+}
+
+// TestStatExplainWorkingTreeStaleness pins §12's second stat --explain arm: a
+// working-tree recording warned non-valid prints the recorded-vs-current
+// explanation below the warning.
+func TestStatExplainWorkingTreeStaleness(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statwtexplain\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg_test.go"), "package pkg\n\nimport \"testing\"\n\nfunc BenchmarkWT(b *testing.B) {}\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	// The recorded toolchain "go-test" cannot be current: the staleness
+	// warning fires and the explanation must lay the values side by side.
+	writeStatRecording(t, st, "pkg", "BenchmarkWT", 100)
+	commitAll(t, repo, "base")
+
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), explain: true}
+	if err := runStat(&out, &errOut, sc, nil); err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	got := errOut.String()
+	if !strings.Contains(got, "comparison may not reflect HEAD") {
+		t.Fatalf("no working-tree staleness warning:\n%s", got)
+	}
+	if !strings.Contains(got, "recorded") || !strings.Contains(got, "current") || !strings.Contains(got, "toolchain") || !strings.Contains(got, "NO") {
+		t.Fatalf("no recorded-vs-current explanation under the warning:\n%s", got)
 	}
 }

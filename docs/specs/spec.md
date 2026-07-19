@@ -800,12 +800,19 @@ Four commands; names follow the `go test` / benchstat idiom.
     `//gofresh:external` (§7.3, §7.5).
 - **`pew status [packages]`** — per-benchmark verdict: `valid` / `stale ⟨reason⟩` /
   `unverifiable ⟨reason⟩` / `unrecorded`. `--stale` filters to non-valid (scriptable; feeds
-  `run --stale`). Supports `--bench-dir <dir>` and `--label <name>` (§6).
+  `run --stale`). **`--explain`** details each non-valid verdict: every guard's recorded vs
+  current value, the closure hash, the runtime-input digest, and the manifest's watched
+  identities — environment inputs disclosed as names with digest equality only, never values
+  (§7.8); a digest mismatch names what was watched, while attributing *which* watched input
+  moved awaits per-input digests in the manifest (a gofresh encoding decision). Supports
+  `--bench-dir <dir>` and `--label <name>` (§6).
 - **`pew stat [ref | refA refB] [flags]`** — compare; the three baselines (§10) fall out of arg
   count (none → auto, one → pinned, two → A/B). `--fail-on-regression`, `--threshold` (3%),
-  `--alpha` (0.05), metric selection (§10.1). `--explain` is reserved for a detailed guard/input
-  explanation view over `pew-closure` and `pew-runtime*`. Supports `--bench-dir <dir>` and
-  `--label <name>`.
+  `--alpha` (0.05), metric selection (§10.1). **`--explain`** lays out the values behind a
+  one-word skip or warning: a comparison key whose two sides disagree on a guard prints both
+  sides' recorded guard values side by side naming the moving guard, and a working-tree recording
+  warned non-valid prints the recorded-vs-current explanation below. Supports `--bench-dir <dir>`
+  and `--label <name>`.
 - **`pew gc`** — remove stored results for benchmarks no longer present in the code. Supports
   `--bench-dir <dir>`. A pew recording that fails the current format (§5) is never silently
   skipped: when its benchmark is also gone from the source it is removed like any other orphan (an

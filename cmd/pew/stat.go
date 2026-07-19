@@ -28,6 +28,7 @@ type statConfig struct {
 	label            string
 	opts             compare.Options
 	failOnRegression bool
+	explain          bool
 }
 
 func newStatCmd() *cobra.Command {
@@ -67,6 +68,7 @@ refs and working-tree store.`,
 	f.Float64Var(&sc.opts.ThresholdPct, "threshold", sc.opts.ThresholdPct, "regression magnitude floor, in percent")
 	f.Float64Var(&sc.opts.Confidence, "confidence", sc.opts.Confidence, "confidence level for summary intervals")
 	f.BoolVar(&sc.failOnRegression, "fail-on-regression", false, "exit non-zero if a gated metric regresses")
+	f.BoolVar(&sc.explain, "explain", false, "explain skipped comparisons and stale working-tree recordings: guard/input values side by side (spec §12)")
 	f.StringVar(&gate, "gate", "sec/op", "comma-separated units whose regression fails the build (sec/op, B/op, allocs/op)")
 	return cmd
 }
@@ -376,7 +378,22 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 							msg += " (" + v.Reason + ")"
 						}
 						fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is %s; comparison may not reflect HEAD — re-run `pew run`\n", cur.importPath, key.bench, msg)
+						if sc.explain {
+							explainRecordAgainstCurrent(errw, engine, cur.moduleDir, cur.importPath, key.bench, fp, os.Environ())
+						}
 					}
+				}
+			}
+			if sc.explain && baseOK && newOK {
+				a, aOK := recordedGuards(baseRecs)
+				b, bOK := recordedGuards(newRecs)
+				if aOK && bOK && a != b {
+					newLabel := bl.newRef
+					if newLabel == "" {
+						newLabel = "working-tree"
+					}
+					fmt.Fprintf(errw, "pew: explain: %s.%s guard mismatch between %s and %s:\n", key.pkgRel, key.bench, bl.baseRef, newLabel)
+					explainSides(errw, "base", "new", baseRecs, newRecs)
 				}
 			}
 			baseAll = append(baseAll, baseRecs...)

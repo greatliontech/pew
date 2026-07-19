@@ -608,7 +608,7 @@ func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {
 func nonValid(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, label string, benches []string) ([]string, error) {
 	var need []string
 	for _, b := range benches {
-		v, _, err := checkOne(st, e, pkgPath, pkgRel, moduleDir, b, label)
+		v, _, _, err := checkOne(st, e, pkgPath, pkgRel, moduleDir, b, label)
 		if err != nil {
 			return nil, err
 		}

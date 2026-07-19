@@ -58,7 +58,7 @@ func TestStatusPackageUsesLabel(t *testing.T) {
 	p.Module.Dir = "."
 
 	var out strings.Builder
-	if err := statusPackage(&out, e, st.Root, "x", false, p); err != nil {
+	if err := statusPackage(&out, e, st.Root, "x", false, false, p); err != nil {
 		t.Fatalf("statusPackage labeled: %v", err)
 	}
 	if got := out.String(); !strings.Contains(got, "valid") || !strings.Contains(got, bench) {
@@ -66,7 +66,7 @@ func TestStatusPackageUsesLabel(t *testing.T) {
 	}
 
 	out.Reset()
-	if err := statusPackage(&out, e, st.Root, "", false, p); err != nil {
+	if err := statusPackage(&out, e, st.Root, "", false, false, p); err != nil {
 		t.Fatalf("statusPackage unlabeled: %v", err)
 	}
 	if got := out.String(); !strings.Contains(got, "unrecorded") {
@@ -137,7 +137,7 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 
 	write("")
 	var out strings.Builder
-	if err := statusPackage(&out, e, st.Root, "", false, p); err != nil {
+	if err := statusPackage(&out, e, st.Root, "", false, false, p); err != nil {
 		t.Fatalf("statusPackage: %v", err)
 	}
 	if got := out.String(); !strings.Contains(got, "unverifiable") || !strings.Contains(got, "external directive") {
@@ -148,10 +148,77 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 	// author's in-code external declaration.
 	write("true")
 	out.Reset()
-	if err := statusPackage(&out, e, st.Root, "", false, p); err != nil {
+	if err := statusPackage(&out, e, st.Root, "", false, false, p); err != nil {
 		t.Fatalf("statusPackage assume-pure: %v", err)
 	}
 	if got := out.String(); !strings.Contains(got, "unverifiable") || !strings.Contains(got, "external directive") {
 		t.Fatalf("assume-pure status = %q, want unverifiable (external directive)", got)
+	}
+}
+
+// TestStatusExplainNamesTheMovingGuard pins spec §12's --explain view: a
+// stale verdict's one-word reason is accompanied by the recorded-vs-current
+// table naming the moving guard, and the runtime manifest's watched
+// identities are disclosed as identities only.
+func TestStatusExplainNamesTheMovingGuard(t *testing.T) {
+	e, _, err := newEngineAt(".", ".", false, os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
+	const bench = "BenchmarkDecode"
+	fp, err := e.CaptureFor(t.Context(), gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt, err := runtimeinput.Incomplete(".", "package-test-binary:explain", "testlog lacks operation outcome evidence")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(t.TempDir())
+	cfg := []benchfmt.Config{
+		{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
+		{Key: "commit", Value: []byte("c1"), File: true},
+		{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
+		{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
+		// A buildconfig that provably is not current: the verdict must be
+		// stale (buildconfig) and the explanation must show the mismatch row.
+		{Key: "buildconfig", Value: []byte("recorded-elsewhere"), File: true},
+		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
+		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
+		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
+		{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
+		{Key: "dirty", Value: []byte("false"), File: true},
+		{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
+	}
+	recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
+	if err := st.Write("internal/fixtures/bench", bench, "", recs); err != nil {
+		t.Fatal(err)
+	}
+	p := pkgMeta{ImportPath: pkg, Dir: "../../internal/fixtures/bench", TestGoFiles: []string{"bench_test.go"}}
+	p.Module.Path = "github.com/greatliontech/pew"
+	p.Module.Dir = "."
+
+	var out strings.Builder
+	if err := statusPackage(&out, e, st.Root, "", false, true, p); err != nil {
+		t.Fatalf("statusPackage explain: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "stale") {
+		t.Fatalf("status = %q, want a stale verdict", got)
+	}
+	if !strings.Contains(got, "buildconfig") || !strings.Contains(got, "recorded-elsewhere") || !strings.Contains(got, "NO") {
+		t.Fatalf("explanation does not name the moving guard:\n%s", got)
+	}
+	if !strings.Contains(got, "toolchain") || strings.Count(got, "yes") < 2 {
+		t.Fatalf("explanation missing holding-guard rows:\n%s", got)
+	}
+	if !strings.Contains(got, "unverifiable observations") {
+		t.Fatalf("watched-input disclosure missing:\n%s", got)
+	}
+	for _, row := range []string{"closure", "runtime"} {
+		if !strings.Contains(got, row) {
+			t.Fatalf("explanation missing the %s row:\n%s", row, got)
+		}
 	}
 }

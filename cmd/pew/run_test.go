@@ -250,7 +250,7 @@ func TestRunRecordsIncompleteRuntimeEvidence(t *testing.T) {
 				t.Errorf("%s recorded governor %q, want observed %q", bench, got, wantGovernor)
 			}
 		}
-		v, reason, err := checkOne(st, e, "example.com/incompleterun", "", dir, bench, "")
+		v, reason, _, err := checkOne(st, e, "example.com/incompleterun", "", dir, bench, "")
 		if err != nil {
 			t.Fatal(err)
 		}
