@@ -1,6 +1,7 @@
 package run
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -371,13 +372,14 @@ func TestRecordingConfigKeySetIsClosed(t *testing.T) {
 	}
 	extra := ProvenanceConfig("c1", false, guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"}, Conditions{})
 	extra = append(extra, RuntimeConfig("rt", "manifest")...)
-	extra = append(extra, ClosureConfig("cl"), GofreshPurityConfig("d"), PureConfig("true"))
+	extra = append(extra, ClosureConfig("cl"), TestVariantConfig("tv"), TestVariantLedgerConfig("lg"), GofreshPurityConfig("d"), PureConfig("true"))
 	closed := map[string]bool{
 		"goos": true, "goarch": true, "pkg": true, "cpu": true,
 		"pew-format": true, "commit": true, "toolchain": true, "machine": true,
 		"buildconfig": true, "runtimeconfig": true, "dirty": true,
 		"pew-runconditions": true, "pew-runtime": true, "pew-runtime-inputs": true,
-		"pew-closure": true, "pew-purity": true, "pure": true,
+		"pew-closure": true, "pew-test-variants": true, "pew-test-variant-ledger": true,
+		"pew-purity": true, "pure": true,
 	}
 	for _, group := range Demux(results, extra) {
 		for _, r := range group {
@@ -589,6 +591,8 @@ func TestParseRejectsReservedFormatConfig(t *testing.T) {
 		"format-delete": "pew-format:",
 		"purity":        "pure: true",
 		"guard":         "commit: forged",
+		"test-variants": "pew-test-variants: forged",
+		"ledger":        "pew-test-variant-ledger: forged",
 		"unknown-pew":   "pew-future: forged",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -597,5 +601,34 @@ func TestParseRejectsReservedFormatConfig(t *testing.T) {
 				t.Fatalf("reserved configuration %q accepted", line)
 			}
 		})
+	}
+}
+
+// TestLedgerCodecRefusals pins the recorded-ledger parser's refusal legs:
+// the diff base must mean exactly what this version encodes, so unknown
+// fields, trailing data, and undecodable input all refuse — the failure
+// direction is a spurious re-run, never a misread diff base.
+func TestLedgerCodecRefusals(t *testing.T) {
+	ledger := Ledger{
+		Declarations: []LedgerDeclaration{{File: "a_test.go", Kind: "func", Name: "TestA", Hash: "00112233445566778899aabbccddeeff"}},
+		FileHeaders:  []LedgerFileHeader{{File: "a_test.go", Hash: "ffeeddccbbaa99887766554433221100"}},
+	}
+	encoded, err := EncodeLedger(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeLedger(encoded)
+	if err != nil || len(decoded.Declarations) != 1 || decoded.Declarations[0] != ledger.Declarations[0] ||
+		len(decoded.FileHeaders) != 1 || decoded.FileHeaders[0] != ledger.FileHeaders[0] {
+		t.Fatalf("round trip = %+v, %v", decoded, err)
+	}
+	if _, err := DecodeLedger("!!!not-base64!!!"); err == nil {
+		t.Fatal("undecodable input accepted")
+	}
+	if _, err := DecodeLedger(base64.RawURLEncoding.EncodeToString([]byte(`{"declarations":[],"future":1}`))); err == nil {
+		t.Fatal("unknown field accepted")
+	}
+	if _, err := DecodeLedger(base64.RawURLEncoding.EncodeToString([]byte(`{}{}`))); err == nil {
+		t.Fatal("trailing data accepted")
 	}
 }

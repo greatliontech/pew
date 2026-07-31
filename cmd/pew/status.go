@@ -150,7 +150,7 @@ func statusPackage(w io.Writer, e *gofresh.Engine, benchDir, label string, stale
 	st := store.New(dir)
 	pkgRel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, p.Module.Path), "/")
 	for _, b := range benches {
-		v, reason, fp, err := checkOne(st, e, p.ImportPath, pkgRel, p.Module.Dir, b, label)
+		v, reason, fp, _, err := checkOne(st, e, p.ImportPath, pkgRel, p.Module.Dir, b, label)
 		if err != nil {
 			return err
 		}
@@ -185,40 +185,126 @@ func statusPackage(w io.Writer, e *gofresh.Engine, benchDir, label string, stale
 	return nil
 }
 
-// checkOne is the per-benchmark validity verdict shared by status, run --stale,
-// and stat's working-tree staleness warning. The engine recomputes the current
+// checkOne is the per-benchmark validity verdict for status and run --stale
+// (stat's working-tree staleness warning shares verdictForRecs below over its
+// already-loaded rows). The engine recomputes the current
 // closure and guards (the SSA load is the dominant cost; an unrecorded benchmark
 // needs no analysis, so the store is read first).
-func checkOne(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, bench, label string) (verdict, string, gofresh.Fingerprint, error) {
+// The fourth result is the encoded current compartment ledger, non-empty
+// exactly when the verdict was granted through the inert-growth rule
+// (spec §7.9): the returned fingerprint then carries the refreshed
+// compartment pin, and the run path rewrites the recording so later
+// verdicts read plainly valid.
+func checkOne(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, bench, label string) (verdict, string, gofresh.Fingerprint, string, error) {
 	recs, err := st.Read(pkgRel, bench, label)
 	switch {
 	case errors.Is(err, store.ErrNotRecorded):
-		return verdictUnrecorded, "", gofresh.Fingerprint{}, nil
+		return verdictUnrecorded, "", gofresh.Fingerprint{}, "", nil
 	case err != nil:
-		return "", "", gofresh.Fingerprint{}, err
+		return "", "", gofresh.Fingerprint{}, "", err
 	}
+	return verdictForRecs(e, pkgPath, moduleDir, bench, recs)
+}
+
+// verdictForRecs is the verdict core over already-loaded recording rows:
+// every verdict surface — status and run --stale through checkOne, stat's
+// working-tree staleness warning directly — shares it, the inert-growth
+// rule included (spec §7.9).
+func verdictForRecs(e *gofresh.Engine, pkgPath, moduleDir, bench string, recs []*benchfmt.Result) (verdict, string, gofresh.Fingerprint, string, error) {
 	if !store.IsRecordingShape(recs) {
-		return verdictStale, "format", gofresh.Fingerprint{}, nil
+		return verdictStale, "format", gofresh.Fingerprint{}, "", nil
 	}
-	fp, pure, ok := fingerprintFromConfig(recs[0].Config)
+	fp, pure, recordedLedger, ok := fingerprintFromConfig(recs[0].Config)
 	if !ok {
-		return verdictStale, "format", gofresh.Fingerprint{}, nil
+		return verdictStale, "format", gofresh.Fingerprint{}, "", nil
 	}
 	v, err := e.Check(context.Background(), fp, gofresh.Subject{Package: pkgPath, Symbol: bench}, moduleDir)
 	if err != nil {
-		return "", "", gofresh.Fingerprint{}, err
+		return "", "", gofresh.Fingerprint{}, "", err
+	}
+	pendingLedger := ""
+	var refreshedFP gofresh.Fingerprint
+	if v.Status == gofresh.Stale && v.Reason == "test variants" {
+		if refreshed, encoded, rv, ok := inertGrownRecheck(e, moduleDir, pkgPath, bench, recordedLedger, fp); ok {
+			// The refreshed verdict takes the ordinary verdict's place and
+			// rides the same purity fold below: a record that would read
+			// valid but for the proven-inert compartment movement serves,
+			// while a pin that hid behind the compartment reason surfaces
+			// under its own attribution (spec §7.9).
+			v, refreshedFP, pendingLedger = rv, refreshed, encoded
+		}
 	}
 	v = applyPurity(v, pure)
+	grownLedger := ""
+	if v.Status == gofresh.Valid && pendingLedger != "" {
+		// The serve succeeded: the refreshed fingerprint is the one the
+		// verdict granted over, and the run path records it. A refused
+		// re-check keeps returning the recorded fingerprint, so an
+		// explanation lays the recording's own values against the current
+		// tree — the moved pin and the moved compartment both surface.
+		grownLedger = pendingLedger
+		fp = refreshedFP
+	}
 	// The fingerprint the verdict was decided over rides back so an
 	// explanation view describes the same recording — never a re-read that a
 	// concurrent run could have replaced.
-	return verdict(v.Status), v.Reason, fp, nil
+	return verdict(v.Status), v.Reason, fp, grownLedger, nil
+}
+
+// inertGrownRecheck applies the inert-growth verdict rule (spec §7.9) to a
+// recording refused as exactly stale "test variants". That verdict
+// certifies the benchmark's own source closure unchanged and nothing more —
+// gofresh orders the compartment comparison after the core and before the
+// environment tiers, so a moved guard or runtime input can hide behind that
+// reason — so the rule completes the proof itself: the recorded compartment
+// ledger must diff inert against the current view's (the only movement is
+// added declarations no unchanged declaration can observe), and the
+// recorded fingerprint refreshed to the current compartment hash re-checks,
+// its verdict replacing the ordinary one — every remaining pin enforced
+// exactly as an ordinary verdict, the purity fold included downstream. Any
+// fault refuses and the original verdict stands.
+func inertGrownRecheck(e *gofresh.Engine, moduleDir, pkgPath, bench, recordedLedger string, fp gofresh.Fingerprint) (gofresh.Fingerprint, string, gofresh.Verdict, bool) {
+	if recordedLedger == "" {
+		return fp, "", gofresh.Verdict{}, false
+	}
+	recorded, err := runpkg.DecodeLedger(recordedLedger)
+	if err != nil {
+		return fp, "", gofresh.Verdict{}, false
+	}
+	ctx := context.Background()
+	subject := gofresh.Subject{Package: pkgPath, Symbol: bench}
+	view, err := e.NewViewFor(ctx, []gofresh.Subject{subject}, moduleDir, gofresh.Measurement)
+	if err != nil {
+		return fp, "", gofresh.Verdict{}, false
+	}
+	current, err := view.TestVariantLedger(subject)
+	if err != nil {
+		return fp, "", gofresh.Verdict{}, false
+	}
+	if !gofresh.DiffTestVariantLedgers(recorded.ToGofresh(), current).Inert() {
+		return fp, "", gofresh.Verdict{}, false
+	}
+	captured, err := view.Capture(ctx, subject)
+	if err != nil || captured.TestVariantClosure == "" {
+		return fp, "", gofresh.Verdict{}, false
+	}
+	refreshed := fp
+	refreshed.TestVariantClosure = captured.TestVariantClosure
+	v, err := view.Check(ctx, refreshed, subject)
+	if err != nil {
+		return fp, "", gofresh.Verdict{}, false
+	}
+	encoded, err := runpkg.EncodeLedger(runpkg.LedgerFromGofresh(current))
+	if err != nil {
+		return fp, "", gofresh.Verdict{}, false
+	}
+	return refreshed, encoded, v, true
 }
 
 // fingerprintFromConfig reads the recorded fingerprint out of a recording's config
 // lines (spec §5: pew owns the serialization, gofresh owns the semantics), plus the
 // recorded per-benchmark purity flag ("" when none).
-func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, bool) {
+func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, string, bool) {
 	m := make(map[string]string, len(cfg))
 	formatCount := 0
 	for _, c := range cfg {
@@ -228,10 +314,11 @@ func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, 
 		}
 	}
 	if m["pew-format-invalid"] == "true" || formatCount != 1 || m["pew-format"] != runpkg.RecordingFormat {
-		return gofresh.Fingerprint{}, "", false
+		return gofresh.Fingerprint{}, "", "", false
 	}
 	return gofresh.Fingerprint{
-		MaximalClosure: m["pew-closure"],
+		MaximalClosure:     m["pew-closure"],
+		TestVariantClosure: m["pew-test-variants"],
 		Guards: guard.Guards{
 			Toolchain:     m["toolchain"],
 			BuildConfig:   m["buildconfig"],
@@ -242,7 +329,7 @@ func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, 
 		RuntimeInputs:   m["pew-runtime-inputs"],
 		RuntimeDigest:   m["pew-runtime"],
 		ResultKind:      gofresh.Measurement,
-	}, m["pure"], true
+	}, m["pure"], m["pew-test-variant-ledger"], true
 }
 
 // applyPurity folds the recorded per-benchmark purity flag into the engine verdict

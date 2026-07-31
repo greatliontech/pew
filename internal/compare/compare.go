@@ -43,7 +43,7 @@ import (
 // digest, and dirty flag) still line up for comparison (§10.1). Variant guards
 // are ignored here too so they do not fragment grouping, but are enforced
 // separately by compareGuards.
-const pewIgnore = "pew-format commit toolchain machine buildconfig runtimeconfig dirty pew-runconditions pew-closure pew-runtime pew-runtime-inputs pew-purity pure"
+const pewIgnore = "pew-format commit toolchain machine buildconfig runtimeconfig dirty pew-runconditions pew-closure pew-test-variants pew-test-variant-ledger pew-runtime pew-runtime-inputs pew-purity pure"
 
 var compareGuards = []string{"machine", "toolchain", "buildconfig", "runtimeconfig"}
 

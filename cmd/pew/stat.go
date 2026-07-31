@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -346,8 +345,6 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 					// Best-effort: a check failure warns but never blocks the
 					// comparison. The per-side stale-format gate above already
 					// guarantees a decodable fingerprint on this side.
-					fp, pure, _ := fingerprintFromConfig(newRecs[0].Config)
-					subj := gofresh.Subject{Package: cur.importPath, Symbol: key.bench}
 					goflags, ok := goflagsByModule[cur.moduleDir]
 					if !ok {
 						goflags, err = runpkg.EffectiveGoflags(cur.moduleDir, os.Environ())
@@ -375,12 +372,16 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 						}
 						engines[ek] = engine
 					}
-					if v, e := engine.Check(context.Background(), fp, subj, cur.moduleDir); e != nil {
+					// The shared verdict core applies the inert-growth rule
+					// exactly as status and run --stale do (spec §7.9); stat
+					// stays read-only, so the returned ledger is dropped and
+					// no recording is rewritten here.
+					if v, reason, fp, _, e := verdictForRecs(engine, cur.importPath, cur.moduleDir, key.bench, newRecs); e != nil {
 						fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, e)
-					} else if v = applyPurity(v, pure); v.Status != gofresh.Valid {
-						msg := string(v.Status)
-						if v.Reason != "" {
-							msg += " (" + v.Reason + ")"
+					} else if v != verdictValid {
+						msg := string(v)
+						if reason != "" {
+							msg += " (" + reason + ")"
 						}
 						fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is %s; comparison may not reflect HEAD — re-run `pew run`\n", cur.importPath, key.bench, msg)
 						if sc.explain {
@@ -715,7 +716,7 @@ func recordingCurrent(recs []*benchfmt.Result) bool {
 	if !store.IsRecordingShape(recs) {
 		return false
 	}
-	_, _, ok := fingerprintFromConfig(recs[0].Config)
+	_, _, _, ok := fingerprintFromConfig(recs[0].Config)
 	return ok
 }
 

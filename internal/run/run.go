@@ -5,6 +5,9 @@ package run
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 
+	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
 	"golang.org/x/perf/benchfmt"
 )
@@ -25,8 +29,12 @@ type Options struct {
 	Bench     string // -bench pattern (default ".")
 }
 
-// RecordingFormat is the current in-band Pew recording format.
-const RecordingFormat = "1"
+// RecordingFormat is the current in-band Pew recording format. Format 2
+// adds the test-variant compartment pin and its declaration ledger
+// (pew-test-variants, pew-test-variant-ledger); format-1 recordings read
+// stale (format) and regenerate, exactly as spec §5 prescribes for any
+// earlier shape.
+const RecordingFormat = "2"
 
 // TestArgs builds the `go test` argument list for benchmarking pkg.
 func TestArgs(pkg string, o Options) []string {
@@ -463,6 +471,19 @@ func PureConfig(v string) benchfmt.Config {
 	return benchfmt.Config{Key: "pure", Value: []byte(v), File: true}
 }
 
+// TestVariantConfig is the recorded test-variant compartment hash line:
+// like the closure hash, derived rather than provenance, and the pin the
+// inert-growth verdict rule refreshes (§7.9).
+func TestVariantConfig(hash string) benchfmt.Config {
+	return benchfmt.Config{Key: "pew-test-variants", Value: []byte(hash), File: true}
+}
+
+// TestVariantLedgerConfig is the recorded compartment declaration ledger:
+// the inert-growth rule's diff base (§7.9), encoded by EncodeLedger.
+func TestVariantLedgerConfig(encoded string) benchfmt.Config {
+	return benchfmt.Config{Key: "pew-test-variant-ledger", Value: []byte(encoded), File: true}
+}
+
 // RuntimeConfig records the runtime-input guard and its manifest (§7.8).
 func RuntimeConfig(digest, manifest string) []benchfmt.Config {
 	return []benchfmt.Config{
@@ -482,4 +503,89 @@ func Demux(results []*benchfmt.Result, extra []benchfmt.Config) map[string][]*be
 		groups[name] = append(groups[name], rc)
 	}
 	return groups
+}
+
+// LedgerDeclaration is one persisted test-variant declaration entry: pew
+// owns this serialization exactly as it owns the fingerprint config lines
+// (spec §5); gofresh owns the semantics.
+type LedgerDeclaration struct {
+	File     string `json:"file"`
+	Kind     string `json:"kind"`
+	Name     string `json:"name"`
+	Receiver string `json:"receiver,omitempty"`
+	Hash     string `json:"hash"`
+}
+
+// LedgerFileHeader is one compartment file's persisted header identity.
+type LedgerFileHeader struct {
+	File     string `json:"file"`
+	Hash     string `json:"hash"`
+	Embedded bool   `json:"embedded,omitempty"`
+}
+
+// Ledger is the recorded package's test-variant declaration ledger — the
+// inert-growth rule's diff base (§7.9).
+type Ledger struct {
+	Declarations []LedgerDeclaration `json:"declarations,omitempty"`
+	FileHeaders  []LedgerFileHeader  `json:"fileHeaders,omitempty"`
+}
+
+// LedgerFromGofresh converts gofresh's ledger to the recorded form.
+func LedgerFromGofresh(ledger gofresh.TestVariantLedger) Ledger {
+	out := Ledger{
+		Declarations: make([]LedgerDeclaration, 0, len(ledger.Declarations)),
+		FileHeaders:  make([]LedgerFileHeader, 0, len(ledger.FileHeaders)),
+	}
+	for _, declaration := range ledger.Declarations {
+		out.Declarations = append(out.Declarations, LedgerDeclaration(declaration))
+	}
+	for _, header := range ledger.FileHeaders {
+		out.FileHeaders = append(out.FileHeaders, LedgerFileHeader(header))
+	}
+	return out
+}
+
+// ToGofresh converts the recorded form back to gofresh's ledger type.
+func (l Ledger) ToGofresh() gofresh.TestVariantLedger {
+	out := gofresh.TestVariantLedger{
+		Declarations: make([]gofresh.TestVariantDeclaration, 0, len(l.Declarations)),
+		FileHeaders:  make([]gofresh.TestVariantFileHeader, 0, len(l.FileHeaders)),
+	}
+	for _, declaration := range l.Declarations {
+		out.Declarations = append(out.Declarations, gofresh.TestVariantDeclaration(declaration))
+	}
+	for _, header := range l.FileHeaders {
+		out.FileHeaders = append(out.FileHeaders, gofresh.TestVariantFileHeader(header))
+	}
+	return out
+}
+
+// EncodeLedger serializes a ledger for the pew-test-variant-ledger config
+// line: compact JSON wrapped in URL-safe base64, so the value stays a
+// single space-free token whatever the declaration names contain.
+func EncodeLedger(l Ledger) (string, error) {
+	data, err := json.Marshal(l)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+// DecodeLedger parses a recorded ledger line. Unknown fields refuse: the
+// recorded diff base must mean exactly what this version encodes.
+func DecodeLedger(encoded string) (Ledger, error) {
+	data, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return Ledger{}, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var out Ledger
+	if err := dec.Decode(&out); err != nil {
+		return Ledger{}, err
+	}
+	if dec.More() {
+		return Ledger{}, errors.New("run: trailing data after ledger document")
+	}
+	return out, nil
 }

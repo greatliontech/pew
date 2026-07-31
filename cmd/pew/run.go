@@ -224,7 +224,7 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 
 	opts := rc.opts
 	if rc.staleOnly {
-		need, err := nonValid(st, e, p.ImportPath, pkgRel, p.Module.Dir, rc.label, runBenches)
+		need, err := nonValid(st, e, gc, baseline.Root(), p.ImportPath, pkgRel, p.Module.Dir, rc.label, runBenches)
 		if err != nil {
 			return err
 		}
@@ -258,11 +258,22 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 	}
 	fingerprints := make(map[string]gofresh.Fingerprint, len(subjects))
 	for _, subject := range subjects {
-		fp, err := view.Capture(subject)
+		fp, err := view.Capture(ctx, subject)
 		if err != nil {
 			return err
 		}
 		fingerprints[subject.Symbol] = fp
+	}
+	// One compartment ledger covers the whole package: it derives from the
+	// same view snapshot every fingerprint's compartment hash pinned, and
+	// the inert-growth rule diffs it at verdict time (spec §7.9).
+	packageLedger, err := view.TestVariantLedger(subjects[0])
+	if err != nil {
+		return err
+	}
+	encodedLedger, err := run.EncodeLedger(run.LedgerFromGofresh(packageLedger))
+	if err != nil {
+		return err
 	}
 
 	// Build the test binary before the throttle bracket opens: compilation is
@@ -375,6 +386,8 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 			recs = withConfig(recs, cfg)
 		}
 		recs = withConfig(recs, run.ClosureConfig(fp.MaximalClosure))
+		recs = withConfig(recs, run.TestVariantConfig(fp.TestVariantClosure))
+		recs = withConfig(recs, run.TestVariantLedgerConfig(encodedLedger))
 		for _, cfg := range run.RuntimeConfig(runtimeState.Digest, runtimeState.Manifest) {
 			recs = withConfig(recs, cfg)
 		}
@@ -605,16 +618,54 @@ func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {
 	return recs
 }
 
-func nonValid(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, label string, benches []string) ([]string, error) {
+func nonValid(st *store.Store, e *gofresh.Engine, gc *gitStateCache, repoRoot, pkgPath, pkgRel, moduleDir, label string, benches []string) ([]string, error) {
 	var need []string
 	for _, b := range benches {
-		v, _, _, err := checkOne(st, e, pkgPath, pkgRel, moduleDir, b, label)
+		v, _, fp, grownLedger, err := checkOne(st, e, pkgPath, pkgRel, moduleDir, b, label)
 		if err != nil {
 			return nil, err
+		}
+		if v == verdictValid && grownLedger != "" {
+			// The verdict rode the inert-growth rule (spec §7.9): rewrite
+			// the recording under the refreshed compartment pin and current
+			// ledger, so later verdicts read plainly valid instead of
+			// re-proving the same delta. The run path is the one writer;
+			// read-only surfaces never touch the store. The rewrite
+			// registers with the repository-state bracket exactly as
+			// runPackage's own recording writes do — an unregistered write
+			// reads as the tree moving under the run and aborts it.
+			if err := refreshRecording(st, pkgRel, b, label, fp.TestVariantClosure, grownLedger); err != nil {
+				return nil, err
+			}
+			path, err := st.Path(pkgRel, b, label)
+			if err != nil {
+				return nil, err
+			}
+			gc.recordWrites(repoRoot, []string{path})
 		}
 		if v != verdictValid {
 			need = append(need, b)
 		}
 	}
 	return need, nil
+}
+
+// refreshRecording rewrites a recording's compartment pin and ledger in
+// place, leaving every measured row and every other config line untouched.
+func refreshRecording(st *store.Store, pkgRel, bench, label, pin, ledger string) error {
+	recs, err := st.Read(pkgRel, bench, label)
+	if err != nil {
+		return err
+	}
+	for _, r := range recs {
+		for i := range r.Config {
+			switch r.Config[i].Key {
+			case "pew-test-variants":
+				r.Config[i].Value = []byte(pin)
+			case "pew-test-variant-ledger":
+				r.Config[i].Value = []byte(ledger)
+			}
+		}
+	}
+	return st.Write(pkgRel, bench, label, recs)
 }

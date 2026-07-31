@@ -232,7 +232,7 @@ func TestRunRecordsIncompleteRuntimeEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fp, _, ok := fingerprintFromConfig(recs[0].Config)
+		fp, _, _, ok := fingerprintFromConfig(recs[0].Config)
 		if !ok {
 			t.Fatalf("%s recording lacks current format", bench)
 		}
@@ -250,7 +250,7 @@ func TestRunRecordsIncompleteRuntimeEvidence(t *testing.T) {
 				t.Errorf("%s recorded governor %q, want observed %q", bench, got, wantGovernor)
 			}
 		}
-		v, reason, _, err := checkOne(st, e, "example.com/incompleterun", "", dir, bench, "")
+		v, reason, _, _, err := checkOne(st, e, "example.com/incompleterun", "", dir, bench, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -950,7 +950,8 @@ func TestRunPackageDropsForeignStreamConfig(t *testing.T) {
 		"pew-format": true, "commit": true, "toolchain": true, "machine": true,
 		"buildconfig": true, "runtimeconfig": true, "dirty": true,
 		"pew-runconditions": true, "pew-runtime": true, "pew-runtime-inputs": true,
-		"pew-closure": true, "pew-purity": true, "pure": true,
+		"pew-closure": true, "pew-test-variants": true, "pew-test-variant-ledger": true,
+		"pew-purity": true, "pure": true,
 	}
 	for _, rec := range recs {
 		for _, cfg := range rec.Config {

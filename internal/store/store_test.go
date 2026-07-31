@@ -16,7 +16,7 @@ const sample = `goos: linux
 goarch: amd64
 pkg: example.com/x/internal/foo
 cpu: TestCPU
-pew-format: 1
+pew-format: 2
 commit: abc123def
 toolchain: go1.26.4
 machine: m-deadbeef
@@ -25,6 +25,8 @@ runtimeconfig: default
 dirty: false
 pew-runconditions: governor=performance turbo=off load1=0.03 throttled=false battery=false
 pew-closure: 1234abcd5678
+pew-test-variants: 9abc0def1234
+pew-test-variant-ledger: dGVzdC1sZWRnZXI
 pew-runtime: abcdef1234567890
 pew-runtime-inputs: eyJ2IjoxfQ
 BenchmarkRun-8 1000000 1234 ns/op 456 B/op 7 allocs/op
@@ -35,7 +37,7 @@ BenchmarkRun/case=big-8 200000 6100 ns/op 2048 B/op 9 allocs/op
 func parse(t *testing.T, raw string) []*benchfmt.Result {
 	t.Helper()
 	if !strings.Contains(raw, "pew-format:") {
-		raw = "pew-format: 1\n" + raw
+		raw = "pew-format: 2\n" + raw
 	}
 	r := benchfmt.NewReader(strings.NewReader(raw), "test")
 	var out []*benchfmt.Result
@@ -77,14 +79,14 @@ func TestIsRecordingRequiresCurrentFormat(t *testing.T) {
 	unknown := recs[0].Clone()
 	for i := range unknown.Config {
 		if unknown.Config[i].Key == "pew-format" {
-			unknown.Config[i].Value = []byte("2")
+			unknown.Config[i].Value = []byte("1")
 		}
 	}
 	if IsRecording([]*benchfmt.Result{unknown}) {
-		t.Fatal("unknown format accepted")
+		t.Fatal("non-current format accepted")
 	}
 	duplicate := recs[0].Clone()
-	duplicate.Config = append(duplicate.Config, benchfmt.Config{Key: "pew-format", Value: []byte("1"), File: true})
+	duplicate.Config = append(duplicate.Config, benchfmt.Config{Key: "pew-format", Value: []byte("2"), File: true})
 	if IsRecording([]*benchfmt.Result{duplicate}) {
 		t.Fatal("duplicate format accepted")
 	}
@@ -93,7 +95,7 @@ func TestIsRecordingRequiresCurrentFormat(t *testing.T) {
 // TestRawFormatRejectsDuplicateRecordingKeys: §5's duplicate rejection covers
 // every recording key, not only the format discriminator.
 func TestRawFormatRejectsDuplicateRecordingKeys(t *testing.T) {
-	base := "toolchain: go1\npew-format: 1\nBenchmarkRun-8 1000000 1234 ns/op\n"
+	base := "toolchain: go1\npew-format: 2\nBenchmarkRun-8 1000000 1234 ns/op\n"
 	if !rawFormatValid([]byte(base)) {
 		t.Fatal("well-formed recording rejected")
 	}
@@ -106,20 +108,22 @@ func TestRawFormatRejectsDuplicateRecordingKeys(t *testing.T) {
 }
 
 // TestIsRecordingShapeRequiresRunConditions: the run-conditions line is a
-// mandatory provenance field (spec §5, §9, INV-4) — a format-1 recording without
-// it is stale (format), like any other missing mandatory field.
+// mandatory provenance field (spec §5, §9, INV-4) — a recording without it is
+// stale (format), like any other missing mandatory field.
 func TestIsRecordingShapeRequiresRunConditions(t *testing.T) {
 	recs := parse(t, sample)
 	if !IsRecordingShape(recs) {
 		t.Fatal("complete recording rejected")
 	}
-	without := recs[0].Clone()
-	without.Config = slices.DeleteFunc(without.Config, func(c benchfmt.Config) bool { return c.Key == "pew-runconditions" })
-	if IsRecordingShape([]*benchfmt.Result{without}) {
-		t.Fatal("recording without pew-runconditions accepted")
-	}
-	if IsRecording([]*benchfmt.Result{without}) {
-		t.Fatal("IsRecording accepted a recording without pew-runconditions")
+	for _, key := range []string{"pew-runconditions", "pew-test-variants", "pew-test-variant-ledger"} {
+		without := recs[0].Clone()
+		without.Config = slices.DeleteFunc(without.Config, func(c benchfmt.Config) bool { return c.Key == key })
+		if IsRecordingShape([]*benchfmt.Result{without}) {
+			t.Fatalf("recording without %s accepted", key)
+		}
+		if IsRecording([]*benchfmt.Result{without}) {
+			t.Fatalf("IsRecording accepted a recording without %s", key)
+		}
 	}
 }
 
@@ -258,12 +262,14 @@ func TestProvenanceRoundTrip(t *testing.T) {
 	}
 	cfg := configMap(got[0])
 	for k, want := range map[string]string{
-		"commit":      "abc123def",
-		"toolchain":   "go1.26.4",
-		"machine":     "m-deadbeef",
-		"buildconfig": "default",
-		"dirty":       "false",
-		"pew-closure": "1234abcd5678",
+		"commit":                  "abc123def",
+		"toolchain":               "go1.26.4",
+		"machine":                 "m-deadbeef",
+		"buildconfig":             "default",
+		"dirty":                   "false",
+		"pew-closure":             "1234abcd5678",
+		"pew-test-variants":       "9abc0def1234",
+		"pew-test-variant-ledger": "dGVzdC1sZWRnZXI",
 	} {
 		if cfg[k] != want {
 			t.Errorf("provenance %q: got %q, want %q", k, cfg[k], want)
@@ -470,19 +476,19 @@ func TestParseFromContent(t *testing.T) {
 		t.Error("Parse of corrupt content: want error")
 	}
 	for name, raw := range map[string]string{
-		"missing":   strings.Replace(sample, "pew-format: 1\n", "", 1),
-		"unknown":   strings.Replace(sample, "pew-format: 1", "pew-format: 2", 1),
-		"duplicate": strings.Replace(sample, "pew-format: 1", "pew-format: 2\npew-format: 1", 1),
+		"missing":   strings.Replace(sample, "pew-format: 2\n", "", 1),
+		"unknown":   strings.Replace(sample, "pew-format: 2", "pew-format: 1", 1),
+		"duplicate": strings.Replace(sample, "pew-format: 2", "pew-format: 1\npew-format: 2", 1),
 		"tab-change": strings.Replace(sample,
 			"BenchmarkRun-8 1000000 1240 ns/op",
-			"pew-format:\t2\nBenchmarkRun-8 1000000 1240 ns/op", 1),
+			"pew-format:\t3\nBenchmarkRun-8 1000000 1240 ns/op", 1),
 		"deletion": strings.Replace(sample,
 			"BenchmarkRun-8 1000000 1240 ns/op",
 			"pew-format:\nBenchmarkRun-8 1000000 1240 ns/op", 1),
 		"crlf": strings.ReplaceAll(sample, "\n", "\r\n"),
 		"changed": strings.Replace(sample,
 			"BenchmarkRun-8 1000000 1240 ns/op",
-			"pew-format: 1\nBenchmarkRun-8 1000000 1240 ns/op", 1),
+			"pew-format: 2\nBenchmarkRun-8 1000000 1240 ns/op", 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			recs, err := Parse(strings.NewReader(raw), name)
@@ -497,11 +503,11 @@ func TestParseFromContent(t *testing.T) {
 }
 
 // TestRawFormatRequiresLFTermination: §5 requires the byte-exact LF-terminated
-// line "pew-format: 1"; a recording whose final bytes are the discriminator with
+// line "pew-format: 2"; a recording whose final bytes are the discriminator with
 // no terminating newline is format-stale, and the same bytes plus the newline
 // are accepted (the termination is the only difference under test).
 func TestRawFormatRequiresLFTermination(t *testing.T) {
-	unterminated := "BenchmarkRun-8 1000000 1234 ns/op\npew-format: 1"
+	unterminated := "BenchmarkRun-8 1000000 1234 ns/op\npew-format: 2"
 	if rawFormatValid([]byte(unterminated)) {
 		t.Error("unterminated pew-format discriminator accepted")
 	}

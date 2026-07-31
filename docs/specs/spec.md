@@ -85,7 +85,7 @@ profile differs between packages (§9):
 
 | key                  | meaning                                                       | source-of-truth? |
 |----------------------|---------------------------------------------------------------|------------------|
-| `pew-format`         | exact Pew recording format version, currently `1`            | yes              |
+| `pew-format`         | exact Pew recording format version, currently `2`            | yes              |
 | `commit`             | full SHA of HEAD at run time                                  | yes              |
 | `toolchain`          | `go version` output (compiler/runtime identity)               | yes              |
 | `machine`            | machine fingerprint id (§8)                                   | yes              |
@@ -96,15 +96,19 @@ profile differs between packages (§9):
 | `pew-runtime`        | digest of runtime-input evidence (§7.8)                      | derived          |
 | `pew-runtime-inputs` | encoded runtime-input manifest or incomplete disposition (§7.8) | yes            |
 | `pew-purity`         | attributable Gofresh purity evidence used for this fingerprint | yes            |
+| `pew-test-variants`  | test-variant compartment hash of the benchmark's package (§7.9) | derived        |
+| `pew-test-variant-ledger` | encoded compartment declaration ledger — §7.9's diff base | derived        |
 
-`pew-format` occurs exactly once as the byte-exact LF-terminated line `pew-format: 1`. A recording
-with no discriminator, a duplicate, alternate whitespace or line endings, or another value is
+`pew-format` occurs exactly once as the byte-exact LF-terminated line `pew-format: 2`. A recording
+with no discriminator, a duplicate, alternate whitespace or line endings, or another value —
+format-1 recordings included — is
 `stale (format)` and MUST be regenerated; Pew never interprets it as an earlier shape. Benchmark
 output that attempts to define `pew-*` or any other Pew-owned provenance, guard, or purity key is
-refused before storage. A format-1 recording missing any mandatory field is likewise `stale (format)`
+refused before storage. A recording of the current format missing any mandatory field is likewise `stale (format)`
 before guard or purity interpretation. Duplicate rejection applies to every recording key — the
 table above plus `pew-closure` and the per-benchmark `pure` line (§7.5) — not only `pew-format`:
-a recording that repeats any of them is `stale (format)`.
+a recording that repeats any of them is `stale (format)`. A format-2 recording's mandatory field
+set includes `pew-test-variants` and `pew-test-variant-ledger`.
 Format governs interpretation rather than measurement identity and is projected from comparisons.
 
 **The recording key set is closed** (INV-12). Stream-derived configuration keys other than the four
@@ -117,7 +121,8 @@ otherwise record transient log text as durable configuration and fragment compar
 Deliberately emitted custom benchmark configuration is therefore **not** a supported recording
 input; supporting it is a spec change, not a pass-through. `pew run` stores recordings whose
 configuration keys are drawn only from the closed set: the toolchain's four, the §5
-provenance/guard keys, `pew-closure`, and the per-benchmark `pure` line. This is a producer
+provenance/guard keys, `pew-closure`, `pew-test-variants`, `pew-test-variant-ledger`, and the
+per-benchmark `pure` line. This is a producer
 contract — read paths do not police historical recordings for foreign keys.
 `pew-purity` is benchmark-specific despite the surrounding uniform provenance keys and is omitted
 when capture used no purity assertion; omission is the canonical no-attribution encoding.
@@ -512,9 +517,39 @@ particular, a transient read error followed by a successful process exit cannot 
 because the process exited zero. An explicit purity assertion retains its separate full-trust
 semantics from §7.5.
 
-Pew defines and reads no positive observation-proof metadata. Format-1 recordings are checked through
+Pew defines and reads no positive observation-proof metadata. Format-2 recordings are checked through
 Gofresh's ordinary fingerprint path. Unversioned recordings are rejected at the Pew format boundary
 before their runtime manifest or any other fingerprint field is interpreted.
+
+### 7.9 Inert test-suite growth
+
+Benchmarks live in `_test.go` files, so they are members of their package's Gofresh
+**test-variant compartment**: the compartment hash rides every fingerprint
+(`pew-test-variants`), and any sibling test or benchmark declaration moving the compartment
+stales every recording in the package — fail-closed, because Gofresh cannot know the movement
+is harmless. That failure direction is sound but expensive for exactly the most common
+suite edit, adding a test. One precisely scoped rule recovers it.
+
+A verdict of exactly stale `test variants` certifies the benchmark's own source closure
+unchanged and nothing more — Gofresh orders the compartment comparison after the core and
+before the environment tiers, so a moved guard or runtime input can hide behind that reason
+(pew fingerprints never carry a refinement). The rule therefore completes the proof itself:
+the recording's `pew-test-variant-ledger` must diff **inert** against the current view's
+ledger per Gofresh's classifier — the only movement is added declarations no unchanged
+declaration can observe (a plain function that is not `TestMain`, a const, or a type; anything
+changed, removed, or initialization-bearing refuses) — and the recorded fingerprint refreshed
+to the current compartment hash re-checks, its verdict replacing the ordinary one and riding
+the same purity fold (§7.5), so every remaining pin is enforced exactly as an ordinary
+verdict. Any fault refuses and the ordinary stale verdict stands (the safe direction:
+a spurious re-run, never a spurious reuse).
+
+The rule is a validity judgment shared by every verdict surface (`status`, `stat`'s
+working-tree warning, `run --stale`). Only `pew run` writes: when its verdict rode the rule,
+it rewrites the recording in place under the refreshed compartment hash and the current
+ledger — the proven extension is recorded, so later verdicts read plainly valid instead of
+re-proving the same delta. Read-only surfaces never touch the store. The measurement rows
+are untouched by the rewrite: the rule extends the recording's validity evidence, never its
+measured values (INV-5's spirit — recomputing derived evidence never changes a measurement).
 
 ## 8. Machine fingerprint
 

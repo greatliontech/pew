@@ -224,24 +224,28 @@ func TestDistinctPackagesNotMerged(t *testing.T) {
 
 func TestPewRuntimeKeysDoNotFragmentComparison(t *testing.T) {
 	baseCfg := map[string]string{
-		"pkg":                "example.com/a",
-		"machine":            "m1",
-		"toolchain":          "go-test",
-		"buildconfig":        "build-test",
-		"runtimeconfig":      "runtime-test",
-		"pew-runtime":        "old-runtime",
-		"pew-runtime-inputs": "old-manifest",
-		"pew-purity":         "old-purity",
+		"pkg":                     "example.com/a",
+		"machine":                 "m1",
+		"toolchain":               "go-test",
+		"buildconfig":             "build-test",
+		"runtimeconfig":           "runtime-test",
+		"pew-runtime":             "old-runtime",
+		"pew-runtime-inputs":      "old-manifest",
+		"pew-purity":              "old-purity",
+		"pew-test-variants":       "old-tv",
+		"pew-test-variant-ledger": "old-ledger",
 	}
 	newCfg := map[string]string{
-		"pkg":                "example.com/a",
-		"machine":            "m1",
-		"toolchain":          "go-test",
-		"buildconfig":        "build-test",
-		"runtimeconfig":      "runtime-test",
-		"pew-runtime":        "new-runtime",
-		"pew-runtime-inputs": "new-manifest",
-		"pew-purity":         "new-purity",
+		"pkg":                     "example.com/a",
+		"machine":                 "m1",
+		"toolchain":               "go-test",
+		"buildconfig":             "build-test",
+		"runtimeconfig":           "runtime-test",
+		"pew-runtime":             "new-runtime",
+		"pew-runtime-inputs":      "new-manifest",
+		"pew-purity":              "new-purity",
+		"pew-test-variants":       "new-tv",
+		"pew-test-variant-ledger": "new-ledger",
 	}
 	res := Compare(
 		benchResults("BenchmarkParse-8", baseCfg, map[string][]float64{"sec/op": seq(1000, 8)}),
@@ -255,8 +259,8 @@ func TestPewRuntimeKeysDoNotFragmentComparison(t *testing.T) {
 			continue
 		}
 		secTables++
-		if strings.Contains(tbl.Config, "pew-runtime") || strings.Contains(tbl.Config, "pew-purity") {
-			t.Fatalf("runtime or purity metadata leaked into comparison config: %q", tbl.Config)
+		if strings.Contains(tbl.Config, "pew-runtime") || strings.Contains(tbl.Config, "pew-purity") || strings.Contains(tbl.Config, "pew-test-variant") {
+			t.Fatalf("runtime, purity, or test-variant metadata leaked into comparison config: %q", tbl.Config)
 		}
 		if len(tbl.Rows) != 1 || !tbl.Rows[0].Regression {
 			t.Fatalf("runtime keys fragmented comparison; rows=%d regression=%v", len(tbl.Rows), len(tbl.Rows) == 1 && tbl.Rows[0].Regression)

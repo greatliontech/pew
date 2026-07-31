@@ -56,17 +56,22 @@ func TestFingerprintFromConfig(t *testing.T) {
 		{Key: "buildconfig", Value: []byte("bc")},
 		{Key: "runtimeconfig", Value: []byte("rc")},
 		{Key: "pew-closure", Value: []byte("cl")},
+		{Key: "pew-test-variants", Value: []byte("tv")},
+		{Key: "pew-test-variant-ledger", Value: []byte("ledger-encoded")},
 		{Key: "pew-runtime", Value: []byte("rd")},
 		{Key: "pew-runtime-inputs", Value: []byte("manifest")},
 		{Key: "pew-purity", Value: []byte("source directive")},
 		{Key: "pure", Value: []byte("true")},
 	}
-	fp, pure, ok := fingerprintFromConfig(cfg)
+	fp, pure, recordedLedger, ok := fingerprintFromConfig(cfg)
 	if !ok {
 		t.Fatal("current recording format rejected")
 	}
-	if fp.MaximalClosure != "cl" || fp.RuntimeInputs != "manifest" || fp.RuntimeDigest != "rd" || fp.PurityAssertion != "source directive" || fp.ResultKind != gofresh.Measurement {
+	if fp.MaximalClosure != "cl" || fp.TestVariantClosure != "tv" || fp.RuntimeInputs != "manifest" || fp.RuntimeDigest != "rd" || fp.PurityAssertion != "source directive" || fp.ResultKind != gofresh.Measurement {
 		t.Errorf("fingerprint closure/runtime fields = %+v", fp)
+	}
+	if recordedLedger != "ledger-encoded" {
+		t.Errorf("recorded ledger = %q, want %q", recordedLedger, "ledger-encoded")
 	}
 	g := fp.Guards
 	if g.Toolchain != "tc" || g.BuildConfig != "bc" || g.Machine != "m" || g.RuntimeConfig != "rc" {
@@ -76,15 +81,15 @@ func TestFingerprintFromConfig(t *testing.T) {
 		t.Errorf("pure = %q, want true", pure)
 	}
 	unknown := append([]benchfmt.Config(nil), cfg...)
-	unknown[0].Value = []byte("2")
+	unknown[0].Value = []byte("1")
 	duplicate := append(append([]benchfmt.Config(nil), cfg...), benchfmt.Config{Key: "pew-format", Value: []byte(runpkg.RecordingFormat)})
 	for name, malformed := range map[string][]benchfmt.Config{"unknown": unknown, "duplicate": duplicate} {
-		if _, _, ok := fingerprintFromConfig(malformed); ok {
+		if _, _, _, ok := fingerprintFromConfig(malformed); ok {
 			t.Errorf("%s recording format accepted", name)
 		}
 	}
 
-	fp, pure, ok = fingerprintFromConfig(nil)
+	fp, pure, _, ok = fingerprintFromConfig(nil)
 	if ok || fp != (gofresh.Fingerprint{}) || pure != "" {
 		t.Errorf("unversioned config: fp=%+v pure=%q ok=%v, want rejection", fp, pure, ok)
 	}
@@ -96,7 +101,7 @@ func TestUnversionedRecordingIsStale(t *testing.T) {
 	if err := st.Write("", "BenchmarkNoIO", "", recs); err != nil {
 		t.Fatal(err)
 	}
-	v, reason, _, err := checkOne(st, nil, "example.com/old", "", "", "BenchmarkNoIO", "")
+	v, reason, _, _, err := checkOne(st, nil, "example.com/old", "", "", "BenchmarkNoIO", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,11 +118,11 @@ func TestUnversionedRecordingIsStale(t *testing.T) {
 	if err := st.Write("", "BenchmarkNoIO", "incomplete", incomplete); err != nil {
 		t.Fatal(err)
 	}
-	v, reason, _, err = checkOne(st, nil, "example.com/old", "", "", "BenchmarkNoIO", "incomplete")
+	v, reason, _, _, err = checkOne(st, nil, "example.com/old", "", "", "BenchmarkNoIO", "incomplete")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if v != verdictStale || reason != "format" {
-		t.Fatalf("incomplete format-1 recording = {%s %q}, want stale format", v, reason)
+		t.Fatalf("incomplete current-format recording = {%s %q}, want stale format", v, reason)
 	}
 }

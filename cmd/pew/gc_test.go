@@ -31,6 +31,8 @@ func writeRecording(t *testing.T, st *store.Store, pkgRel, bench, label string) 
 			{Key: "dirty", Value: []byte("false"), File: true},
 			{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
 			{Key: "pew-closure", Value: []byte("cl1"), File: true},
+			{Key: "pew-test-variants", Value: []byte("tv1"), File: true},
+			{Key: "pew-test-variant-ledger", Value: []byte("ledger1"), File: true},
 			{Key: "pew-runtime", Value: []byte("rt1"), File: true},
 			{Key: "pew-runtime-inputs", Value: []byte("manifest1"), File: true},
 		},
@@ -71,7 +73,7 @@ func TestGCStoreRemovesOnlyMissingBenchmarks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadPkgData = bytes.Replace(deadPkgData, []byte("pew-format: 1\n"), nil, 1)
+	deadPkgData = bytes.Replace(deadPkgData, []byte("pew-format: 2\n"), nil, 1)
 	if err := os.WriteFile(deadPkg, deadPkgData, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +154,7 @@ func TestGCStoreSurfacesShapeFailingRecordings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(unreadable, []byte("pew-format: 1\n"), 0o644); err != nil {
+	if err := os.WriteFile(unreadable, []byte("pew-format: 2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// Foreign: parseable benchmark file with no pew-owned key, benchmark gone.

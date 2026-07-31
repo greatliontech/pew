@@ -252,7 +252,8 @@ func TestStatABDoesNotDiscoverSiblingModuleOutsideCurrentScope(t *testing.T) {
 func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statdirective\n\ngo 1.26.4\n")
-	writeFile(t, filepath.Join(dir, "bench_test.go"), "package statdirective\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\n//gofresh:pure\nfunc BenchmarkPureRead(b *testing.B) { _, _ = os.ReadFile(\"fixture.txt\") }\n")
+	writeFile(t, filepath.Join(dir, "lib.go"), "package statdirective\n\nfunc fixturePath() string { return \"fixture.txt\" }\n")
+	writeFile(t, filepath.Join(dir, "bench_test.go"), "package statdirective\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\n//gofresh:pure\nfunc BenchmarkPureRead(b *testing.B) { _, _ = os.ReadFile(fixturePath()) }\n")
 	writeFile(t, filepath.Join(dir, "fixture.txt"), "fixture\n")
 	repo, err := gogit.PlainInit(dir, false)
 	if err != nil {
@@ -274,6 +275,8 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 	}
 	st := store.New(filepath.Join(dir, "benchmarks"))
 	cfg := append(runpkg.ProvenanceConfig("c1", false, fp.Guards, runpkg.Conditions{}), runpkg.ClosureConfig(fp.MaximalClosure))
+	cfg = append(cfg, runpkg.TestVariantConfig(fp.TestVariantClosure))
+	cfg = append(cfg, runpkg.TestVariantLedgerConfig("ledger-placeholder"))
 	cfg = append(cfg, runpkg.RuntimeConfig(observation.Digest, observation.Manifest)...)
 	cfg = append(cfg, runpkg.GofreshPurityConfig(fp.PurityAssertion))
 	recs := []*benchfmt.Result{{Name: benchfmt.Name("PureRead"), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
@@ -297,7 +300,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	unversioned := bytes.Replace(recording, []byte("pew-format: 1\n"), nil, 1)
+	unversioned := bytes.Replace(recording, []byte("pew-format: 2\n"), nil, 1)
 	if bytes.Equal(unversioned, recording) {
 		t.Fatal("recording format line not found")
 	}
@@ -316,7 +319,9 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeFile(t, filepath.Join(dir, "bench_test.go"), "package statdirective\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\n//gofresh:pure\nfunc BenchmarkPureRead(b *testing.B) { _, _ = os.ReadFile(\"fixture.txt\"); b.ReportAllocs() }\n")
+	// A non-test source change moves the benchmark's core closure: the
+	// staleness warning must name closure, not the test-variant compartment.
+	writeFile(t, filepath.Join(dir, "lib.go"), "package statdirective\n\nfunc fixturePath() string { name := \"fixture.txt\"; return name }\n")
 	out.Reset()
 	errOut.Reset()
 	if err := runStat(&out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
@@ -424,7 +429,7 @@ func TestReadSideRetainsStaleFormatBlobForReporting(t *testing.T) {
 	}
 	if recs, ok, err := readSide(st, reader, newer.String(), "pkg", "BenchmarkGhost", ""); err != nil || !ok || len(recs) == 0 {
 		t.Fatalf("stale-format side unavailable for reporting: ok=%v len=%d err=%v", ok, len(recs), err)
-	} else if _, _, formatOK := fingerprintFromConfig(recs[0].Config); formatOK {
+	} else if _, _, _, formatOK := fingerprintFromConfig(recs[0].Config); formatOK {
 		t.Fatal("stale-format historical side accepted")
 	}
 }
@@ -444,7 +449,7 @@ func TestAddRefInventoryReportsMalformedHistoricalRecording(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, badPath, strings.Join([]string{
-		"pew-format: 1",
+		"pew-format: 2",
 		"commit: c1",
 		"toolchain: go-test",
 		"machine: m1",
@@ -452,6 +457,8 @@ func TestAddRefInventoryReportsMalformedHistoricalRecording(t *testing.T) {
 		"runtimeconfig: r1",
 		"dirty: false",
 		"pew-closure: cl1",
+		"pew-test-variants: tv1",
+		"pew-test-variant-ledger: ledger1",
 		"pew-runtime: rt1",
 		"pew-runtime-inputs: manifest1",
 		"BenchmarkBad-8 nope 100 sec/op",
@@ -706,6 +713,8 @@ func writeStatRecordingSamplesConditions(t *testing.T, st *store.Store, pkgRel, 
 				{Key: "dirty", Value: []byte("false"), File: true},
 				{Key: "pew-runconditions", Value: []byte(conditions), File: true},
 				{Key: "pew-closure", Value: []byte("cl1"), File: true},
+				{Key: "pew-test-variants", Value: []byte("tv1"), File: true},
+				{Key: "pew-test-variant-ledger", Value: []byte("ledger1"), File: true},
 				{Key: "pew-runtime", Value: []byte("rt1"), File: true},
 				{Key: "pew-runtime-inputs", Value: []byte("manifest1"), File: true},
 			},
@@ -779,6 +788,8 @@ func TestNonValidUsesLabel(t *testing.T) {
 			{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
 			{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
 			{Key: "pew-closure", Value: []byte(hash), File: true},
+			{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
+			{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
 			{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
 			{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
 			{Key: "pew-purity", Value: []byte(fp.PurityAssertion), File: true},
@@ -792,14 +803,14 @@ func TestNonValidUsesLabel(t *testing.T) {
 	write("", fp.MaximalClosure)
 	write("x", fp.MaximalClosure+"-stale")
 
-	need, err := nonValid(st, e, pkg, "", ".", "x", []string{bench})
+	need, err := nonValid(st, e, newGitStateCache(), ".", pkg, "", ".", "x", []string{bench})
 	if err != nil {
 		t.Fatalf("nonValid labeled: %v", err)
 	}
 	if len(need) != 1 || need[0] != bench {
 		t.Fatalf("labeled nonValid = %v, want [%s]", need, bench)
 	}
-	need, err = nonValid(st, e, pkg, "", ".", "", []string{bench})
+	need, err = nonValid(st, e, newGitStateCache(), ".", pkg, "", ".", "", []string{bench})
 	if err != nil {
 		t.Fatalf("nonValid unlabeled: %v", err)
 	}
@@ -838,6 +849,8 @@ func TestRunConditionsDoNotAffectValidity(t *testing.T) {
 			{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
 			{Key: "pew-runconditions", Value: []byte(conditions), File: true},
 			{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
+			{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
+			{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
 			{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
 			{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
 			{Key: "pew-purity", Value: []byte(fp.PurityAssertion), File: true},
@@ -853,7 +866,7 @@ func TestRunConditionsDoNotAffectValidity(t *testing.T) {
 	write("unknown", "governor=unknown turbo=unknown load1=unknown throttled=unknown battery=unknown")
 
 	for _, label := range []string{"quiet", "noisy", "unknown"} {
-		v, reason, _, err := checkOne(st, e, pkg, "", ".", bench, label)
+		v, reason, _, _, err := checkOne(st, e, pkg, "", ".", bench, label)
 		if err != nil {
 			t.Fatalf("checkOne(%s): %v", label, err)
 		}
@@ -924,6 +937,8 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
 		{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
 		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
+		{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
+		{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
 		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
 		{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
 		{Key: "dirty", Value: []byte("false"), File: true},
@@ -932,7 +947,7 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 	if err := st.Write("", bench, "", recs); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	v, reason, _, err := checkOne(st, e, pkg, "", ".", bench, "")
+	v, reason, _, _, err := checkOne(st, e, pkg, "", ".", bench, "")
 	if err != nil {
 		t.Fatalf("checkOne: %v", err)
 	}
@@ -951,6 +966,8 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
 		{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
 		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
+		{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
+		{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
 		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
 		{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
 		{Key: "dirty", Value: []byte("false"), File: true},
@@ -960,7 +977,7 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 	if err := st.Write("", bench, "imp", impRecs); err != nil {
 		t.Fatalf("Write imp: %v", err)
 	}
-	v, reason, _, err = checkOne(st, e, pkg, "", ".", bench, "imp")
+	v, reason, _, _, err = checkOne(st, e, pkg, "", ".", bench, "imp")
 	if err != nil {
 		t.Fatalf("checkOne imp: %v", err)
 	}

@@ -70,6 +70,7 @@ func explainRecordAgainstCurrent(w io.Writer, e *gofresh.Engine, moduleDir, impo
 	}
 	rows := guardRows(fp.Guards, curFP.Guards)
 	rows = append(rows, explainRow{"closure", fp.MaximalClosure, curFP.MaximalClosure})
+	rows = append(rows, explainRow{"test-variants", fp.TestVariantClosure, curFP.TestVariantClosure})
 	if fp.RuntimeInputs != "" {
 		if st, err := runtimeinput.CurrentEnv(fp.RuntimeInputs, moduleDir, env); err != nil {
 			rows = append(rows, explainRow{"runtime", fp.RuntimeDigest, "(uncomputable: " + err.Error() + ")"})
@@ -113,6 +114,6 @@ func recordedGuards(recs []*benchfmt.Result) (guard.Guards, bool) {
 	if len(recs) == 0 {
 		return guard.Guards{}, false
 	}
-	fp, _, ok := fingerprintFromConfig(recs[0].Config)
+	fp, _, _, ok := fingerprintFromConfig(recs[0].Config)
 	return fp.Guards, ok
 }

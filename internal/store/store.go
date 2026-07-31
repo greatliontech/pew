@@ -19,6 +19,8 @@ import (
 	"strings"
 
 	"golang.org/x/perf/benchfmt"
+
+	"github.com/greatliontech/pew/internal/run"
 )
 
 // Store is a benchmark-recording directory — the configurable bench-dir (§6).
@@ -445,7 +447,7 @@ func IsRecording(recs []*benchfmt.Result) bool {
 			formatCount++
 		}
 	}
-	return cfg["pew-format-invalid"] != "true" && formatCount == 1 && cfg["pew-format"] == "1"
+	return cfg["pew-format-invalid"] != "true" && formatCount == 1 && cfg["pew-format"] == run.RecordingFormat
 }
 
 // IsPewMarked reports whether parsed results carry any pew-owned (`pew-`
@@ -479,7 +481,7 @@ func IsRecordingShape(recs []*benchfmt.Result) bool {
 	for _, c := range recs[0].Config {
 		cfg[c.Key] = string(c.Value)
 	}
-	for _, key := range []string{"commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pew-runconditions", "pew-closure", "pew-runtime", "pew-runtime-inputs"} {
+	for _, key := range []string{"commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pew-runconditions", "pew-closure", "pew-test-variants", "pew-test-variant-ledger", "pew-runtime", "pew-runtime-inputs"} {
 		if cfg[key] == "" {
 			return false
 		}
@@ -708,9 +710,10 @@ func rawFormatValid(data []byte) bool {
 		valid = valid && counts[key] == 1
 		if key == "pew-format" {
 			// §5: the discriminator is the byte-exact LF-terminated line
-			// "pew-format: 1". After splitting on '\n', only the final element
-			// lacks a terminating LF, so a discriminator there is unterminated.
-			valid = valid && bytes.Equal(line, []byte("pew-format: 1")) && i < len(lines)-1
+			// "pew-format: " plus the current version. After splitting on
+			// '\n', only the final element lacks a terminating LF, so a
+			// discriminator there is unterminated.
+			valid = valid && bytes.Equal(line, []byte("pew-format: "+run.RecordingFormat)) && i < len(lines)-1
 		}
 	}
 	return counts["pew-format"] == 1 && valid
@@ -718,7 +721,7 @@ func rawFormatValid(data []byte) bool {
 
 func recordingConfigKey(key string) bool {
 	switch key {
-	case "pew-format", "commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pew-runconditions", "pew-closure", "pew-runtime", "pew-runtime-inputs", "pew-purity", "pure":
+	case "pew-format", "commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pew-runconditions", "pew-closure", "pew-test-variants", "pew-test-variant-ledger", "pew-runtime", "pew-runtime-inputs", "pew-purity", "pure":
 		return true
 	default:
 		return false

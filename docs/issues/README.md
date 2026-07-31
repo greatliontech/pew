@@ -8,6 +8,7 @@ close-out convention.
 |------|---------|-------|
 | [recorded-config-trust](recorded-config-trust.md) | whitelisted toolchain-key values are spoofable in-stream; historical foreign keys unpoliced at read time | when a spoofed value or foreign-key fragmentation is observed, or when read-side recording validation is next designed |
 | [remote-bench-execution](remote-bench-execution.md) | run measurements on a dedicated homelab bench machine: gRPC-over-SSH `pew agent`, machine lease, off-box builds, calibration drift-vet | when a dedicated bench machine is provisioned and measurements first need to run on it |
+| [per-benchmark-view-builds](per-benchmark-view-builds.md) | verdict surfaces build one analysis view per benchmark (two per inert-growth rider); a per-package batch check would share it | when a package's verdict pass measurably dominates status/stat latency, or when the verdict surfaces are next restructured |
 
 ## In-spec upgrade paths (tracked inline, not here)
 
