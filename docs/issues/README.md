@@ -21,4 +21,4 @@ index:
 - per-declaration hashing *into* cache deps (§7.7)
 - gitignored persistent closure memo (§6)
 - same-identity sample merge (§6)
-- **[bench-runtime-inputs-structural-noise](bench-runtime-inputs-structural-noise.md)** — every bench header flags runtime inputs unverifiable for a structurally evidence-free run class; the fix is presentational (the incomplete manifest is load-bearing). *Lands: when pew work resumes after gofresh's analysis-simplification plan closes.*
+- **[bench-observation-evidence-path](bench-observation-evidence-path.md)** — recording verification is decorative for benchmarks: pew never wires the testlog+bracket observation harness its sibling tools use; the fix is the identical wiring. *Lands: first pew work item after gofresh's memo chunks land — before the gomutant train.*
