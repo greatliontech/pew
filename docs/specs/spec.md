@@ -384,15 +384,16 @@ not source at all, so no source widening can bound it:
 
 | construct | external state |
 |-----------|----------------|
-| file I/O on a non-embedded path (`os.Open`, `os.ReadFile`, …) | requires the complete observation conjunction in §7.8; Pew's current producer records incompleteness, so it remains `unverifiable` |
+| file I/O on a non-embedded path (`os.Open`, `os.ReadFile`, …) | the run records the completed observation conjunction (§7.8), but Pew selects no observability proof, so the closure remains `unverifiable` on its own reason |
 | network I/O | a remote that may change |
 | `plugin.Open` / `plugin.Lookup` | code loaded from an arbitrary `.so` at runtime |
 | cgo linked against an external library (`#cgo LDFLAGS: -l…`) | C outside the build (in-tree `.c`/`.h` *are* hashed → that is A′, not B) |
 | `go:wasmimport` host functions | host code outside the binary |
 
 Any non-file Class-B dependence reachable in `B`'s closure → `unverifiable`. File I/O reached by
-the closure also remains `unverifiable` unless the full upstream observation conjunction holds
-(§7.8). Testlog identities alone prove neither complete path coverage nor operation outcomes, so
+the closure also remains `unverifiable`: rescuing it needs the completed observation conjunction
+*and* an observability proof, and Pew records the former but selects no proof (§7.8). Testlog
+identities alone prove neither complete path coverage nor operation outcomes, so
 they cannot suppress the Class-B marker. (Ambient nondeterminism — `time.Now`, unseeded `rand` — is a
 benchmark-*quality* issue, out of scope per §3, not a Class-B trigger.)
 
@@ -504,22 +505,29 @@ Two consequences:
 ### 7.8 Runtime-input evidence
 
 Go's testlog stream records operation identities but omits behavior-affecting return values, byte
-counts, and errors. A zero exit from the `go test` driver proves neither those outcomes nor normal
-completion of an observation protocol by itself. Pew has no separate per-operation outcome evidence,
-so `pew run` does not call the completed-observation constructor, does not select an observability
-proof, and never promotes a file-reading benchmark to `valid` from testlog identities.
+counts, and errors, so testlog identities alone prove neither operation outcomes nor complete path
+coverage. Pew completes the observation the way its sibling producers do — the conjunction Gofresh's
+runtime-input contract defines: the measurement invocation carries a `-test.testlogfile` capture
+(passed through `go test`'s argument passthrough), an observation **bracket** is fingerprinted over
+the package directory immediately before the invocation (VCS bookkeeping excluded), and the capture
+is ingested with the completed-process and bracket options plus the toolchain, module-cache,
+build-cache, and ephemeral-temp classifications. The resulting completed observation's manifest and
+digest ride the recording (`pew-runtime-inputs`, `pew-runtime`), so the runtime-input guard is real
+evidence: a moved observed input stales the recording instead of hiding behind blanket
+incompleteness, and content the ingest itself cannot vouch for (an unrecognized operation, a moved
+bracket) stays fail-closed inside the manifest as its own unverifiable entries.
 
-Every new run instead records one canonical incomplete observation for the result-contributing
-package test-binary process, with reason `testlog lacks operation outcome evidence`. Its
-`pew-runtime-inputs` manifest carries that disposition and `pew-runtime` carries the corresponding
-digest. Ordinary checking therefore returns `unverifiable` while the other guards hold. In
-particular, a transient read error followed by a successful process exit cannot become `valid` merely
-because the process exited zero. An explicit purity assertion retains its separate full-trust
-semantics from §7.5.
+A process that dies before the harness initializes (its capture carries no test-log header), an
+unreadable capture, a failed bracket, or any other ingest failure records the canonical
+**incomplete** observation with the honest reason instead — never an absent manifest, which would
+assert "no runtime inputs" and serve.
 
-Pew defines and reads no positive observation-proof metadata. Format-2 recordings are checked through
-Gofresh's ordinary fingerprint path. Unversioned recordings are rejected at the Pew format boundary
-before their runtime manifest or any other fingerprint field is interpreted.
+Pew still selects no observability proof: a file-reading benchmark's closure remains `unverifiable`
+under Gofresh's ordinary fingerprint path — refused on its own closure reason, no longer on
+manufactured incompleteness — unless an explicit purity assertion applies with its separate
+full-trust semantics from §7.5. Format-2 recordings are checked through Gofresh's ordinary
+fingerprint path. Unversioned recordings are rejected at the Pew format boundary before their
+runtime manifest or any other fingerprint field is interpreted.
 
 ### 7.9 Inert test-suite growth
 
@@ -704,14 +712,18 @@ provenance is captured atomically with the run:
     orphan evidence catches tail-preserving fabrication, but a splice that both fabricates a
     parseable row and masks its detached tail is undetectable — the same exposure every consumer
     of the text format has.
-- Records provenance (§5), computes the run-commit closure hash (§7), and records explicit incomplete
-  runtime-input evidence (`pew-runtime*`, §7.8) at run time.
+- Records provenance (§5), computes the run-commit closure hash (§7), and records runtime-input
+  evidence (`pew-runtime*`, §7.8) at run time: the completed observation conjunction, or the
+  canonical incomplete disposition with its honest reason when the conjunction cannot complete.
 - Captures one ordinary measurement view and every benchmark fingerprint before execution. The
-  result-contributing process is the package test binary launched by the `go test` driver. Because
-  Pew has no per-operation outcome evidence, it finalizes exactly one incomplete observation for
-  that package test binary. It validates the view and the sealed incomplete runtime state before
+  result-contributing process is the package test binary launched by the `go test` driver. Pew
+  finalizes exactly one observation for that package test binary — completed under the §7.8
+  conjunction (pre-spawn bracket, testlog capture, completed-process ingest), incomplete with the
+  stated reason otherwise. It validates the view and the sealed runtime state before
   writing any result. One immutable complete process-environment snapshot configures the view, the
-  driver and inherited package test binary, and incomplete-observation construction. Source, guard,
+  driver and inherited package test binary, and the observation's construction — spawn and
+  ingestion use the same environment, with `PWD` pinned to the package directory the driver gives
+  the test binary. Source, guard,
   purity, commit, or worktree-state drift aborts the package write. Every destination is
   staged before replacement and every returned commit failure restores the prior complete set, so one
   package run is one producer transaction across ordinary filesystem errors. Each file is individually
@@ -906,15 +918,16 @@ Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred
 - **INV-3 — Artifact format compatibility.** Every stored `.txt` is a well-formed Go
   benchmark-format file parseable by `benchfmt` and plain `benchstat`. *Violation:* a written file
   that `benchfmt` rejects → ecosystem lock-in, G5 broken. *Kind:* clause-explicit (§5, G5).
-- **INV-4 — Provenance completeness.** Every produced result carries format `1` and the provenance
-  and manifests required to evaluate all six guards: `pew run` always writes the commit, the runtime-input
-  manifest (a canonical incomplete disposition for every run, §7.8), the four environment
+- **INV-4 — Provenance completeness.** Every produced result carries the current format and the
+  provenance and manifests required to evaluate all six guards: `pew run` always writes the commit,
+  the runtime-input manifest (completed under the §7.8 conjunction, or the canonical incomplete
+  disposition with its reason — present for every run either way), the four environment
   guard lines, and the run-conditions line (§9, explicit `unknown` fields when unobserved).
   *Violation:* a result missing `commit` or a guard value → the guard is unevaluable → validity
   undecidable → must conservatively re-run, defeating G1/G2. A missing or unknown format is rejected
   without interpretation. A recorded `pew-runtime` digest without its manifest is corruption and stale;
-  a recording without the incomplete disposition violates the producer contract. *Kind:*
-  entailed.
+  a recording with no runtime manifest at all violates the producer contract — absence would assert
+  "no runtime inputs" and serve. *Kind:* entailed.
 - **INV-5 — Derived state is never authoritative.** Persisted closure hashes are a memoization keyed
   *only* by immutable inputs `(commit, toolchain, buildconfig)`; they are never the source of truth
   for provenance and recomputing/discarding them never changes a validity verdict. *Violation:* a

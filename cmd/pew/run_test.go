@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"io"
 	"os"
@@ -186,13 +187,18 @@ func TestRunRunKeepsSharedRepositoryModulesClean(t *testing.T) {
 	}
 }
 
-func TestRunRecordsIncompleteRuntimeEvidence(t *testing.T) {
+func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{
-		"go.mod":        "module example.com/incompleterun\n\ngo 1.26.4\n",
-		"bench_test.go": "package incompleterun\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc BenchmarkNoIO(b *testing.B) {}\nfunc BenchmarkReadError(b *testing.B) { _, _ = os.ReadFile(\"transiently-missing.txt\") }\n",
+		"go.mod":                "module example.com/incompleterun\n\ngo 1.26.4\n",
+		"pure/bench_test.go":    "package pure\n\nimport \"testing\"\n\nfunc BenchmarkNoIO(b *testing.B) {}\n",
+		"readerr/bench_test.go": "package readerr\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc BenchmarkReadError(b *testing.B) { _, _ = os.ReadFile(\"transiently-missing.txt\") }\n",
+		"getwd/bench_test.go":   "package getwd\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc BenchmarkGetwd(b *testing.B) { _ = os.Getenv(\"PWD\") }\n",
 	}
 	for name, content := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -218,7 +224,7 @@ func TestRunRecordsIncompleteRuntimeEvidence(t *testing.T) {
 	err = runRun(&out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
-	}, []string{"."})
+	}, []string{"./..."})
 	if err != nil {
 		t.Fatalf("runRun: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
 	}
@@ -227,8 +233,8 @@ func TestRunRecordsIncompleteRuntimeEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := store.New(benchDir)
-	for _, bench := range []string{"BenchmarkNoIO", "BenchmarkReadError"} {
-		recs, err := st.Read("", bench, "")
+	for bench, pkgRel := range map[string]string{"BenchmarkNoIO": "pure", "BenchmarkReadError": "readerr", "BenchmarkGetwd": "getwd"} {
+		recs, err := st.Read(pkgRel, bench, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -250,12 +256,42 @@ func TestRunRecordsIncompleteRuntimeEvidence(t *testing.T) {
 				t.Errorf("%s recorded governor %q, want observed %q", bench, got, wantGovernor)
 			}
 		}
-		v, reason, _, _, err := checkOne(st, e, "example.com/incompleterun", "", dir, bench, "")
+		v, reason, _, _, err := checkOne(st, e, "example.com/incompleterun/"+pkgRel, pkgRel, dir, bench, "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if v != verdictUnverifiable || reason != "testlog lacks operation outcome evidence" {
-			t.Fatalf("%s recording = {%s %q}, want unverifiable incomplete observation", bench, v, reason)
+		// The completed conjunction replaces the blanket incompleteness
+		// (spec §7.8): a clean-closure benchmark's recording verifies —
+		// the runtime guard finally earns — while a file-reading one
+		// refuses on its own closure, never on manufactured
+		// incompleteness.
+		switch bench {
+		case "BenchmarkNoIO":
+			if v != verdictValid {
+				t.Fatalf("%s recording = {%s %q}, want valid under the completed observation", bench, v, reason)
+			}
+		case "BenchmarkGetwd":
+			// Spawn and ingestion share one environment with PWD pinned to
+			// the package directory the go driver gives the binary. The
+			// verdict still refuses on the closure (pew selects no
+			// observability proof), but the truthful pinned PWD is
+			// admitted recordless — the manifest must never carry the
+			// process-local-divergence seal an ingest under pew's own
+			// environment would record.
+			if v != verdictUnverifiable || !strings.Contains(reason, "os.Getenv") {
+				t.Fatalf("%s recording = {%s %q}, want unverifiable on the closure reason", bench, v, reason)
+			}
+			manifest, decErr := base64.RawURLEncoding.DecodeString(fp.RuntimeInputs)
+			if decErr != nil {
+				t.Fatal(decErr)
+			}
+			if strings.Contains(string(manifest), "process-local environment input") {
+				t.Fatalf("%s manifest = %s, want the PWD read observed rather than sealed process-local", bench, manifest)
+			}
+		case "BenchmarkReadError":
+			if v != verdictUnverifiable || reason == "testlog lacks operation outcome evidence" || !strings.Contains(reason, "os.ReadFile") {
+				t.Fatalf("%s recording = {%s %q}, want unverifiable on its own closure reason", bench, v, reason)
+			}
 		}
 	}
 }
@@ -1185,5 +1221,91 @@ func TestRunRunReturnsErrorOnPackageFailure(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "error") {
 		t.Fatalf("output = %q, want package error row", out.String())
+	}
+}
+
+// TestRunObservesThroughSymlinkedModule pins spawn/ingest environment
+// fidelity through a symlinked checkout under the truthful-PWD posture
+// of a shell-launched run. Three assertions, three mutations: the seal
+// assertion kills an ingest under pew's own unpinned environment; the
+// module-relative assertion kills both the resolved-root-spawn revert
+// (whose reads classify as alias abs-paths) and a conjunction that
+// regressed to the fallback (whose manifest carries no path); the
+// alias assertion independently kills the revert.
+func TestRunObservesThroughSymlinkedModule(t *testing.T) {
+	real := filepath.Join(t.TempDir(), "real")
+	if err := os.MkdirAll(filepath.Join(real, "getwd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"go.mod":                "module example.com/symlinkedrun\n\ngo 1.26.4\n",
+		"getwd/bench_test.go":   "package getwd\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc BenchmarkPWDRead(b *testing.B) { _, _ = os.ReadFile(os.Getenv(\"PWD\") + \"/bench_input.txt\") }\n",
+		"getwd/bench_input.txt": "input\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(real, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := gogit.PlainInit(real, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	benchDir := filepath.Join(t.TempDir(), "benchmarks")
+	withWorkingDir(t, link)
+	// The truthful-PWD posture of a shell-launched run: go's Getwd (and
+	// go list's module dir) honor an exported PWD naming the alias, so
+	// the module dir the run sees is the SYMLINK path — the shape the
+	// resolved-root spawn exists for.
+	t.Setenv("PWD", link)
+
+	var out, errOut bytes.Buffer
+	err = runRun(&out, &errOut, runConfig{
+		benchDir: benchDir,
+		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
+	}, []string{"./..."})
+	if err != nil {
+		t.Fatalf("runRun: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+	st := store.New(benchDir)
+	recs, err := st.Read("getwd", "BenchmarkPWDRead", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp, _, _, ok := fingerprintFromConfig(recs[0].Config)
+	if !ok {
+		t.Fatal("recording lacks current format")
+	}
+	manifest, err := base64.RawURLEncoding.DecodeString(fp.RuntimeInputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(manifest), "process-local environment input") {
+		t.Fatalf("manifest = %s, want spawn-faithful PWD through the symlink rather than the process-local seal", manifest)
+	}
+	// The completed shape, positively: the $PWD-derived read normalizes
+	// to a module-relative identity — proof the observation completed
+	// and resolved the read inside the bracketed module (a
+	// fallback-incomplete manifest carries no path at all), and no alias
+	// path leaks into the durable evidence.
+	if !strings.Contains(string(manifest), `"getwd/bench_input.txt"`) {
+		t.Fatalf("manifest = %s, want the observed input recorded module-relative", manifest)
+	}
+	if strings.Contains(string(manifest), link) {
+		t.Fatalf("manifest = %s, records the alias path %s", manifest, link)
 	}
 }

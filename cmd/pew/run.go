@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/gitblob"
 	"github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
@@ -290,11 +289,35 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 	if _, err := rc.executeGo(p.Module.Dir, "", env, run.BuildArgs(p.ImportPath, warmupPath)); err != nil {
 		return err
 	}
+	// The completed-observation conjunction (spec §7.8): classification
+	// roots and the pre-spawn bracket are captured before the throttle
+	// bracket opens — both are exec/IO work, not measurement — and the
+	// measurement invocation carries the testlog capture through the
+	// test binary's own flag.
+	envRoots, err := run.ReadGoEnvRoots(p.Module.Dir, env)
+	if err != nil {
+		return err
+	}
+	frame := run.CaptureObservationFrame(ctx, p.Module.Dir, pkgRel)
+	testlog, err := os.CreateTemp("", "pew-testlog-*")
+	if err != nil {
+		return err
+	}
+	testlogPath := testlog.Name()
+	_ = testlog.Close()
+	defer os.Remove(testlogPath)
 	// A benchmark failure makes `go test` exit non-zero and discards the whole
 	// package's run (the successful benches too) — a suspect package records
 	// nothing rather than a partial set.
+	// The measurement runs from the frame's resolved root so the go
+	// driver hands the test binary the same resolved package directory
+	// the ingest pins — byte-faithful even through a symlinked checkout.
+	measureDir := p.Module.Dir
+	if frame.Reason == "" {
+		measureDir = frame.Root
+	}
 	throttleBase := rc.snapshotThrottle()
-	out, err := rc.executeGo(p.Module.Dir, rc.pin, env, run.TestArgs(p.ImportPath, opts))
+	out, err := rc.executeGo(measureDir, rc.pin, env, append(run.TestArgs(p.ImportPath, opts), "-args", "-test.testlogfile="+testlogPath))
 	if err != nil {
 		return err
 	}
@@ -309,16 +332,7 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 			return fmt.Errorf("run: %s: thermal throttling during measurement (--strict)", p.ImportPath)
 		}
 	}
-	runtimeObservation, err := runtimeinput.IncompleteEnv(
-		p.Module.Dir,
-		"package-test-binary:"+p.ImportPath,
-		"testlog lacks operation outcome evidence",
-		env,
-	)
-	if err != nil {
-		return err
-	}
-	runtimeState, err := runtimeinput.CompletedState(runtimeObservation)
+	runtimeState, err := run.IngestObservation(frame, testlogPath, p.Module.Dir, "package-test-binary:"+p.ImportPath, env, envRoots)
 	if err != nil {
 		return err
 	}
