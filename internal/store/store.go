@@ -659,7 +659,8 @@ func Parse(r io.Reader, name string) ([]*benchfmt.Result, error) {
 		return nil, fmt.Errorf("store: read recording %s: %w", name, err)
 	}
 	formatValid := rawFormatValid(data)
-	rd := benchfmt.NewReader(bytes.NewReader(data), name)
+	stream, lifted := liftOversizedConfig(data)
+	rd := benchfmt.NewReader(bytes.NewReader(stream), name)
 	var out []*benchfmt.Result
 	for rd.Scan() {
 		switch rec := rd.Result().(type) {
@@ -682,12 +683,78 @@ func Parse(r io.Reader, name string) ([]*benchfmt.Result, error) {
 	if len(out) == 0 {
 		return nil, fmt.Errorf("store: empty recording %s", name)
 	}
+	if len(lifted) > 0 {
+		for _, result := range out {
+			result.Config = append(result.Config, lifted...)
+		}
+	}
 	if !formatValid {
 		for _, result := range out {
 			result.Config = append(result.Config, benchfmt.Config{Key: "pew-format-invalid", Value: []byte("true")})
 		}
 	}
 	return out, nil
+}
+
+// liftOversizedConfig removes recording-config lines too long for
+// benchfmt's reader — a bufio.Scanner at its default token bound, which
+// refuses the whole file on one oversized line — and returns them as
+// parsed file config for reattachment after the scan. Pew's own header
+// blobs (the runtime-input manifest, the test-variant ledger) grow with
+// the package and have exceeded the bound in the field, so the store
+// must read back what pew run wrote. Reattachment to every result is
+// exact for the canonical layout, where all config precedes the first
+// result (rawFormatValid flags the rest); only recognized recording
+// config keys are lifted, so an oversized line of any other shape still
+// fails loudly in benchfmt instead of being silently interpreted. The
+// threshold sits well under the scanner's cliff rather than at it —
+// lifting a line the scanner could still have read is harmless, riding
+// the cliff's exact off-by-one is not.
+func liftOversizedConfig(data []byte) ([]byte, []benchfmt.Config) {
+	const bound = 48 << 10
+	if len(data) <= bound {
+		return data, nil
+	}
+	long := false
+	for rest := data; ; {
+		nl := bytes.IndexByte(rest, '\n')
+		if nl < 0 {
+			long = long || len(rest) > bound
+			break
+		}
+		if nl > bound {
+			long = true
+			break
+		}
+		rest = rest[nl+1:]
+	}
+	if !long {
+		return data, nil
+	}
+	var lifted []benchfmt.Config
+	kept := make([]byte, 0, len(data))
+	for rest := data; len(rest) > 0; {
+		var line []byte
+		if nl := bytes.IndexByte(rest, '\n'); nl < 0 {
+			line, rest = rest, nil
+		} else {
+			line, rest = rest[:nl], rest[nl+1:]
+		}
+		if len(line) > bound {
+			if colon := bytes.IndexByte(line, ':'); colon > 0 && recordingConfigKey(string(line[:colon])) {
+				value := bytes.TrimSpace(line[colon+1:])
+				lifted = append(lifted, benchfmt.Config{
+					Key:   string(line[:colon]),
+					Value: append([]byte(nil), value...),
+					File:  true,
+				})
+				continue
+			}
+		}
+		kept = append(kept, line...)
+		kept = append(kept, '\n')
+	}
+	return kept, lifted
 }
 
 func rawFormatValid(data []byte) bool {

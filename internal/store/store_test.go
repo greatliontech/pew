@@ -622,3 +622,40 @@ func TestRemoveRecordingPrunesEmptyDirs(t *testing.T) {
 		t.Fatalf("empty package dirs were not pruned: %v", err)
 	}
 }
+
+// TestParseLiftsOversizedConfigLine: a recording whose header carries a
+// config line beyond benchfmt's scanner bound (the field shape: a large
+// package's runtime-input manifest) must still read back — the store
+// reads what pew run writes — with the oversized value intact on every
+// result. An oversized line that is NOT a recognized recording config
+// key keeps failing loudly.
+func TestParseLiftsOversizedConfigLine(t *testing.T) {
+	huge := strings.Repeat("A", 1<<20)
+	raw := strings.Replace(sample, "pew-runtime-inputs: eyJ2IjoxfQ", "pew-runtime-inputs: "+huge, 1)
+	recs, err := Parse(strings.NewReader(raw), "oversized")
+	if err != nil {
+		t.Fatalf("Parse of oversized recording config: %v", err)
+	}
+	if len(recs) != 3 {
+		t.Fatalf("results: got %d, want 3", len(recs))
+	}
+	for i, rec := range recs {
+		got := ""
+		for _, c := range rec.Config {
+			if c.Key == "pew-runtime-inputs" {
+				got = string(c.Value)
+			}
+		}
+		if got != huge {
+			t.Fatalf("result %d: pew-runtime-inputs not carried (len %d, want %d)", i, len(got), len(huge))
+		}
+	}
+	if !IsRecording(recs) {
+		t.Fatal("oversized-but-canonical recording not recognized as a recording")
+	}
+
+	foreign := strings.Replace(sample, "pew-runtime-inputs: eyJ2IjoxfQ", "not-a-recording-key: "+huge, 1)
+	if _, err := Parse(strings.NewReader(foreign), "foreign-oversized"); err == nil {
+		t.Fatal("oversized non-recording line: want loud failure, got success")
+	}
+}
