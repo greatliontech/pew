@@ -1,8 +1,9 @@
 # Profile capture and attribution as recording companions
 
-**Lands:** when profile evidence next needs machine checking — a
-subject-attribution verdict or a profile diff across refs (tugboat's
-bench protocol is the standing consumer, hand-run today).
+**Lands:** the cross-tool train's profile chunk (gofresh
+docs/plans/cross-tool-train.md), after the one-go-invocation chunk —
+folded from the original condition: profile evidence needing machine
+checking, with tugboat's hand-run bench protocol the standing consumer.
 
 pew owns curves, provenance, and comparison; the *attribution* half of
 a measurement is a hand protocol in consumers. tugboat's standing
