@@ -599,3 +599,56 @@ func TestGCStoreKeepsRootPackageRecording(t *testing.T) {
 	assertPathExists(t, live)
 	assertPathMissing(t, dead)
 }
+
+// The //pew:scratch directive is discovered from the package's test
+// files: one pattern per directive, deduplicated and sorted, a
+// marker-prefixed identifier (`//pew:scratchy`) ignored, and a bare
+// directive refused loudly rather than read as declaring nothing
+// (spec §7.8).
+func TestScratchPatternsDiscoversDirectives(t *testing.T) {
+	dir := t.TempDir()
+	src := `package p
+
+import "testing"
+
+//pew:scratch nodebench-*
+//pew:scratchy not-a-directive
+
+//pew:scratch	ws-*
+//pew:scratch nodebench-*
+
+func BenchmarkX(b *testing.B) {}
+`
+	if err := os.WriteFile(filepath.Join(dir, "scratch_test.go"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	patterns, err := scratchPatterns(pkgMeta{Dir: dir, TestGoFiles: []string{"scratch_test.go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(patterns) != 2 || patterns[0] != "nodebench-*" || patterns[1] != "ws-*" {
+		t.Fatalf("patterns = %v, want [nodebench-* ws-*]", patterns)
+	}
+
+	bare := `package p
+
+//pew:scratch
+func f() {}
+`
+	if err := os.WriteFile(filepath.Join(dir, "bare_test.go"), []byte(bare), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scratchPatterns(pkgMeta{Dir: dir, TestGoFiles: []string{"bare_test.go"}}); err == nil {
+		t.Fatal("bare //pew:scratch directive accepted")
+	}
+
+	for _, malformed := range []string{"testdata/x-*", "a-* b-*"} {
+		src := "package p\n\n//pew:scratch " + malformed + "\nfunc g() {}\n"
+		if err := os.WriteFile(filepath.Join(dir, "malformed_test.go"), []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := scratchPatterns(pkgMeta{Dir: dir, TestGoFiles: []string{"malformed_test.go"}}); err == nil {
+			t.Fatalf("malformed //pew:scratch %q accepted", malformed)
+		}
+	}
+}

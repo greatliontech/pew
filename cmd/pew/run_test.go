@@ -1309,3 +1309,92 @@ func TestRunObservesThroughSymlinkedModule(t *testing.T) {
 		t.Fatalf("manifest = %s, records the alias path %s", manifest, link)
 	}
 }
+
+// The //pew:scratch directive rides the whole path — discovery in the
+// package's test files, runPackage, ingest — so a bench's own
+// created-and-removed scratch leaves no manifest identities, while the
+// identical bench without the declaration records them (spec §7.8).
+func TestRunScratchDirectiveKeepsManifestClean(t *testing.T) {
+	dir := t.TempDir()
+	benchBody := `package p
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func BenchmarkScratch(b *testing.B) {
+	d, err := os.MkdirTemp(".", "sb-*")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer os.RemoveAll(d)
+	p := filepath.Join(d, "out.txt")
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		b.Fatal(err)
+	}
+	if _, err := os.ReadFile(p); err != nil {
+		b.Fatal(err)
+	}
+}
+`
+	files := map[string]string{
+		"go.mod":                   "module example.com/scratchrun\n\ngo 1.26.4\n",
+		"declared/bench_test.go":   "//pew:scratch sb-*\n" + benchBody,
+		"undeclared/bench_test.go": benchBody,
+	}
+	for name, content := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	benchDir := filepath.Join(t.TempDir(), "benchmarks")
+	withWorkingDir(t, dir)
+
+	var out, errOut bytes.Buffer
+	if err := runRun(&out, &errOut, runConfig{
+		benchDir: benchDir,
+		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
+	}, []string{"./..."}); err != nil {
+		t.Fatalf("runRun: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+	st := store.New(benchDir)
+	for pkgRel, wantScratch := range map[string]bool{"declared": false, "undeclared": true} {
+		recs, err := st.Read(pkgRel, "BenchmarkScratch", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(recs) == 0 {
+			t.Fatalf("%s: no recording", pkgRel)
+		}
+		fp, _, _, ok := fingerprintFromConfig(recs[0].Config)
+		if !ok {
+			t.Fatalf("%s recording lacks current format", pkgRel)
+		}
+		manifest, err := base64.RawURLEncoding.DecodeString(fp.RuntimeInputs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(string(manifest), "sb-"); got != wantScratch {
+			t.Fatalf("%s manifest scratch identities = %v, want %v; manifest: %s", pkgRel, got, wantScratch, manifest)
+		}
+	}
+}

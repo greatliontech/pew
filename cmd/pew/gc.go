@@ -244,6 +244,63 @@ func selectedBenchmarks(p pkgMeta) ([]string, error) {
 	return benches, nil
 }
 
+// scratchPatterns collects the package's //pew:scratch declarations
+// from its test files. Each directive names one run-scratch pattern
+// (os.MkdirTemp shape: the minted string replaces the last "*", or
+// extends a pattern carrying none) under the package directory; the
+// observation ingest turns each into a gofresh scratch namespace, so
+// only reads proven absent at both observation-bracket endpoints admit
+// recordless. The directive is a durable in-source assertion exactly
+// like //gofresh:pure: its author takes the caller-side soundness
+// responsibility — absence-probes matching the pattern forfeit their
+// appearance-pin (spec §7.8). Only line comments carry directives
+// (Go's directive convention; block comments never match), and each
+// directive carries exactly one single-component pattern: a bare
+// marker, a separator-bearing pattern, or several whitespace-split
+// tokens are refused loudly BEFORE the measurement runs — the silent
+// alternative would pay for the run and then record it incomplete or
+// noisy.
+func scratchPatterns(p pkgMeta) ([]string, error) {
+	files := append([]string{}, p.TestGoFiles...)
+	files = append(files, p.XTestGoFiles...)
+	fset := token.NewFileSet()
+	seen := map[string]bool{}
+	var patterns []string
+	for _, name := range files {
+		file, err := parser.ParseFile(fset, filepath.Join(p.Dir, name), nil, parser.ParseComments)
+		if err != nil {
+			return nil, err
+		}
+		for _, group := range file.Comments {
+			for _, comment := range group.List {
+				rest, ok := strings.CutPrefix(comment.Text, "//pew:scratch")
+				if !ok {
+					continue
+				}
+				if rest != "" && rest[0] != ' ' && rest[0] != '\t' {
+					continue
+				}
+				pattern := strings.TrimSpace(rest)
+				if pattern == "" {
+					return nil, fmt.Errorf("%s: //pew:scratch directive carries no pattern", name)
+				}
+				if strings.ContainsAny(pattern, "/\\") {
+					return nil, fmt.Errorf("%s: //pew:scratch pattern %q carries a path separator; one single-component pattern per directive", name, pattern)
+				}
+				if strings.ContainsAny(pattern, " \t") {
+					return nil, fmt.Errorf("%s: //pew:scratch carries %q; one single-component pattern per directive", name, pattern)
+				}
+				if !seen[pattern] {
+					seen[pattern] = true
+					patterns = append(patterns, pattern)
+				}
+			}
+		}
+	}
+	sort.Strings(patterns)
+	return patterns, nil
+}
+
 func benchmarksInFiles(dir string, names []string) (map[string]bool, error) {
 	benches := map[string]bool{}
 	fset := token.NewFileSet()

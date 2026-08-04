@@ -6,7 +6,6 @@ close-out convention.
 
 | slug | summary | Lands |
 |------|---------|-------|
-| [bench-scratch-dirs-recorded-as-runtime-inputs](bench-scratch-dirs-recorded-as-runtime-inputs.md) | run-created package-dir scratch paths land in the runtime-input manifest: noise at any size, permanent verification churn | with the next observation-strategy revision (gofresh runtimeinput classification), or sooner on a second consumer's churn |
 | [recorded-config-trust](recorded-config-trust.md) | whitelisted toolchain-key values are spoofable in-stream; historical foreign keys unpoliced at read time | when a spoofed value or foreign-key fragmentation is observed, or when read-side recording validation is next designed |
 | [remote-bench-execution](remote-bench-execution.md) | run measurements on a dedicated homelab bench machine: gRPC-over-SSH `pew agent`, machine lease, off-box builds, calibration drift-vet | when a dedicated bench machine is provisioned and measurements first need to run on it |
 | [per-benchmark-view-builds](per-benchmark-view-builds.md) | verdict surfaces build one analysis view per benchmark (two per inert-growth rider); a per-package batch check would share it | when a package's verdict pass measurably dominates status/stat latency, or when the verdict surfaces are next restructured |
@@ -25,4 +24,4 @@ index:
 - **[one-go-invocation-environment](one-go-invocation-environment.md)** — gotool.RunIn inherits
   `$PWD` while run.Execute pins it, so go list can report a symlink-alias module dir the
   measurement machinery bridges case-by-case; one pinned-environment mechanism would hold by
-  construction. *Lands: the next pew work item.*
+  construction. *Lands: the cross-tool train's dedicated pew chunk (gofresh docs/plans/cross-tool-train.md), after the gomutant tail.*

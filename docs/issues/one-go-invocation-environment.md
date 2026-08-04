@@ -10,4 +10,4 @@ regression net). Unifying every go invocation on the pinned-environment
 mechanism would make the resolved-dir premise hold by construction and
 delete the per-site bridging.
 
-Lands: the next pew work item.
+Lands: the cross-tool train's dedicated pew chunk (gofresh docs/plans/cross-tool-train.md), after the gomutant tail.

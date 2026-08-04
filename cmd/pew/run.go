@@ -198,6 +198,10 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 	if len(benches) == 0 {
 		return nil
 	}
+	scratch, err := scratchPatterns(p)
+	if err != nil {
+		return err
+	}
 	runBenches, err := matchingBenchmarks(benches, rc.opts.Bench)
 	if err != nil {
 		return err
@@ -332,7 +336,7 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 			return fmt.Errorf("run: %s: thermal throttling during measurement (--strict)", p.ImportPath)
 		}
 	}
-	runtimeState, err := run.IngestObservation(frame, testlogPath, p.Module.Dir, "package-test-binary:"+p.ImportPath, env, envRoots)
+	runtimeState, err := run.IngestObservation(frame, testlogPath, p.Module.Dir, "package-test-binary:"+p.ImportPath, env, envRoots, scratch...)
 	if err != nil {
 		return err
 	}

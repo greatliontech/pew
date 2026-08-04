@@ -511,8 +511,22 @@ runtime-input contract defines: the measurement invocation carries a `-test.test
 (passed through `go test`'s argument passthrough), an observation **bracket** is fingerprinted over
 the package directory immediately before the invocation (VCS bookkeeping excluded), and the capture
 is ingested with the completed-process and bracket options plus the toolchain, module-cache,
-build-cache, and ephemeral-temp classifications. The resulting completed observation's manifest and
-digest ride the recording (`pew-runtime-inputs`, `pew-runtime`), so the runtime-input guard is real
+build-cache, and ephemeral-temp classifications, and — where the package declares them — its
+run-scratch namespaces. A **`//pew:scratch <pattern>`** directive in any of the package's
+build-selected test files (a durable in-source line-comment assertion, the same channel as
+`//gofresh:pure`; one single-component pattern per directive, malformed shapes refused loudly before
+the measurement runs) names one `os.MkdirTemp`-shaped scratch pattern under the package directory;
+ingest turns each into a Gofresh scratch namespace, so a read matching the pattern records nothing
+exactly when the engine proves it absent at both bracket endpoints — pre-existing, surviving, and
+consumed-and-removed state all stay observed. The
+declaration exists because the identity-only testlog cannot distinguish a bench's own scratch
+(created, read, and removed within the run — recording it is unre-observable noise whose random
+per-run names permanently churn evidence comparison) from an absence-probe whose later appearance
+must stale the recording; the directive supplies that missing bit, and its author takes the one
+forfeited protection — absence-probes matching the pattern lose their appearance-pin, one namespace
+wide — as a caller-side soundness responsibility, exactly like a path exclusion. The resulting
+completed observation's manifest and digest ride the recording (`pew-runtime-inputs`,
+`pew-runtime`), so the runtime-input guard is real
 evidence: a moved observed input stales the recording instead of hiding behind blanket
 incompleteness, and content the ingest itself cannot vouch for (an unrecognized operation, a moved
 bracket) stays fail-closed inside the manifest as its own unverifiable entries.

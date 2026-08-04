@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
 // Every fallback leg of the completed-observation conjunction records
@@ -111,5 +113,50 @@ func TestIngestObservationClassifiesToolchainReads(t *testing.T) {
 	}
 	if !state.Unverifiable {
 		t.Fatalf("out-of-root read completed without the classification, want sealed: %+v", state)
+	}
+}
+
+// A declared scratch pattern becomes a gofresh scratch namespace over
+// the package directory: an endpoint-absent read matching it records
+// nothing, while the same read without the declaration records its
+// identity — pinning the option wiring the ingest carries (spec §7.8).
+func TestIngestObservationAppliesScratchNamespaces(t *testing.T) {
+	dir := t.TempDir()
+	frame := CaptureObservationFrame(context.Background(), dir, ".")
+	if frame.Reason != "" {
+		t.Fatalf("frame capture failed: %s", frame.Reason)
+	}
+	capture := filepath.Join(t.TempDir(), "log")
+	if err := os.WriteFile(capture, []byte("# test log\nopen bench-xyz/out.txt\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", t.TempDir())
+	env := os.Environ()
+
+	state, err := IngestObservation(frame, capture, dir, "package-test-binary:probe", env, GoEnvRoots{}, "bench-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Unverifiable {
+		t.Fatalf("scratch-declared ingest sealed: %+v", state)
+	}
+	paths, err := runtimeinput.Paths(state.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 0 {
+		t.Fatalf("declared scratch read recorded: %v", paths)
+	}
+
+	state, err = IngestObservation(frame, capture, dir, "package-test-binary:probe", env, GoEnvRoots{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err = runtimeinput.Paths(state.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("undeclared scratch read not recorded: %v", paths)
 	}
 }

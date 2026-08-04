@@ -22,6 +22,7 @@ import (
 type ObservationFrame struct {
 	Root    string
 	PkgDir  string
+	PkgRel  string
 	Bracket runtimeinput.Bracket
 	Reason  string
 }
@@ -50,7 +51,7 @@ func CaptureObservationFrame(ctx context.Context, moduleDir, pkgRel string) Obse
 	if err != nil {
 		return ObservationFrame{Reason: fmt.Sprintf("observation bracket capture failed: %v", err)}
 	}
-	return ObservationFrame{Root: root, PkgDir: pkgDir, Bracket: bracket}
+	return ObservationFrame{Root: root, PkgDir: pkgDir, PkgRel: filepath.ToSlash(rel), Bracket: bracket}
 }
 
 // GoEnvRoots carries the toolchain-mediated classification roots the
@@ -85,8 +86,14 @@ func ReadGoEnvRoots(moduleDir string, env []string) (GoEnvRoots, error) {
 // incomplete disposition — a process that dies before harness
 // completion, a capture the binary never opened, or a missing frame
 // records incomplete with the honest reason; absence would assert "no
-// runtime inputs" and serve (spec §7.8).
-func IngestObservation(frame ObservationFrame, logPath, moduleDir, identity string, env []string, roots GoEnvRoots) (runtimeinput.State, error) {
+// runtime inputs" and serve (spec §7.8). scratch carries the package's
+// declared run-scratch name patterns (the //pew:scratch directive):
+// each becomes a gofresh scratch namespace over the package directory,
+// admitting recordless only reads the engine proves absent at both
+// bracket endpoints — the declaration forfeits exactly the
+// appearance-pin of absence-probes matching the pattern, the
+// caller-side responsibility the directive's author takes on.
+func IngestObservation(frame ObservationFrame, logPath, moduleDir, identity string, env []string, roots GoEnvRoots, scratch ...string) (runtimeinput.State, error) {
 	incomplete := func(reason string) (runtimeinput.State, error) {
 		observation, err := runtimeinput.IncompleteEnv(moduleDir, identity, reason, env)
 		if err != nil {
@@ -124,6 +131,9 @@ func IngestObservation(frame ObservationFrame, logPath, moduleDir, identity stri
 		// soundness responsibility gofresh's exclusion contract assigns.
 		runtimeinput.WithExcludedPaths(".", ".git"),
 		runtimeinput.WithEphemeralTempRoot(filepath.Clean(os.TempDir())),
+	}
+	for _, pattern := range scratch {
+		opts = append(opts, runtimeinput.WithScratchNamespace(frame.PkgRel, pattern))
 	}
 	if roots.Toolchain != "" {
 		opts = append(opts, runtimeinput.WithToolchainRoot(roots.Toolchain))
