@@ -26,3 +26,4 @@ index:
   `$PWD` while run.Execute pins it, so go list can report a symlink-alias module dir the
   measurement machinery bridges case-by-case; one pinned-environment mechanism would hold by
   construction. *Lands: the cross-tool train's dedicated pew chunk (gofresh docs/plans/cross-tool-train.md), after the gomutant tail.*
+- **[bench-dir-recordings-count-as-tree-dirt](bench-dir-recordings-count-as-tree-dirt.md)** — a multi-package recording session self-poisons provenance: earlier runs' recording files dirty the tree for later runs, though the measured closure is the committed commit; the dirtiness judgment should exclude the bench-dir. *Lands: the cross-tool train's dedicated pew chunk.*
