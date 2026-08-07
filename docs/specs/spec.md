@@ -91,7 +91,7 @@ profile differs between packages (§9):
 | `machine`            | machine fingerprint id (§8)                                   | yes              |
 | `buildconfig`        | digest of build tags + relevant GOFLAGS/gcflags + cgo + PGO profile **content** | yes |
 | `runtimeconfig`      | digest of Go runtime-config env (GOGC/GODEBUG/GOMEMLIMIT/GOMAXPROCS), §7 | yes  |
-| `dirty`              | `true` if the working tree had uncommitted changes at run    | yes              |
+| `dirty`              | `true` if the working tree had uncommitted changes at run, the recording store (bench-dir) excluded — pew's own outputs are never part of the measured subject | yes              |
 | `pew-runconditions`  | observed transient run conditions at run time (§9)           | yes              |
 | `pew-runtime`        | digest of runtime-input evidence (§7.8)                      | derived          |
 | `pew-runtime-inputs` | encoded runtime-input manifest or incomplete disposition (§7.8) | yes            |
@@ -140,6 +140,14 @@ observed identities (§7.8).
 
 A `dirty` run is recorded but flagged: its `commit` does not faithfully describe its source, so
 its closure is computed from the *working tree*, and it is never usable as a pinned baseline.
+The recording store itself is excluded from the dirtiness judgment and from the pinned
+repository-state bracket wholesale: recordings are pew's own outputs, never part of any measured
+subject, so a multi-package session's earlier recordings cannot poison later runs' provenance —
+anything else under the tree stays dirty-relevant. The exclusion is subtree-wide over the
+invocation's union of module stores, resolved symlink-free, with its precondition enforced: a run
+refuses when any measured source file lies under a store, because source hiding in the excluded
+subtree could move mid-run unseen — the false-valid direction. The index hash keeps store entries:
+staging a recording is an operator act, and mid-run index motion still aborts.
 
 ### 5.1 Identity vs validity
 
@@ -737,7 +745,10 @@ provenance is captured atomically with the run:
   writing any result. One immutable complete process-environment snapshot configures the view, the
   driver and inherited package test binary, and the observation's construction — spawn and
   ingestion use the same environment, with `PWD` pinned to the package directory the driver gives
-  the test binary. Source, guard,
+  the test binary. The same policy governs every go invocation pew makes — measurement, list,
+  env, and module probes alike: the working directory is resolved symlink-free and `PWD` pinned
+  to it, so the resolved-directory premise holds by construction through a symlinked checkout
+  whose shell exports the alias, with no per-site bridging. Source, guard,
   purity, commit, or worktree-state drift aborts the package write. Every destination is
   staged before replacement and every returned commit failure restores the prior complete set, so one
   package run is one producer transaction across ordinary filesystem errors. Each file is individually

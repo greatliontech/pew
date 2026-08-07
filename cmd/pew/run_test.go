@@ -18,7 +18,6 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/pew/internal/gitblob"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
@@ -72,7 +71,7 @@ func TestRestrictBenchmarkPatternPreservesSubBenchmarkSelection(t *testing.T) {
 	}
 }
 
-func TestGitStateCacheSharesOnlyRecordedWritesAcrossModules(t *testing.T) {
+func TestGitStateCacheExcludesRecordingStoresAcrossModules(t *testing.T) {
 	root := t.TempDir()
 	nested := filepath.Join(root, "nested")
 	if err := os.Mkdir(nested, 0o755); err != nil {
@@ -100,9 +99,12 @@ func TestGitStateCacheSharesOnlyRecordedWritesAcrossModules(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cache := newGitStateCache()
-	rootState, err := cache.state(root)
-	if err != nil {
+	// The invocation-wide union of recording stores is excluded from the
+	// pinned repository state (spec §5): a sibling module's recordings
+	// never taint this module's baseline, while source mutation anywhere
+	// stays visible.
+	cache := newGitStateCache([]string{filepath.Join(root, "benchmarks"), filepath.Join(nested, "benchmarks")})
+	if _, err := cache.state(root); err != nil {
 		t.Fatal(err)
 	}
 	nestedState, err := cache.state(nested)
@@ -116,22 +118,21 @@ func TestGitStateCacheSharesOnlyRecordedWritesAcrossModules(t *testing.T) {
 	if err := os.WriteFile(recording, []byte("result"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cache.recordWrites(rootState.Root(), []string{recording})
-	current, err := gitblob.Snapshot(nested)
+	current, err := cache.snapshot(nested)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !nestedState.EqualExceptPaths(current, cache.writtenPaths(nestedState.Root())) {
+	if !nestedState.Equal(current) {
 		t.Fatal("earlier recording write tainted nested-module baseline")
 	}
 	if err := os.WriteFile(nestedSource, []byte("package nested\n// changed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	current, err = gitblob.Snapshot(nested)
+	current, err = cache.snapshot(nested)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if nestedState.EqualExceptPaths(current, cache.writtenPaths(nestedState.Root())) {
+	if nestedState.Equal(current) {
 		t.Fatal("unrecorded source mutation was excluded")
 	}
 }
@@ -354,7 +355,7 @@ func TestRunPackageRecordsProvidedConditions(t *testing.T) {
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 		throttle: func() runpkg.ThrottleSnapshot { return runpkg.ThrottleSnapshot{"c0": 5} },
 	}
-	if err := runPackage(&out, io.Discard, e, newGitStateCache(), rc, pkgs[0], env, conditions, ""); err != nil {
+	if err := runPackage(&out, io.Discard, e, newGitStateCache(nil), rc, pkgs[0], env, conditions, ""); err != nil {
 		t.Fatalf("runPackage: %v\nstdout:\n%s", err, out.String())
 	}
 	recs, err := store.New(benchDir).Read("", "BenchmarkWire", "")
@@ -418,7 +419,7 @@ func TestRunPackageRecordsThrottleDelta(t *testing.T) {
 		benchDir := filepath.Join(t.TempDir(), "benchmarks")
 		var out, errOut bytes.Buffer
 		rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}, throttle: movingCounter()}
-		if err := runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
+		if err := runPackage(&out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
 			t.Fatalf("runPackage: %v", err)
 		}
 		recs, err := store.New(benchDir).Read("", "BenchmarkHot", "")
@@ -451,7 +452,7 @@ func TestRunPackageRecordsThrottleDelta(t *testing.T) {
 		}
 		var out, errOut bytes.Buffer
 		rc := runConfig{benchDir: benchDir, strict: true, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}, throttle: movingCounter()}
-		err = runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, "")
+		err = runPackage(&out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, "")
 		if err == nil || !strings.Contains(err.Error(), "thermal throttling during measurement") {
 			t.Fatalf("err = %v, want the strict throttling refusal", err)
 		}
@@ -489,7 +490,7 @@ func TestRunPackageRecordsThrottleDelta(t *testing.T) {
 				return []byte("goos: linux\ngoarch: amd64\npkg: example.com/throttlewire\ncpu: T\nBenchmarkHot-8 1 5 ns/op\nPASS\n"), nil
 			},
 		}
-		if err := runPackage(io.Discard, io.Discard, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
+		if err := runPackage(io.Discard, io.Discard, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
 			t.Fatalf("runPackage: %v", err)
 		}
 		want := []string{"build", "snapshot", "measure", "snapshot"}
@@ -609,7 +610,7 @@ func TestRunPackagePGOContentMovesBuildconfig(t *testing.T) {
 		}
 		var out bytes.Buffer
 		rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}
-		if err := runPackage(&out, io.Discard, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, pgoInput); err != nil {
+		if err := runPackage(&out, io.Discard, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, pgoInput); err != nil {
 			t.Fatalf("runPackage: %v\nstdout:\n%s", err, out.String())
 		}
 		recs, err := store.New(benchDir).Read("", "BenchmarkPGO", "")
@@ -716,7 +717,7 @@ func TestRunPackageDefaultPGOMovesBuildconfig(t *testing.T) {
 		}
 		var out bytes.Buffer
 		rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}
-		if err := runPackage(&out, io.Discard, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, pgoInput); err != nil {
+		if err := runPackage(&out, io.Discard, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, pgoInput); err != nil {
 			t.Fatalf("runPackage: %v\nstdout:\n%s", err, out.String())
 		}
 		recs, err := store.New(benchDir).Read("", "BenchmarkMain", "")
@@ -804,7 +805,7 @@ func TestRunPackageRefusesPGOProfileDrift(t *testing.T) {
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
 	var out bytes.Buffer
 	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}
-	err = runPackage(&out, io.Discard, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, pgoInput)
+	err = runPackage(&out, io.Discard, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, pgoInput)
 	if err == nil || !strings.Contains(err.Error(), "effective PGO input changed") {
 		t.Fatalf("err = %v, want the PGO drift refusal", err)
 	}
@@ -874,7 +875,7 @@ func TestRunPackageSalvagesCorruptStream(t *testing.T) {
 	}
 	var out, errOut bytes.Buffer
 	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 2, Benchtime: "1x", Bench: "."}}
-	refusal := runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, "")
+	refusal := runPackage(&out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, "")
 	if refusal == nil {
 		t.Fatalf("corrupted stream reported no error\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
 	}
@@ -967,7 +968,7 @@ func TestRunPackageDropsForeignStreamConfig(t *testing.T) {
 	}
 	var out, errOut bytes.Buffer
 	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 2, Benchtime: "1x", Bench: "."}}
-	if err := runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
+	if err := runPackage(&out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
 		t.Fatalf("runPackage: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if !strings.Contains(errOut.String(), `dropping stream configuration key "raft"`) {
@@ -1049,7 +1050,7 @@ func TestRunPackageRefusesUnattributableOrphan(t *testing.T) {
 	}
 	var out, errOut bytes.Buffer
 	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}
-	refusal := runPackage(&out, &errOut, e, newGitStateCache(), rc, pkgs[0], env, runpkg.Conditions{}, "")
+	refusal := runPackage(&out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, "")
 	if refusal == nil {
 		t.Fatalf("unattributable orphan reported no error\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
 	}
@@ -1396,5 +1397,47 @@ func BenchmarkScratch(b *testing.B) {
 		if got := strings.Contains(string(manifest), "sb-"); got != wantScratch {
 			t.Fatalf("%s manifest scratch identities = %v, want %v; manifest: %s", pkgRel, got, wantScratch, manifest)
 		}
+	}
+}
+
+// moduleBenchDir resolves through symlinks even when the store does not
+// exist yet — the nearest existing ancestor resolves and the tail rejoins —
+// so a relative --bench-dir made absolute through an alias cwd still
+// matches the resolved paths the exclusion compares against (spec §5).
+func TestModuleBenchDirResolvesThroughMissingStore(t *testing.T) {
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	if err := os.Mkdir(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(base, "alias")
+	if err := os.Symlink(real, alias); err != nil {
+		t.Fatal(err)
+	}
+	resolvedReal, err := filepath.EvalSymlinks(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := moduleBenchDir("", alias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(resolvedReal, "benchmarks"); got != want {
+		t.Fatalf("moduleBenchDir(alias) = %q, want %q", got, want)
+	}
+}
+
+// The exclusion's precondition is enforced, not assumed: measured source
+// under the recording store refuses the run (spec §5).
+func TestRejectStoreCoveredSources(t *testing.T) {
+	base := t.TempDir()
+	store := filepath.Join(base, "benchmarks")
+	src := filepath.Join(store, "pkg", "code.go")
+	if err := rejectStoreCoveredSources([]string{src}, store); err == nil {
+		t.Fatal("measured source under the store accepted")
+	}
+	outside := filepath.Join(base, "pkg", "code.go")
+	if err := rejectStoreCoveredSources([]string{outside}, store); err != nil {
+		t.Fatalf("source outside the store refused: %v", err)
 	}
 }

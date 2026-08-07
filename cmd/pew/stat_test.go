@@ -803,14 +803,14 @@ func TestNonValidUsesLabel(t *testing.T) {
 	write("", fp.MaximalClosure)
 	write("x", fp.MaximalClosure+"-stale")
 
-	need, err := nonValid(st, e, newGitStateCache(), ".", pkg, "", ".", "x", []string{bench})
+	need, err := nonValid(st, e, pkg, "", ".", "x", []string{bench})
 	if err != nil {
 		t.Fatalf("nonValid labeled: %v", err)
 	}
 	if len(need) != 1 || need[0] != bench {
 		t.Fatalf("labeled nonValid = %v, want [%s]", need, bench)
 	}
-	need, err = nonValid(st, e, newGitStateCache(), ".", pkg, "", ".", "", []string{bench})
+	need, err = nonValid(st, e, pkg, "", ".", "", []string{bench})
 	if err != nil {
 		t.Fatalf("nonValid unlabeled: %v", err)
 	}

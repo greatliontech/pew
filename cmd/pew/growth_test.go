@@ -110,26 +110,12 @@ func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
 	}
 
 	// The run path rewrites the recording under the refreshed pin: nonValid
-	// reports nothing to run, the next verdict is plainly valid, and the
-	// rewrite registers with the repository-state bracket so the run's
-	// state comparison does not read it as the tree moving (spec §9).
-	gc := newGitStateCache()
-	need, err := nonValid(st, e, gc, tmp, pkg, "", tmp, "", []string{bench})
+	// reports nothing to run and the next verdict is plainly valid. The
+	// rewrite lands under the recording store, which the repository-state
+	// bracket excludes wholesale (spec §5) — no per-write registration.
+	need, err := nonValid(st, e, pkg, "", tmp, "", []string{bench})
 	if err != nil || len(need) != 0 {
 		t.Fatalf("nonValid after inert growth = %v, %v; want none", need, err)
-	}
-	refreshedPath, err := st.Path("", bench, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	registered := false
-	for _, path := range gc.writtenPaths(tmp) {
-		if path == refreshedPath {
-			registered = true
-		}
-	}
-	if !registered {
-		t.Fatal("refreshed recording not registered with the repository-state bracket")
 	}
 	recs, err := st.Read("", bench, "")
 	if err != nil {

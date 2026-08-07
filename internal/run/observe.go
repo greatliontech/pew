@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/pew/internal/gotool"
 )
 
 // ObservationFrame is the pre-spawn half of the completed-observation
@@ -68,8 +69,9 @@ type GoEnvRoots struct {
 // and environment the measurement runs under.
 func ReadGoEnvRoots(moduleDir string, env []string) (GoEnvRoots, error) {
 	cmd := exec.Command("go", "env", "-json", "GOROOT", "GOMODCACHE", "GOCACHE")
-	cmd.Dir = moduleDir
-	cmd.Env = env
+	resolved := gotool.CommandDir(moduleDir)
+	cmd.Dir = resolved
+	cmd.Env = gotool.CommandEnvironment(env, resolved)
 	out, err := cmd.Output()
 	if err != nil {
 		return GoEnvRoots{}, fmt.Errorf("go env: %w", err)
@@ -114,15 +116,12 @@ func IngestObservation(frame ObservationFrame, logPath, moduleDir, identity stri
 	if !bytes.HasPrefix(log, []byte("# test log")) {
 		return incomplete("testlog capture carries no test-log header; the test binary never opened it")
 	}
-	// Spawn and ingestion MUST use the same environment: the measurement
-	// invocation runs from the frame's resolved root, so the go tool
-	// hands the test binary exactly frame.PkgDir as its PWD, and the
-	// ingested env pins the same value — a divergent PWD is a
-	// process-local input that seals the observation.
-	processEnv, err := commandEnvironment(env, frame.PkgDir)
-	if err != nil {
-		return incomplete(fmt.Sprintf("testlog ingest environment: %v", err))
-	}
+	// Spawn and ingestion MUST use the same environment: Execute pins the
+	// resolved working directory by construction, so the go tool hands
+	// the test binary exactly frame.PkgDir (already resolved by the frame
+	// capture) as its PWD, and the ingested env pins the same value — a
+	// divergent PWD is a process-local input that seals the observation.
+	processEnv := gotool.CommandEnvironment(env, frame.PkgDir)
 	opts := []runtimeinput.TestLogOption{
 		runtimeinput.WithCompletedProcess(identity),
 		runtimeinput.WithBracket(frame.Bracket),

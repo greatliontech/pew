@@ -12,13 +12,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/pew/internal/gotool"
 	"golang.org/x/perf/benchfmt"
 )
 
@@ -52,12 +52,9 @@ func Execute(dir, pin string, env, args []string) ([]byte, error) {
 		name, full = "taskset", append([]string{"-c", pin, "go"}, args...)
 	}
 	cmd := exec.Command(name, full...)
-	cmd.Dir = dir
-	commandEnv, err := commandEnvironment(env, dir)
-	if err != nil {
-		return nil, fmt.Errorf("run: command environment: %w", err)
-	}
-	cmd.Env = commandEnv
+	resolved := gotool.CommandDir(dir)
+	cmd.Dir = resolved
+	cmd.Env = gotool.CommandEnvironment(env, resolved)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
@@ -65,29 +62,6 @@ func Execute(dir, pin string, env, args []string) ([]byte, error) {
 			name, strings.Join(full, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
-}
-
-func commandEnvironment(env []string, dir string) ([]string, error) {
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return nil, err
-	}
-	command := make([]string, 0, len(env)+1)
-	for _, entry := range env {
-		name, _, ok := strings.Cut(entry, "=")
-		if ok && equalEnvKey(name, "PWD") {
-			continue
-		}
-		command = append(command, entry)
-	}
-	return append(command, "PWD="+abs), nil
-}
-
-func equalEnvKey(left, right string) bool {
-	if runtime.GOOS == "windows" {
-		return strings.EqualFold(left, right)
-	}
-	return left == right
 }
 
 // A CorruptLine is one line of the transient `go test` stream that carried
@@ -363,8 +337,9 @@ func BenchName(resultName string) string {
 // either channel is seen. Scanning the process env alone misses the env file.
 func EffectiveGoflags(moduleDir string, env []string) (string, error) {
 	cmd := exec.Command("go", "env", "GOFLAGS")
-	cmd.Dir = moduleDir
-	cmd.Env = env
+	resolved := gotool.CommandDir(moduleDir)
+	cmd.Dir = resolved
+	cmd.Env = gotool.CommandEnvironment(env, resolved)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("run: go env GOFLAGS: %w", err)

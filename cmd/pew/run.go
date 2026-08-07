@@ -110,7 +110,22 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 			return fmt.Errorf("run: refusing to run under noisy conditions (--strict)")
 		}
 	}
-	gc := newGitStateCache()
+	var excludeDirs []string
+	seenExclude := map[string]bool{}
+	for _, p := range pkgs {
+		if p.Module.Dir == "" {
+			continue
+		}
+		benchDir, err := moduleBenchDir(rc.benchDir, p.Module.Dir)
+		if err != nil {
+			return err
+		}
+		if !seenExclude[benchDir] {
+			seenExclude[benchDir] = true
+			excludeDirs = append(excludeDirs, benchDir)
+		}
+	}
+	gc := newGitStateCache(excludeDirs)
 	env := os.Environ()
 	for _, p := range pkgs {
 		if p.Module.Dir == "" {
@@ -149,7 +164,7 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 // provenance recorded for the command.
 type gitStateCache struct {
 	entries map[string]gitStateResult
-	written map[string]map[string]bool
+	exclude []string
 }
 
 type gitStateResult struct {
@@ -157,10 +172,70 @@ type gitStateResult struct {
 	err   error
 }
 
-func newGitStateCache() *gitStateCache {
+// moduleBenchDir resolves the recording store for a module: the configured
+// bench-dir, or <module>/benchmarks, absolute and symlink-resolved — the
+// one subtree the repository-state bracket excludes (spec §5). Resolution
+// matters: the paths the exclusion must match are resolved (go list runs
+// under the pinned resolved-PWD policy), while a relative --bench-dir made
+// absolute through an alias cwd would silently never match. The store may
+// not exist yet, so the nearest existing ancestor resolves and the tail
+// rejoins.
+func moduleBenchDir(configured, moduleDir string) (string, error) {
+	dir := configured
+	if dir == "" {
+		dir = filepath.Join(moduleDir, "benchmarks")
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	ancestor, tail := abs, ""
+	for {
+		resolved, err := filepath.EvalSymlinks(ancestor)
+		if err == nil {
+			return filepath.Join(resolved, tail), nil
+		}
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			return abs, nil
+		}
+		tail = filepath.Join(filepath.Base(ancestor), tail)
+		ancestor = parent
+	}
+}
+
+// newGitStateCache pins repository state with the invocation-wide union of
+// recording stores excluded: in a multi-module repository, one module's
+// recordings must not taint a sibling module's provenance either
+// (spec §5).
+// rejectStoreCoveredSources enforces the exclusion's precondition: no
+// measured source may live under the recording store, because the store's
+// subtree is excluded from the worktree-state-drift guard wholesale — a
+// closure file hiding there could move mid-run unseen, the false-valid
+// direction (spec §5).
+func rejectStoreCoveredSources(sourceFiles []string, benchDirs ...string) error {
+	for _, src := range sourceFiles {
+		abs, err := filepath.Abs(src)
+		if err != nil {
+			return err
+		}
+		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = resolved
+		}
+		for _, benchDir := range benchDirs {
+			rel, err := filepath.Rel(benchDir, abs)
+			if err == nil && filepath.IsLocal(rel) {
+				return fmt.Errorf("run: measured source %s lies under the recording store %s; the store is excluded from worktree-state tracking, so it must not contain measured source", src, benchDir)
+			}
+		}
+	}
+	return nil
+}
+
+func newGitStateCache(excludeDirs []string) *gitStateCache {
 	return &gitStateCache{
 		entries: map[string]gitStateResult{},
-		written: map[string]map[string]bool{},
+		exclude: excludeDirs,
 	}
 }
 
@@ -168,26 +243,15 @@ func (c *gitStateCache) state(moduleDir string) (gitblob.RepositoryState, error)
 	if r, ok := c.entries[moduleDir]; ok {
 		return r.state, r.err
 	}
-	state, err := gitblob.Snapshot(moduleDir)
+	state, err := c.snapshot(moduleDir)
 	c.entries[moduleDir] = gitStateResult{state: state, err: err}
 	return state, err
 }
 
-func (c *gitStateCache) writtenPaths(repoRoot string) []string {
-	paths := make([]string, 0, len(c.written[repoRoot]))
-	for path := range c.written[repoRoot] {
-		paths = append(paths, path)
-	}
-	return paths
-}
-
-func (c *gitStateCache) recordWrites(repoRoot string, paths []string) {
-	if c.written[repoRoot] == nil {
-		c.written[repoRoot] = map[string]bool{}
-	}
-	for _, path := range paths {
-		c.written[repoRoot][path] = true
-	}
+// snapshot is the one Snapshot entry for the run path, carrying the
+// invocation-wide store exclusion.
+func (c *gitStateCache) snapshot(moduleDir string) (gitblob.RepositoryState, error) {
+	return gitblob.Snapshot(moduleDir, c.exclude...)
 }
 
 func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig, p pkgMeta, env []string, conditions run.Conditions, pgoInput string) error {
@@ -209,11 +273,7 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 	if len(runBenches) == 0 {
 		return nil
 	}
-	dir := rc.benchDir
-	if dir == "" {
-		dir = filepath.Join(p.Module.Dir, "benchmarks")
-	}
-	dir, err = filepath.Abs(dir)
+	dir, err := moduleBenchDir(rc.benchDir, p.Module.Dir)
 	if err != nil {
 		return err
 	}
@@ -227,7 +287,7 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 
 	opts := rc.opts
 	if rc.staleOnly {
-		need, err := nonValid(st, e, gc, baseline.Root(), p.ImportPath, pkgRel, p.Module.Dir, rc.label, runBenches)
+		need, err := nonValid(st, e, p.ImportPath, pkgRel, p.Module.Dir, rc.label, runBenches)
 		if err != nil {
 			return err
 		}
@@ -242,11 +302,11 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 		}
 		runBenches = need
 	}
-	startState, err := gitblob.Snapshot(p.Module.Dir)
+	startState, err := gc.snapshot(p.Module.Dir)
 	if err != nil {
 		return err
 	}
-	if !baseline.EqualExceptPaths(startState, gc.writtenPaths(baseline.Root())) {
+	if !baseline.Equal(startState) {
 		return fmt.Errorf("repository state moved before benchmark run")
 	}
 
@@ -313,15 +373,12 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 	// A benchmark failure makes `go test` exit non-zero and discards the whole
 	// package's run (the successful benches too) — a suspect package records
 	// nothing rather than a partial set.
-	// The measurement runs from the frame's resolved root so the go
-	// driver hands the test binary the same resolved package directory
-	// the ingest pins — byte-faithful even through a symlinked checkout.
-	measureDir := p.Module.Dir
-	if frame.Reason == "" {
-		measureDir = frame.Root
-	}
+	// run.Execute resolves the working directory and pins PWD to it by
+	// construction, so the go driver hands the test binary the same
+	// resolved package directory the ingest pins — byte-faithful even
+	// through a symlinked checkout, with no per-site bridging.
 	throttleBase := rc.snapshotThrottle()
-	out, err := rc.executeGo(measureDir, rc.pin, env, append(run.TestArgs(p.ImportPath, opts), "-args", "-test.testlogfile="+testlogPath))
+	out, err := rc.executeGo(p.Module.Dir, rc.pin, env, append(run.TestArgs(p.ImportPath, opts), "-args", "-test.testlogfile="+testlogPath))
 	if err != nil {
 		return err
 	}
@@ -385,7 +442,7 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 			return err
 		}
 	}
-	finalState, err := gitblob.Snapshot(p.Module.Dir)
+	finalState, err := gc.snapshot(p.Module.Dir)
 	if err != nil {
 		return err
 	}
@@ -430,6 +487,9 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 		}
 		recordingPaths = append(recordingPaths, path)
 	}
+	if err := rejectStoreCoveredSources(view.SourceFiles(), gc.exclude...); err != nil {
+		return err
+	}
 	if err := rejectRecordingDestinations(view.SourceFiles(), recordingPaths); err != nil {
 		return err
 	}
@@ -450,7 +510,7 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 	if pgoAtWrite != pgoInput {
 		return fmt.Errorf("effective PGO input changed during the benchmark run")
 	}
-	stateAtWrite, err := gitblob.Snapshot(p.Module.Dir)
+	stateAtWrite, err := gc.snapshot(p.Module.Dir)
 	if err != nil {
 		return err
 	}
@@ -460,7 +520,6 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 	if err := st.WriteBatch(writes); err != nil {
 		return err
 	}
-	gc.recordWrites(baseline.Root(), recordingPaths)
 	sort.Strings(written)
 	for _, name := range written {
 		fmt.Fprintf(w, "recorded     %s.%s\n", p.ImportPath, name)
@@ -636,7 +695,7 @@ func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {
 	return recs
 }
 
-func nonValid(st *store.Store, e *gofresh.Engine, gc *gitStateCache, repoRoot, pkgPath, pkgRel, moduleDir, label string, benches []string) ([]string, error) {
+func nonValid(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, label string, benches []string) ([]string, error) {
 	var need []string
 	for _, b := range benches {
 		v, _, fp, grownLedger, err := checkOne(st, e, pkgPath, pkgRel, moduleDir, b, label)
@@ -648,18 +707,13 @@ func nonValid(st *store.Store, e *gofresh.Engine, gc *gitStateCache, repoRoot, p
 			// the recording under the refreshed compartment pin and current
 			// ledger, so later verdicts read plainly valid instead of
 			// re-proving the same delta. The run path is the one writer;
-			// read-only surfaces never touch the store. The rewrite
-			// registers with the repository-state bracket exactly as
-			// runPackage's own recording writes do — an unregistered write
-			// reads as the tree moving under the run and aborts it.
+			// read-only surfaces never touch the store. The write lands
+			// under the recording store, which the repository-state
+			// bracket excludes wholesale — pew's outputs are never part of
+			// the measured subject (spec §5).
 			if err := refreshRecording(st, pkgRel, b, label, fp.TestVariantClosure, grownLedger); err != nil {
 				return nil, err
 			}
-			path, err := st.Path(pkgRel, b, label)
-			if err != nil {
-				return nil, err
-			}
-			gc.recordWrites(repoRoot, []string{path})
 		}
 		if v != verdictValid {
 			need = append(need, b)

@@ -28,8 +28,12 @@ type RepositoryState struct {
 // position (§6.1) — and dirty marks a tree whose recording cannot serve as a
 // baseline (§10). Neither is a validity guard: freshness is commit-independent.
 // Worktree status is the documented slow path on large repos (§11).
-func State(dir string) (commit string, dirty bool, err error) {
-	state, err := Snapshot(dir)
+// excludeDirs names absolute directories whose contents are pew's own
+// outputs — the recording store — and never part of any measured subject:
+// status entries under them contribute neither to dirty nor to the pinned
+// worktree signatures (spec §5).
+func State(dir string, excludeDirs ...string) (commit string, dirty bool, err error) {
+	state, err := Snapshot(dir, excludeDirs...)
 	if err != nil {
 		return "", false, err
 	}
@@ -37,7 +41,7 @@ func State(dir string) (commit string, dirty bool, err error) {
 }
 
 // Snapshot returns the exact repository state relevant to dirty provenance.
-func Snapshot(dir string) (RepositoryState, error) {
+func Snapshot(dir string, excludeDirs ...string) (RepositoryState, error) {
 	r, err := Open(dir)
 	if err != nil {
 		return RepositoryState{}, err
@@ -70,9 +74,27 @@ func Snapshot(dir string) (RepositoryState, error) {
 		fmt.Fprintf(indexHash, "%s\x00%s\x00%d\x00%d\x00%t\x00%t\n", entry.Name, entry.Hash, entry.Mode, entry.Stage, entry.SkipWorktree, entry.IntentToAdd)
 	}
 
+	// The exclusion covers dirty and the worktree signatures only; the
+	// index hash deliberately keeps store entries — staging a recording is
+	// an operator act, and mid-run index motion must still abort.
+	excluded := func(path string) bool {
+		abs := filepath.Join(r.root, filepath.FromSlash(path))
+		for _, dir := range excludeDirs {
+			rel, err := filepath.Rel(dir, abs)
+			if err == nil && filepath.IsLocal(rel) {
+				return true
+			}
+		}
+		return false
+	}
 	paths := make([]string, 0, len(st))
+	dirty := false
 	for path := range st {
+		if excluded(path) {
+			continue
+		}
 		paths = append(paths, path)
+		dirty = true
 	}
 	sort.Strings(paths)
 	worktree := make(map[string]string, len(paths))
@@ -86,7 +108,7 @@ func Snapshot(dir string) (RepositoryState, error) {
 	}
 	return RepositoryState{
 		Commit:   head.Hash().String(),
-		Dirty:    !st.IsClean(),
+		Dirty:    dirty,
 		root:     r.root,
 		index:    fmt.Sprintf("%x", indexHash.Sum(nil)),
 		worktree: worktree,
@@ -100,21 +122,6 @@ func (s RepositoryState) Equal(other RepositoryState) bool {
 
 // Root returns the absolute worktree root represented by the snapshot.
 func (s RepositoryState) Root() string { return s.root }
-
-// EqualExceptPaths reports whether two snapshots differ only at the listed
-// absolute paths. Callers use it for files they have themselves replaced.
-func (s RepositoryState) EqualExceptPaths(other RepositoryState, excludedPaths []string) bool {
-	excluded := make(map[string]bool, len(excludedPaths))
-	if filepath.Clean(s.root) == filepath.Clean(other.root) {
-		for _, path := range excludedPaths {
-			rel, err := filepath.Rel(s.root, path)
-			if err == nil && filepath.IsLocal(rel) {
-				excluded[filepath.ToSlash(rel)] = true
-			}
-		}
-	}
-	return s.equalExcept(other, excluded)
-}
 
 func (s RepositoryState) equalExcept(other RepositoryState, excluded map[string]bool) bool {
 	if s.Commit != other.Commit || s.index != other.index || filepath.Clean(s.root) != filepath.Clean(other.root) {
