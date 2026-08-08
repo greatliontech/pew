@@ -1,8 +1,6 @@
 # Recorded-configuration trust residuals: whitelisted-value spoofing, historical foreign keys
 
-Lands: when a spoofed toolchain key value or foreign-key grouping fragmentation is observed in a
-real recording, or when read-side recording validation is next designed
-
+Lands: cross-tool train chunk 44.
 ## Gap (two residuals left by the closed recording key set, spec §5 / INV-12)
 
 The closed-key-set enforcement is write-side and key-based; two adjacent trust gaps remain:

@@ -6,10 +6,11 @@ close-out convention.
 
 | slug | summary | Lands |
 |------|---------|-------|
-| [recorded-config-trust](recorded-config-trust.md) | whitelisted toolchain-key values are spoofable in-stream; historical foreign keys unpoliced at read time | when a spoofed value or foreign-key fragmentation is observed, or when read-side recording validation is next designed |
+| [recorded-config-trust](recorded-config-trust.md) | whitelisted toolchain-key values are spoofable in-stream; historical foreign keys unpoliced at read time | cross-tool train chunk 44 |
 | [remote-bench-execution](remote-bench-execution.md) | run measurements on a dedicated homelab bench machine: gRPC-over-SSH `pew agent`, machine lease, off-box builds, calibration drift-vet | when a dedicated bench machine is provisioned and measurements first need to run on it |
-| [per-benchmark-view-builds](per-benchmark-view-builds.md) | verdict surfaces build one analysis view per benchmark (two per inert-growth rider); a per-package batch check would share it | when a package's verdict pass measurably dominates status/stat latency, or when the verdict surfaces are next restructured |
+| [per-benchmark-view-builds](per-benchmark-view-builds.md) | verdict surfaces build one analysis view per benchmark (two per inert-growth rider); a per-package batch check would share it | cross-tool train chunk 44 |
 | [profile-capture-attribution](profile-capture-attribution.md) | subject attribution is consumer hand protocol: capture profiles with recordings, attribution verdict in status, profile diff in stat | the cross-tool train's profile chunk (gofresh docs/plans/cross-tool-train.md) |
+| [derivation-ab-mode](derivation-ab-mode.md) | uncommitted-vs-ref A/B is a hand stash cycle in consumers; `pew ab` — both sides built first (worktree for the ref), interleaved runs, no tree mutation | cross-tool train chunk 44 |
 
 ## In-spec upgrade paths (tracked inline, not here)
 

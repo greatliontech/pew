@@ -1,8 +1,6 @@
 # Verdict surfaces build one analysis view per benchmark; a batch check per package would share it
 
-Lands: when a package's verdict pass measurably dominates status/stat
-latency, or when the verdict surfaces are next restructured.
-
+Lands: cross-tool train chunk 44.
 ## Observed
 
 checkOne runs one engine.Check per benchmark (one SSA load each — the
