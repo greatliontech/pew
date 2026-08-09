@@ -71,10 +71,12 @@ func explainRecordAgainstCurrent(w io.Writer, e *gofresh.Engine, moduleDir, impo
 	rows := guardRows(fp.Guards, curFP.Guards)
 	rows = append(rows, explainRow{"closure", fp.MaximalClosure, curFP.MaximalClosure})
 	rows = append(rows, explainRow{"test-variants", fp.TestVariantClosure, curFP.TestVariantClosure})
+	currentRuntime := ""
 	if fp.RuntimeInputs != "" {
 		if st, err := runtimeinput.CurrentEnv(fp.RuntimeInputs, moduleDir, env); err != nil {
 			rows = append(rows, explainRow{"runtime", fp.RuntimeDigest, "(uncomputable: " + err.Error() + ")"})
 		} else {
+			currentRuntime = st.Digest
 			rows = append(rows, explainRow{"runtime", fp.RuntimeDigest, st.Digest})
 		}
 	}
@@ -96,6 +98,25 @@ func explainRecordAgainstCurrent(w io.Writer, e *gofresh.Engine, moduleDir, impo
 	if len(d.Unverifiable) > 0 {
 		fmt.Fprintf(w, "    unverifiable observations: %v\n", d.Unverifiable)
 	}
+	// A moved digest names the moved inputs themselves (per-input digests
+	// in the manifest), not only what was watched — env entries as names,
+	// values never (§7.8).
+	if currentRuntime != "" && currentRuntime != fp.RuntimeDigest {
+		if line := movedInputsLine(ctx, fp.RuntimeInputs, moduleDir, env); line != "" {
+			fmt.Fprintf(w, "    moved inputs: %s\n", line)
+		}
+	}
+}
+
+// movedInputsLine renders the moved-input attribution behind a runtime
+// digest mismatch, best-effort: an attribution error or an empty result
+// yields no line, and the digest row stays the whole story.
+func movedInputsLine(ctx context.Context, manifest, moduleDir string, env []string) string {
+	moved, err := runtimeinput.MovedInputsContext(ctx, manifest, moduleDir, env)
+	if err != nil || len(moved) == 0 {
+		return ""
+	}
+	return strings.Join(moved, ", ")
 }
 
 // explainSides explains a skipped comparison between two recordings: the

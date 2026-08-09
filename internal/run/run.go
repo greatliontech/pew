@@ -489,6 +489,14 @@ type LedgerDeclaration struct {
 	Name     string `json:"name"`
 	Receiver string `json:"receiver,omitempty"`
 	Hash     string `json:"hash"`
+	// Package and References carry the declaration's package clause and
+	// referenced-name list (gofresh's diff identity and reference-walk
+	// inputs). A recording persisted before these fields decodes them
+	// empty, which gofresh treats as certifying nothing — the growth
+	// carve-out then re-measures rather than serving, the anti-flattering
+	// direction.
+	Package    string   `json:"package,omitempty"`
+	References []string `json:"references,omitempty"`
 }
 
 // LedgerFileHeader is one compartment file's persisted header identity.
@@ -512,7 +520,11 @@ func LedgerFromGofresh(ledger gofresh.TestVariantLedger) Ledger {
 		FileHeaders:  make([]LedgerFileHeader, 0, len(ledger.FileHeaders)),
 	}
 	for _, declaration := range ledger.Declarations {
-		out.Declarations = append(out.Declarations, LedgerDeclaration(declaration))
+		out.Declarations = append(out.Declarations, LedgerDeclaration{
+			File: declaration.File, Kind: declaration.Kind, Name: declaration.Name,
+			Receiver: declaration.Receiver, Hash: declaration.Hash,
+			Package: declaration.Package, References: declaration.References,
+		})
 	}
 	for _, header := range ledger.FileHeaders {
 		out.FileHeaders = append(out.FileHeaders, LedgerFileHeader(header))
@@ -527,7 +539,11 @@ func (l Ledger) ToGofresh() gofresh.TestVariantLedger {
 		FileHeaders:  make([]gofresh.TestVariantFileHeader, 0, len(l.FileHeaders)),
 	}
 	for _, declaration := range l.Declarations {
-		out.Declarations = append(out.Declarations, gofresh.TestVariantDeclaration(declaration))
+		out.Declarations = append(out.Declarations, gofresh.TestVariantDeclaration{
+			File: declaration.File, Kind: declaration.Kind, Name: declaration.Name,
+			Receiver: declaration.Receiver, Hash: declaration.Hash,
+			Package: declaration.Package, References: declaration.References,
+		})
 	}
 	for _, header := range l.FileHeaders {
 		out.FileHeaders = append(out.FileHeaders, gofresh.TestVariantFileHeader(header))

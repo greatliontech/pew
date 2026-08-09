@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
 	"golang.org/x/perf/benchfmt"
 )
@@ -610,20 +611,44 @@ func TestParseRejectsReservedFormatConfig(t *testing.T) {
 // direction is a spurious re-run, never a misread diff base.
 func TestLedgerCodecRefusals(t *testing.T) {
 	ledger := Ledger{
-		Declarations: []LedgerDeclaration{{File: "a_test.go", Kind: "func", Name: "TestA", Hash: "00112233445566778899aabbccddeeff"}},
-		FileHeaders:  []LedgerFileHeader{{File: "a_test.go", Hash: "ffeeddccbbaa99887766554433221100"}},
+		Declarations: []LedgerDeclaration{{File: "a_test.go", Kind: "func", Name: "TestA", Hash: "00112233445566778899aabbccddeeff",
+			Package: "a_test", References: []string{"Value", "testing"}}},
+		FileHeaders: []LedgerFileHeader{{File: "a_test.go", Hash: "ffeeddccbbaa99887766554433221100"}},
 	}
 	encoded, err := EncodeLedger(ledger)
 	if err != nil {
 		t.Fatal(err)
 	}
 	decoded, err := DecodeLedger(encoded)
-	if err != nil || len(decoded.Declarations) != 1 || decoded.Declarations[0] != ledger.Declarations[0] ||
-		len(decoded.FileHeaders) != 1 || decoded.FileHeaders[0] != ledger.FileHeaders[0] {
+	if err != nil || !reflect.DeepEqual(decoded, ledger) {
 		t.Fatalf("round trip = %+v, %v", decoded, err)
+	}
+	// The wire keys are persisted contract: a renamed key would make every
+	// prior recording's ledger refuse as an unknown field.
+	raw, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil || !strings.Contains(string(raw), `"package":"a_test"`) ||
+		!strings.Contains(string(raw), `"references":["Value","testing"]`) {
+		t.Fatalf("wire form = %s, %v", raw, err)
 	}
 	if _, err := DecodeLedger("!!!not-base64!!!"); err == nil {
 		t.Fatal("undecodable input accepted")
+	}
+	// A recording persisted before the package/references fields decodes
+	// them empty, and an empty package clause certifies nothing: the diff
+	// keys identity on the clause, so every legacy entry classifies
+	// removed-and-added and the inert-growth carve-out refuses — a
+	// spurious re-run, never a hash-matched serve on unproven identity.
+	legacy := Ledger{
+		Declarations: []LedgerDeclaration{{File: "a_test.go", Kind: "func", Name: "TestA", Hash: "00112233445566778899aabbccddeeff"}},
+		FileHeaders:  ledger.FileHeaders,
+	}
+	current := Ledger{
+		Declarations: []LedgerDeclaration{{File: "a_test.go", Kind: "func", Name: "TestA", Hash: "00112233445566778899aabbccddeeff",
+			Package: "a_test", References: []string{"Value"}}},
+		FileHeaders: ledger.FileHeaders,
+	}
+	if delta := gofresh.DiffTestVariantLedgers(legacy.ToGofresh(), current.ToGofresh()); delta.Inert() {
+		t.Fatalf("legacy ledger read as inert growth: %+v", delta)
 	}
 	if _, err := DecodeLedger(base64.RawURLEncoding.EncodeToString([]byte(`{"declarations":[],"future":1}`))); err == nil {
 		t.Fatal("unknown field accepted")

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -227,6 +229,50 @@ func TestStatusExplainNamesTheMovingGuard(t *testing.T) {
 		if !strings.Contains(got, row) {
 			t.Fatalf("explanation missing the %s row:\n%s", row, got)
 		}
+	}
+}
+
+// TestStatusExplainNamesMovedInputs pins spec §12's moved-input
+// attribution: a runtime digest mismatch names WHICH watched inputs
+// moved, over the manifest's per-input digests - environment entries as
+// names only, the observed value never disclosed (§7.8).
+func TestStatusExplainNamesMovedInputs(t *testing.T) {
+	e, _, err := newEngineAt(".", ".", false, os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
+	const bench = "BenchmarkDecode"
+	fp, err := e.CaptureFor(t.Context(), gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	watched := filepath.Join(t.TempDir(), "corpus.txt")
+	if err := os.WriteFile(watched, []byte("current content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stale := strings.Repeat("0", 32)
+	manifest := fmt.Sprintf(`{"v":1,"env":[{"n":"PEW_EXPLAIN_PROBE","d":%q}],"paths":[{"k":"abs","p":%q,"d":%q}]}`,
+		stale, watched, stale)
+	fp.RuntimeInputs = base64.RawURLEncoding.EncodeToString([]byte(manifest))
+	fp.RuntimeDigest = "recorded-elsewhere"
+	env := append(os.Environ(), "PEW_EXPLAIN_PROBE=probe-secret-value")
+
+	var out strings.Builder
+	explainRecordAgainstCurrent(&out, e, ".", pkg, bench, fp, env)
+	got := out.String()
+	if !strings.Contains(got, "moved inputs:") ||
+		!strings.Contains(got, "env PEW_EXPLAIN_PROBE") || !strings.Contains(got, watched) {
+		t.Fatalf("moved inputs not attributed:\n%s", got)
+	}
+	if strings.Contains(got, "probe-secret-value") {
+		t.Fatalf("environment value disclosed:\n%s", got)
+	}
+
+	// Best-effort degradation (§12): an attribution error yields no line
+	// and no failure - the digest row stays the whole story.
+	if line := movedInputsLine(t.Context(), "!!!undecodable!!!", ".", env); line != "" {
+		t.Fatalf("attribution error produced a line: %q", line)
 	}
 }
 

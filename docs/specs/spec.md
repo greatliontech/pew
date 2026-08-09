@@ -875,8 +875,9 @@ Four commands; names follow the `go test` / benchstat idiom.
   `run --stale`). **`--explain`** details each non-valid verdict: every guard's recorded vs
   current value, the closure hash, the runtime-input digest, and the manifest's watched
   identities — environment inputs disclosed as names with digest equality only, never values
-  (§7.8); a digest mismatch names what was watched, while attributing *which* watched input
-  moved awaits per-input digests in the manifest (a gofresh encoding decision). Supports
+  (§7.8); a digest mismatch additionally names the moved watched inputs themselves,
+  best-effort over the manifest's per-input digests — environment entries as names, values
+  never. Supports
   `--bench-dir <dir>` and `--label <name>` (§6).
 - **`pew stat [ref | refA refB] [flags]`** — compare; the three baselines (§10) fall out of arg
   count (none → auto, one → pinned, two → A/B). `--fail-on-regression`, `--threshold` (3%),
