@@ -9,7 +9,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"unicode"
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
@@ -41,6 +43,9 @@ func newStatusCmd() *cobra.Command {
 		Use:   "status [packages]",
 		Short: "Report each benchmark as valid / stale / unverifiable / unrecorded",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := resolveVouches(); err != nil {
+				return err
+			}
 			if explain && jsonOut {
 				return fmt.Errorf("status: --explain and -json are mutually exclusive (the explanation is a human view)")
 			}
@@ -56,6 +61,7 @@ func newStatusCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&staleOnly, "stale", false, "show only benchmarks that need re-running (non-valid)")
 	cmd.Flags().BoolVar(&explain, "explain", false, "explain each non-valid verdict: recorded vs current guard/input values (spec §12)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit one JSON object per row (spec §12, --json)")
+	cmd.Flags().StringArrayVar(&rawVouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, the load-bearing set recorded as pew-vouches (spec §12)")
 	return cmd
 }
 
@@ -84,6 +90,9 @@ func newEngineForPkg(p pkgMeta, env []string) (*gofresh.Engine, string, error) {
 }
 
 func newEngineAt(moduleDir, pkgDir string, mainPkg bool, env []string) (*gofresh.Engine, string, error) {
+	if err := resolveVouches(); err != nil {
+		return nil, "", err
+	}
 	goflags, err := runpkg.EffectiveGoflags(moduleDir, env)
 	if err != nil {
 		return nil, "", err
@@ -96,10 +105,70 @@ func newEngineAt(moduleDir, pkgDir string, mainPkg bool, env []string) (*gofresh
 	return e, pgo, err
 }
 
+// rawVouches collects the --vouch flag values; resolveVouches parses
+// them once into dynamicStateVouches before the first engine builds.
+var rawVouches []string
+
+// dynamicStateVouches is the process-wide reviewed vouch set from the
+// --vouch flags: one set for every engine a command builds, so run,
+// status, and stat verdicts judge under the same acceptances.
+var dynamicStateVouches []string
+
+// resolveVouches parses the collected --vouch values; every command
+// path that builds engines calls it before the first build.
+func resolveVouches() error {
+	if len(rawVouches) == 0 {
+		dynamicStateVouches = nil
+		return nil
+	}
+	identities, err := parseDynamicStateVouches(rawVouches)
+	if err != nil {
+		return err
+	}
+	dynamicStateVouches = identities
+	return nil
+}
+
+// parseDynamicStateVouches parses "IMPORT-PATH:VARIABLE" pairs (a colon
+// cannot appear in an import path, so a bare package is unrepresentable)
+// into gofresh's canonical identities, refusing control or space
+// characters and a variable that is not one Go identifier.
+func parseDynamicStateVouches(entries []string) ([]string, error) {
+	var identities []string
+	seen := map[string]bool{}
+	for _, entry := range entries {
+		pkg, name, ok := strings.Cut(entry, ":")
+		if !ok || pkg == "" || name == "" {
+			return nil, fmt.Errorf("vouch %q is not IMPORT-PATH:VARIABLE", entry)
+		}
+		for _, r := range pkg {
+			if r <= ' ' || r == 0x7f || unicode.IsControl(r) {
+				return nil, fmt.Errorf("vouch package %q carries a control or space character", pkg)
+			}
+		}
+		for i, r := range name {
+			letter := unicode.IsLetter(r) || r == '_'
+			if (i == 0 && !letter) || (i > 0 && !letter && !unicode.IsDigit(r)) {
+				return nil, fmt.Errorf("vouch variable %q is not one Go identifier", name)
+			}
+		}
+		identity := pkg + "." + name
+		if !seen[identity] {
+			seen[identity] = true
+			identities = append(identities, identity)
+		}
+	}
+	sort.Strings(identities)
+	return identities, nil
+}
+
 func buildEngine(moduleDir string, env []string, pgo string) (*gofresh.Engine, error) {
 	opts := []gofresh.Option{gofresh.WithDir(moduleDir), gofresh.WithEnv(env...)}
 	if pgo != "" {
 		opts = append(opts, gofresh.WithBuildInputs(pgo))
+	}
+	if len(dynamicStateVouches) > 0 {
+		opts = append(opts, gofresh.WithDynamicStateVouches(dynamicStateVouches...))
 	}
 	return gofresh.New(opts...)
 }
@@ -325,10 +394,11 @@ func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, 
 			Machine:       m["machine"],
 			RuntimeConfig: m["runtimeconfig"],
 		},
-		PurityAssertion: m["pew-purity"],
-		RuntimeInputs:   m["pew-runtime-inputs"],
-		RuntimeDigest:   m["pew-runtime"],
-		ResultKind:      gofresh.Measurement,
+		PurityAssertion:     m["pew-purity"],
+		DynamicStateVouches: m["pew-vouches"],
+		RuntimeInputs:       m["pew-runtime-inputs"],
+		RuntimeDigest:       m["pew-runtime"],
+		ResultKind:          gofresh.Measurement,
 	}, m["pure"], m["pew-test-variant-ledger"], true
 }
 

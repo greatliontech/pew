@@ -96,6 +96,7 @@ profile differs between packages (§9):
 | `pew-runtime`        | digest of runtime-input evidence (§7.8)                      | derived          |
 | `pew-runtime-inputs` | encoded runtime-input manifest or incomplete disposition (§7.8) | yes            |
 | `pew-purity`         | attributable Gofresh purity evidence used for this fingerprint | yes            |
+| `pew-vouches`        | dynamic-state vouches that discharged culprits for this fingerprint (gofresh's sorted comma-joined identities) — audit riding the recording, never a validity key: verdicts derive from the current engine's own set, the line is omitted when no vouch was load-bearing, and two sides differing in it compare with a note, never fragmenting (the run-conditions precedent) | derived |
 | `pew-test-variants`  | test-variant compartment hash of the benchmark's package (§7.9) | derived        |
 | `pew-test-variant-ledger` | encoded compartment declaration ledger — §7.9's diff base | derived        |
 
@@ -866,6 +867,10 @@ Four commands; names follow the `go test` / benchstat idiom.
     `valid` ones (the reuse-don't-rerun win; shares the `status` closure-analysis path). This filter
     intersects the independent `--bench` selection and never adds or records an excluded benchmark.
   - hygiene: `--count` (10), `--benchtime` (1s), `--pin`, `--strict` (§9)
+  - **`--vouch IMPORT-PATH:VARIABLE`** (repeatable, also on `status`/`stat`): a version-pinned
+    dependency variable accepted as stable after initialization (gofresh's vouch contract; the
+    colon pair makes a bare package unrepresentable); discharges exactly that variable's
+    shared-dynamic-state downgrade, the load-bearing set recorded as `pew-vouches`
   - storage: `--bench-dir <dir>` (default `<module>/benchmarks`), `--label <name>` (§6);
     purity overrides: `--assume-pure <bench>` (§7.5), `--impure <bench>` (§7.3). Both assertions
     also have durable in-code forms honored by the shared engine: `//gofresh:pure` and

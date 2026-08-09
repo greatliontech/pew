@@ -440,6 +440,29 @@ func GofreshPurityConfig(attribution string) benchfmt.Config {
 	return benchfmt.Config{Key: "pew-purity", Value: []byte(attribution), File: true}
 }
 
+// GofreshVouchesConfig records the dynamic-state vouches that discharged
+// culprits for this fingerprint - audit riding the recording, never a
+// validity key.
+func GofreshVouchesConfig(vouches string) benchfmt.Config {
+	return benchfmt.Config{Key: "pew-vouches", Value: []byte(vouches), File: true}
+}
+
+// GofreshEvidenceConfigs composes the attributable gofresh evidence
+// lines: the purity attribution and the load-bearing vouch set, each
+// emitted exactly when non-empty - the two are independent, so a
+// benchmark whose only impurity was a vouched culprit still records
+// its acceptance.
+func GofreshEvidenceConfigs(purity, vouches string) []benchfmt.Config {
+	var cfgs []benchfmt.Config
+	if purity != "" {
+		cfgs = append(cfgs, GofreshPurityConfig(purity))
+	}
+	if vouches != "" {
+		cfgs = append(cfgs, GofreshVouchesConfig(vouches))
+	}
+	return cfgs
+}
+
 // PureConfig is the recorded purity flag ("true" for --assume-pure, "false" for
 // --impure). File:true so it serializes.
 func PureConfig(v string) benchfmt.Config {

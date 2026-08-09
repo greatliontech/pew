@@ -788,7 +788,7 @@ func rawFormatValid(data []byte) bool {
 
 func recordingConfigKey(key string) bool {
 	switch key {
-	case "pew-format", "commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pew-runconditions", "pew-closure", "pew-test-variants", "pew-test-variant-ledger", "pew-runtime", "pew-runtime-inputs", "pew-purity", "pure":
+	case "pew-format", "commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pew-runconditions", "pew-closure", "pew-test-variants", "pew-test-variant-ledger", "pew-runtime", "pew-runtime-inputs", "pew-purity", "pew-vouches", "pure":
 		return true
 	default:
 		return false

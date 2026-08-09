@@ -61,6 +61,9 @@ func newRunCmd() *cobra.Command {
 					return fmt.Errorf("run: %s is both --assume-pure and --impure", b)
 				}
 			}
+			if err := resolveVouches(); err != nil {
+				return err
+			}
 			patterns := args
 			if len(patterns) == 0 {
 				patterns = []string{"./..."}
@@ -79,6 +82,7 @@ func newRunCmd() *cobra.Command {
 	f.StringArrayVar(&assumePure, "assume-pure", nil, "mark a benchmark perf-pure, suppressing Class-B detection (repeatable)")
 	f.StringArrayVar(&impure, "impure", nil, "mark a benchmark external / always-rerun (repeatable)")
 	f.BoolVar(&rc.staleOnly, "stale", false, "run only benchmarks that are currently non-valid")
+	f.StringArrayVar(&rawVouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, the load-bearing set recorded as pew-vouches (spec §12)")
 	return cmd
 }
 
@@ -466,8 +470,8 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 		for _, cfg := range run.RuntimeConfig(runtimeState.Digest, runtimeState.Manifest) {
 			recs = withConfig(recs, cfg)
 		}
-		if fp.PurityAssertion != "" {
-			recs = withConfig(recs, run.GofreshPurityConfig(fp.PurityAssertion))
+		for _, cfg := range run.GofreshEvidenceConfigs(fp.PurityAssertion, fp.DynamicStateVouches) {
+			recs = withConfig(recs, cfg)
 		}
 		// Purity flags are per-benchmark (spec §7.5): apply only to the named ones.
 		if rc.pure[name] {

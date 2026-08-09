@@ -50,6 +50,9 @@ with 'pew run' first). It inventories stored recording paths from the selected
 refs and working-tree store.`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := resolveVouches(); err != nil {
+				return err
+			}
 			gu, err := parseGateUnits(gate)
 			if err != nil {
 				return err
@@ -74,6 +77,7 @@ refs and working-tree store.`,
 	f.BoolVar(&sc.explain, "explain", false, "explain skipped comparisons and stale working-tree recordings: guard/input values side by side (spec §12)")
 	f.BoolVar(&sc.jsonOut, "json", false, "emit one JSON object per comparison row/note (spec §12, --json)")
 	f.StringVar(&gate, "gate", "sec/op", "comma-separated units whose regression fails the build (sec/op, B/op, allocs/op)")
+	f.StringArrayVar(&rawVouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, the load-bearing set recorded as pew-vouches (spec §12)")
 	return cmd
 }
 
@@ -366,6 +370,9 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 					ek := engineKey{moduleDir: cur.moduleDir, pgo: pgo}
 					engine := engines[ek]
 					if engine == nil {
+						if err := resolveVouches(); err != nil {
+							return err
+						}
 						engine, err = buildEngine(cur.moduleDir, os.Environ(), pgo)
 						if err != nil {
 							return err

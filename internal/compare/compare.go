@@ -43,7 +43,7 @@ import (
 // digest, and dirty flag) still line up for comparison (§10.1). Variant guards
 // are ignored here too so they do not fragment grouping, but are enforced
 // separately by compareGuards.
-const pewIgnore = "pew-format commit toolchain machine buildconfig runtimeconfig dirty pew-runconditions pew-closure pew-test-variants pew-test-variant-ledger pew-runtime pew-runtime-inputs pew-purity pure"
+const pewIgnore = "pew-format commit toolchain machine buildconfig runtimeconfig dirty pew-runconditions pew-closure pew-test-variants pew-test-variant-ledger pew-runtime pew-runtime-inputs pew-purity pew-vouches pure"
 
 var compareGuards = []string{"machine", "toolchain", "buildconfig", "runtimeconfig"}
 
@@ -174,8 +174,12 @@ type group struct {
 	// side. Unlike the guards it never blocks a comparison (spec §10.1, INV-9):
 	// a difference is surfaced as a note and the comparison proceeds.
 	baseConds, newConds guardValue
-	units               []string // first-seen order, deduplicated
-	cells               map[string]*cell
+	// baseVouches/newVouches track the recorded `pew-vouches` audit per
+	// side: two sides measured under different acceptances compare with
+	// a note, never fragment (the run-conditions precedent).
+	baseVouches, newVouches guardValue
+	units                   []string // first-seen order, deduplicated
+	cells                   map[string]*cell
 }
 
 type guardValue struct {
@@ -242,8 +246,10 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 			}
 			if isBase {
 				g.baseConds = recordGuard(g.baseConds, r.GetConfig("pew-runconditions"))
+				g.baseVouches = recordGuard(g.baseVouches, r.GetConfig("pew-vouches"))
 			} else {
 				g.newConds = recordGuard(g.newConds, r.GetConfig("pew-runconditions"))
+				g.newVouches = recordGuard(g.newVouches, r.GetConfig("pew-vouches"))
 			}
 			for _, v := range r.Values {
 				c := g.cells[v.Unit]
@@ -354,8 +360,16 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 			if hasCondNote && (g.baseConds.mixed || g.newConds.mixed) {
 				res.Notes = append(res.Notes, condNote)
 			}
-		} else if hasCondNote {
-			res.Notes = append(res.Notes, condNote)
+			if vouchNote, has := g.vouchesNote(); has {
+				res.Notes = append(res.Notes, vouchNote)
+			}
+		} else {
+			if hasCondNote {
+				res.Notes = append(res.Notes, condNote)
+			}
+			if vouchNote, has := g.vouchesNote(); has {
+				res.Notes = append(res.Notes, vouchNote)
+			}
 		}
 	}
 
@@ -443,6 +457,35 @@ var conditionCategoricalFields = []string{"governor", "turbo", "throttled", "bat
 // missing or malformed field reads as "unknown", so garbage never silently
 // equals an observed value — and two identically-unknown sides (e.g. two
 // non-Linux recordings) do not differ.
+// vouchesNote surfaces two sides measured under different dynamic-state
+// acceptances - audit provenance, so a note, never a key. A side where
+// some samples carry the line and some omit it is itself mixed
+// acceptance provenance and reports as such, so a partially-recorded
+// side can never silently read as unvouched.
+func (g *group) vouchesNote() (string, bool) {
+	base, newer := g.baseVouches, g.newVouches
+	baseMixed := base.mixed || (base.seen && base.missing && base.value != "")
+	newMixed := newer.mixed || (newer.seen && newer.missing && newer.value != "")
+	if baseMixed || newMixed {
+		side := "base"
+		if !baseMixed {
+			side = "new"
+		}
+		return fmt.Sprintf("%s: mixed dynamic-state vouches within the %s side", g.label(), side), true
+	}
+	baseValue, newValue := base.value, newer.value
+	if !base.seen || baseValue == "" {
+		baseValue = "(none)"
+	}
+	if !newer.seen || newValue == "" {
+		newValue = "(none)"
+	}
+	if baseValue != newValue {
+		return fmt.Sprintf("%s: dynamic-state vouches differ (base: %s; new: %s)", g.label(), baseValue, newValue), true
+	}
+	return "", false
+}
+
 func conditionsDiffer(base, newer string) bool {
 	b, n := conditionCategorical(base), conditionCategorical(newer)
 	for _, field := range conditionCategoricalFields {
