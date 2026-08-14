@@ -397,7 +397,7 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 			return fmt.Errorf("run: %s: thermal throttling during measurement (--strict)", p.ImportPath)
 		}
 	}
-	runtimeState, err := run.IngestObservation(frame, testlogPath, p.Module.Dir, "package-test-binary:"+p.ImportPath, env, envRoots, scratch...)
+	runtimeState, err := run.IngestObservation(ctx, frame, testlogPath, "package-test-binary:"+p.ImportPath, env, envRoots, scratch...)
 	if err != nil {
 		return err
 	}

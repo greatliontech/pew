@@ -515,8 +515,9 @@ Two consequences:
 
 Go's testlog stream records operation identities but omits behavior-affecting return values, byte
 counts, and errors, so testlog identities alone prove neither operation outcomes nor complete path
-coverage. Pew completes the observation the way its sibling producers do — the conjunction Gofresh's
-runtime-input contract defines: the measurement invocation carries a `-test.testlogfile` capture
+coverage. Pew completes the observation the way its sibling producers do — through the producer
+facade owning the conjunction the Gofresh runtime-input contract
+defines: the measurement invocation carries a `-test.testlogfile` capture
 (passed through `go test`'s argument passthrough), an observation **bracket** is fingerprinted over
 the package directory immediately before the invocation (VCS bookkeeping excluded), and the capture
 is ingested with the completed-process and bracket options plus the toolchain, module-cache,
