@@ -24,6 +24,5 @@ about lineage divergence from a later stat.
 
 ## Lands
 
-With the cross-tool train (gofresh `docs/plans/cross-tool-train.md`);
-unchartered — charter when pulled, plausibly riding a chunk that
-already touches `run`'s store interaction.
+Cross-tool train chunk 44 (the recording-trust batch touches `run`'s
+store interaction).

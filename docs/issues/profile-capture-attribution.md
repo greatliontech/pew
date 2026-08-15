@@ -1,6 +1,6 @@
 # Profile capture and attribution as recording companions
 
-**Lands:** the cross-tool train's profile chunk (gofresh
+**Lands:** cross-tool train chunk 15 (gofresh
 docs/plans/cross-tool-train.md), after the one-go-invocation chunk —
 folded from the original condition: profile evidence needing machine
 checking, with tugboat's hand-run bench protocol the standing consumer.

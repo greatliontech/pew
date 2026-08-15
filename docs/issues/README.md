@@ -9,10 +9,10 @@ close-out convention.
 | [recorded-config-trust](recorded-config-trust.md) | whitelisted toolchain-key values are spoofable in-stream; historical foreign keys unpoliced at read time | cross-tool train chunk 44 |
 | [remote-bench-execution](remote-bench-execution.md) | run measurements on a dedicated homelab bench machine: gRPC-over-SSH `pew agent`, machine lease, off-box builds, calibration drift-vet | when a dedicated bench machine is provisioned and measurements first need to run on it |
 | [per-benchmark-view-builds](per-benchmark-view-builds.md) | verdict surfaces build one analysis view per benchmark (two per inert-growth rider); a per-package batch check would share it | cross-tool train chunk 44 |
-| [profile-capture-attribution](profile-capture-attribution.md) | subject attribution is consumer hand protocol: capture profiles with recordings, attribution verdict in status, profile diff in stat | the cross-tool train's profile chunk (gofresh docs/plans/cross-tool-train.md) |
+| [profile-capture-attribution](profile-capture-attribution.md) | subject attribution is consumer hand protocol: capture profiles with recordings, attribution verdict in status, profile diff in stat | cross-tool train chunk 15 |
 | [derivation-ab-mode](derivation-ab-mode.md) | uncommitted-vs-ref A/B is a hand stash cycle in consumers; `pew ab` — both sides built first (worktree for the ref), interleaved runs, no tree mutation | cross-tool train chunk 44 |
-| [per-arm-noise-floors](per-arm-noise-floors.md) | one global `--threshold` vs ±10% layout-only cross-commit drift on ns-class arms (run-to-run CV measured 0.2–1.4%); false regressions get hand-inspected — derive per-arm floors from lineage history | with the cross-tool train; charter when pulled |
-| [no-lineage-recording-warning](no-lineage-recording-warning.md) | a run minting a new GOMAXPROCS variant (e.g. `--pin`) records silently; incomparability surfaces only at a later `stat` — warn at record time when a sibling lineage exists | with the cross-tool train; charter when pulled |
+| [per-arm-noise-floors](per-arm-noise-floors.md) | one global `--threshold` vs ±10% layout-only cross-commit drift on ns-class arms (run-to-run CV measured 0.2–1.4%); false regressions get hand-inspected — derive per-arm floors from lineage history | cross-tool train chunk 15 |
+| [no-lineage-recording-warning](no-lineage-recording-warning.md) | a run minting a new GOMAXPROCS variant (e.g. `--pin`) records silently; incomparability surfaces only at a later `stat` — warn at record time when a sibling lineage exists | cross-tool train chunk 44 |
 
 ## In-spec upgrade paths (tracked inline, not here)
 

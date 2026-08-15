@@ -33,7 +33,6 @@ surface, but the derived floor is the design goal — annotations rot.
 
 ## Lands
 
-With the cross-tool train (gofresh `docs/plans/cross-tool-train.md`);
-unchartered — charter when pulled. Adjacent to chunk 15's
-profile-capture design discussion (both grow what a recording
+Cross-tool train chunk 15: folds into its opening design discussion
+(both grow what a recording
 carries about its own trustworthiness).
