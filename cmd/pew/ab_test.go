@@ -117,6 +117,22 @@ func TestABInterleavesAfterBothSidesBuild(t *testing.T) {
 	if aDir == bDir {
 		t.Fatalf("both sides ran from one tree: %s", aDir)
 	}
+	// The worktree is a SIBLING of the repository — same filesystem, so
+	// package-dir-relative benchmark media sees the same storage on both
+	// sides (an os.TempDir worktree on a tmpfs host measures RAM against
+	// disk). Both paths resolve through the same symlink discipline
+	// before comparison.
+	aRoot, err := filepath.EvalSymlinks(filepath.Dir(filepath.Dir(aDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bRoot, err := filepath.EvalSymlinks(filepath.Dir(filepath.Dir(bDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aRoot != bRoot {
+		t.Fatalf("worktree parent %s is not beside the repository (parent %s) — side B's media lives on a different filesystem", bRoot, aRoot)
+	}
 	if !strings.Contains(out.String(), "A=working-tree") || !strings.Contains(out.String(), "B=HEAD") {
 		t.Fatalf("report header missing the side identities:\n%s", out.String())
 	}
@@ -334,6 +350,33 @@ func TestABSideBPackageKindFromRef(t *testing.T) {
 	if !seenA || !seenB {
 		t.Fatalf("capture dirs %v did not cover both sides (fixture root %s)", kinds, resolved)
 	}
+}
+
+// sameDevice is the runtime enforcement behind the same-medium worktree
+// contract: same path trivially agrees, and where this host's temp dir
+// and working directory sit on different devices (tmpfs vs disk — the
+// exact configuration the contract exists for), the check must say so.
+func TestSameDevice(t *testing.T) {
+	dir := t.TempDir()
+	if same, err := sameDevice(dir, dir); err != nil || !same {
+		t.Fatalf("sameDevice(x, x) = %v, %v", same, err)
+	}
+	if _, err := sameDevice(dir, filepath.Join(dir, "absent")); err == nil {
+		t.Fatal("sameDevice on a missing path must error")
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	same, err := sameDevice(dir, wd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if same {
+		t.Skipf("temp dir %s and %s share a device on this host; cross-device branch not exercisable", dir, wd)
+	}
+	// Reaching here proves the false branch fires on genuinely distinct
+	// devices — the branch addWorktree's refusal rides on.
 }
 
 // The artifact is marked out of every stat-baseline path by shape.

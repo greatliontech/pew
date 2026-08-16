@@ -350,11 +350,28 @@ func gitTopLevel(dir string) (string, error) {
 
 // addWorktree materializes ref in a disposable detached worktree and
 // returns its path with a cleanup that removes it; the repository stays
-// writable throughout.
+// writable throughout. The worktree is created BESIDE the repository —
+// same filesystem — never in the OS temp dir: a benchmark keeping its
+// media package-dir-relative (the durable-write arms) measures that
+// filesystem's storage, and an os.TempDir worktree on a tmpfs host
+// hands side B RAM-backed fsyncs while side A pays the disk, an
+// invalid experiment no interleaving can rescue. An unwritable parent
+// is a hard error, not a silent fallback to a different medium.
 func addWorktree(repoRoot, ref string) (string, func(), error) {
-	dir, err := os.MkdirTemp("", "pew-ab-worktree-*")
+	dir, err := os.MkdirTemp(filepath.Dir(repoRoot), ".pew-ab-worktree-*")
 	if err != nil {
+		return "", nil, fmt.Errorf("ab: creating the side-B worktree beside the repository (same filesystem, spec §12): %w", err)
+	}
+	// Sibling placement is same-filesystem only when the repository is
+	// not itself a mount boundary (a repo on a dedicated bench disk is
+	// exactly this tool's population) — so the contract is enforced by
+	// device identity, not assumed from the path shape.
+	if same, err := sameDevice(repoRoot, dir); err != nil {
+		os.RemoveAll(dir)
 		return "", nil, err
+	} else if !same {
+		os.RemoveAll(dir)
+		return "", nil, fmt.Errorf("ab: the repository parent %s is on a different filesystem than the repository — side B's media would not match side A's (spec §12)", filepath.Dir(repoRoot))
 	}
 	cmd := exec.Command("git", "-C", repoRoot, "worktree", "add", "--detach", dir, ref)
 	if out, err := cmd.CombinedOutput(); err != nil {

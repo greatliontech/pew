@@ -875,7 +875,10 @@ Five commands; names follow the `go test` / benchstat idiom.
 
 - **`pew ab [packages] [flags]`** — A/B-compare the uncommitted working tree (side A) against a
   git rev (side B, `--ref`, default `HEAD`) without touching either: side B materializes in a
-  disposable detached worktree, both sides build before either measures, and executions
+  disposable detached worktree created beside the repository on the same filesystem — a
+  benchmark keeping its media package-dir-relative measures that filesystem's storage, and an
+  OS-temp worktree on a tmpfs host would hand side B RAM-backed durability while side A pays
+  the disk — both sides build before either measures, and executions
   interleave A/B per iteration (`--count`, default 6) so slow machine drift cancels instead of
   folding into the measured delta (A leads each pair, so only the first sample of one side
   carries the cold-start boundary) — statistically stronger than any block-ordered stash cycle,
