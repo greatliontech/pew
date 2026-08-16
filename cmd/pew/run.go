@@ -131,6 +131,23 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 	}
 	gc := newGitStateCache(excludeDirs)
 	env := os.Environ()
+	// The scratch sweep runs at COMMAND ENTRY, before the module state
+	// cache pins its baseline: a leftover carrying git-visible files
+	// would otherwise enter the cached baseline, and its removal would
+	// abort the run as "repository state moved" — the exact failure the
+	// sweep exists to prevent.
+	for _, p := range pkgs {
+		if p.Module.Dir == "" {
+			continue
+		}
+		scratch, err := scratchPatterns(p)
+		if err != nil {
+			return err
+		}
+		if err := sweepScratchLeftovers(errw, p.Dir, scratch); err != nil {
+			return err
+		}
+	}
 	for _, p := range pkgs {
 		if p.Module.Dir == "" {
 			continue

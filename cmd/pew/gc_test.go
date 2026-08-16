@@ -605,6 +605,58 @@ func TestGCStoreKeepsRootPackageRecording(t *testing.T) {
 // marker-prefixed identifier (`//pew:scratchy`) ignored, and a bare
 // directive refused loudly rather than read as declaring nothing
 // (spec §7.8).
+// The pre-bracket sweep removes exactly the declared namespaces'
+// pre-existing entries — a killed run's leftovers, which would enter
+// the bracket and re-stale every later recording — printing each
+// removal, and touches nothing outside the declared patterns.
+func TestSweepScratchLeftovers(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"lcbench-123", "lcbench-456"} {
+		if err := os.MkdirAll(filepath.Join(dir, name, "wal"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// Leftovers carry real content — the git-visible shape whose
+		// removal after a state baseline would abort the run.
+		if err := os.WriteFile(filepath.Join(dir, name, "wal", "seg0.log"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "keepme.go"), []byte("package p\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "testdata"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var errw bytes.Buffer
+	if err := sweepScratchLeftovers(&errw, dir, []string{"lcbench-*", "walbench-*"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, gone := range []string{"lcbench-123", "lcbench-456"} {
+		if _, err := os.Stat(filepath.Join(dir, gone)); !os.IsNotExist(err) {
+			t.Fatalf("leftover %s survived the sweep", gone)
+		}
+	}
+	for _, kept := range []string{"keepme.go", "testdata"} {
+		if _, err := os.Stat(filepath.Join(dir, kept)); err != nil {
+			t.Fatalf("non-scratch %s was swept: %v", kept, err)
+		}
+	}
+	out := errw.String()
+	if !strings.Contains(out, "lcbench-123") || !strings.Contains(out, "lcbench-456") || strings.Contains(out, "keepme") {
+		t.Fatalf("sweep notices wrong: %q", out)
+	}
+	// A pattern with no star sweeps its MkdirTemp extension shape.
+	if err := os.MkdirAll(filepath.Join(dir, "scr999"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := sweepScratchLeftovers(&errw, dir, []string{"scr"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "scr999")); !os.IsNotExist(err) {
+		t.Fatal("starless pattern's extension shape survived")
+	}
+}
+
 func TestScratchPatternsDiscoversDirectives(t *testing.T) {
 	dir := t.TempDir()
 	src := `package p
@@ -642,7 +694,7 @@ func f() {}
 		t.Fatal("bare //pew:scratch directive accepted")
 	}
 
-	for _, malformed := range []string{"testdata/x-*", "a-* b-*"} {
+	for _, malformed := range []string{"testdata/x-*", "a-* b-*", "a?c", "a[bc]-*", "a-*-b-*"} {
 		src := "package p\n\n//pew:scratch " + malformed + "\nfunc g() {}\n"
 		if err := os.WriteFile(filepath.Join(dir, "malformed_test.go"), []byte(src), 0o600); err != nil {
 			t.Fatal(err)

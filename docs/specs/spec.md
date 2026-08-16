@@ -539,7 +539,12 @@ build-selected test files (a durable in-source line-comment assertion, the same 
 the measurement runs) names one `os.MkdirTemp`-shaped scratch pattern under the package directory;
 ingest turns each into a Gofresh scratch namespace, so a read matching the pattern records nothing
 exactly when the engine proves it absent at both bracket endpoints — pre-existing, surviving, and
-consumed-and-removed state all stay observed. The
+consumed-and-removed state all stay observed. Before the bracket is fingerprinted, `pew run` sweeps
+each declared namespace: every pre-existing package-directory entry matching a declared pattern is
+removed, each removal printed — the only producer of such names is the harness's own
+`os.MkdirTemp`, so a pre-existing match is a killed run's leftover, and left in place it enters the
+bracket and re-stales every later recording when the leftover set changes. The sweep is the
+directive's own declared-forfeit semantics, scoped to declared patterns — never a general cleanup. The
 declaration exists because the identity-only testlog cannot distinguish a bench's own scratch
 (created, read, and removed within the run — recording it is unre-observable noise whose random
 per-run names permanently churn evidence comparison) from an absence-probe whose later appearance

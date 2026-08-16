@@ -244,6 +244,35 @@ func selectedBenchmarks(p pkgMeta) ([]string, error) {
 	return benches, nil
 }
 
+// sweepScratchLeftovers removes pre-existing package-directory entries
+// matching declared run-scratch patterns before the observation bracket
+// forms: the only producer of such names is the harness's own
+// os.MkdirTemp, so a pre-existing match is a killed run's leftover —
+// and left in place it enters the bracket (spec §7.8's fail-closed
+// pre-existing rule) and re-stales every later recording when the
+// leftover set changes. The directive's author already declared the
+// namespace forfeit; the sweep makes absent-at-both-endpoints true by
+// construction for leftovers. Every removal prints — never silent.
+func sweepScratchLeftovers(errw io.Writer, pkgDir string, patterns []string) error {
+	for _, pattern := range patterns {
+		glob := pattern
+		if !strings.Contains(glob, "*") {
+			glob += "*"
+		}
+		matches, err := filepath.Glob(filepath.Join(pkgDir, glob))
+		if err != nil {
+			return fmt.Errorf("scratch sweep %q: %w", pattern, err)
+		}
+		for _, m := range matches {
+			if err := os.RemoveAll(m); err != nil {
+				return fmt.Errorf("scratch sweep %q: %w", pattern, err)
+			}
+			fmt.Fprintf(errw, "pew: swept stale run-scratch %s (declared //pew:scratch %s)\n", m, pattern)
+		}
+	}
+	return nil
+}
+
 // scratchPatterns collects the package's //pew:scratch declarations
 // from its test files. Each directive names one run-scratch pattern
 // (os.MkdirTemp shape: the minted string replaces the last "*", or
@@ -289,6 +318,15 @@ func scratchPatterns(p pkgMeta) ([]string, error) {
 				}
 				if strings.ContainsAny(pattern, " \t") {
 					return nil, fmt.Errorf("%s: //pew:scratch carries %q; one single-component pattern per directive", name, pattern)
+				}
+				// MkdirTemp treats ? and [ as literals and replaces only
+				// the LAST *; the sweep globs the pattern, where those
+				// are metacharacters — a divergence that could over-sweep
+				// non-scratch files (`a?c` deleting `abc.go`). Refused
+				// loudly before the measurement, like every malformed
+				// shape.
+				if strings.ContainsAny(pattern, "?[]") || strings.Count(pattern, "*") > 1 {
+					return nil, fmt.Errorf("%s: //pew:scratch pattern %q carries glob metacharacters beyond one trailing *; MkdirTemp shape only", name, pattern)
 				}
 				if !seen[pattern] {
 					seen[pattern] = true

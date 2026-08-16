@@ -1376,12 +1376,36 @@ func BenchmarkScratch(b *testing.B) {
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
 	withWorkingDir(t, dir)
 
+	// A killed run's leftover in the DECLARED namespace is swept before
+	// the bracket forms (with a printed notice); the same name in the
+	// undeclared package is ordinary state and survives untouched.
+	for _, pkg := range []string{"declared", "undeclared"} {
+		if err := os.MkdirAll(filepath.Join(dir, pkg, "sb-stale123"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// The leftover carries a git-VISIBLE file: a sweep after the
+		// module state baseline pins would abort the whole run as
+		// "repository state moved" — the sweep must precede the pin.
+		if err := os.WriteFile(filepath.Join(dir, pkg, "sb-stale123", "out.txt"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	var out, errOut bytes.Buffer
 	if err := runRun(&out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{"./..."}); err != nil {
 		t.Fatalf("runRun: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "declared", "sb-stale123")); !os.IsNotExist(err) {
+		t.Fatal("declared-namespace leftover survived the pre-bracket sweep")
+	}
+	if !strings.Contains(errOut.String(), "swept stale run-scratch") || !strings.Contains(errOut.String(), "sb-stale123") {
+		t.Fatalf("sweep notice missing:\n%s", errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "undeclared", "sb-stale123")); err != nil {
+		t.Fatalf("undeclared package's dir was swept without a directive: %v", err)
 	}
 	st := store.New(benchDir)
 	for pkgRel, wantScratch := range map[string]bool{"declared": false, "undeclared": true} {
