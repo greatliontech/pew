@@ -152,6 +152,11 @@ observed identities (§7.8).
 
 A `dirty` run is recorded but flagged: its `commit` does not faithfully describe its source, so
 its closure is computed from the *working tree*, and it is never usable as a pinned baseline.
+The flag's claim is source-scoped and judged at the run's span: a tracked non-source runtime
+input mutated between two arms' brackets by an external writer is outside `dirty`'s claim —
+the recording's own runtime-input manifest carries the content evidence for exactly what its
+arm read, and every later verdict re-validates that manifest against the current tree, so the
+narrowed claim never lets a stale recording serve.
 The recording store itself is excluded from the dirtiness judgment and from the pinned
 repository-state bracket wholesale: recordings are pew's own outputs, never part of any measured
 subject, so a multi-package session's earlier recordings cannot poison later runs' provenance —
@@ -528,10 +533,11 @@ Go's testlog stream records operation identities but omits behavior-affecting re
 counts, and errors, so testlog identities alone prove neither operation outcomes nor complete path
 coverage. Pew completes the observation the way its sibling producers do — through the producer
 facade owning the conjunction the Gofresh runtime-input contract
-defines: the measurement invocation carries a `-test.testlogfile` capture
+defines: each benchmark's measurement invocation — one `go test` process per benchmark (§9,
+single-subject execution) — carries its own `-test.testlogfile` capture
 (passed through `go test`'s argument passthrough), an observation **bracket** is fingerprinted over
-the package directory immediately before the invocation (VCS bookkeeping excluded), and the capture
-is ingested with the completed-process and bracket options plus the toolchain, module-cache,
+the package directory immediately before each invocation (VCS bookkeeping excluded), and each
+capture is ingested with the completed-process and bracket options plus the toolchain, module-cache,
 build-cache, and ephemeral-temp classifications, and — where the package declares them — its
 run-scratch namespaces. A **`//pew:scratch <pattern>`** directive in any of the package's
 build-selected test files (a durable in-source line-comment assertion, the same channel as
@@ -539,11 +545,13 @@ build-selected test files (a durable in-source line-comment assertion, the same 
 the measurement runs) names one `os.MkdirTemp`-shaped scratch pattern under the package directory;
 ingest turns each into a Gofresh scratch namespace, so a read matching the pattern records nothing
 exactly when the engine proves it absent at both bracket endpoints — pre-existing, surviving, and
-consumed-and-removed state all stay observed. Before the bracket is fingerprinted, `pew run` sweeps
-each declared namespace: every pre-existing package-directory entry matching a declared pattern is
-removed, each removal printed — the only producer of such names is the harness's own
-`os.MkdirTemp`, so a pre-existing match is a killed run's leftover, and left in place it enters the
-bracket and re-stales every later recording when the leftover set changes. The sweep is the
+consumed-and-removed state all stay observed. `pew run` sweeps each declared namespace at command
+entry and again before each benchmark invocation's brackets form: every pre-existing
+package-directory entry matching a declared pattern is removed, each removal printed — the only
+producer of such names is the harness's own `os.MkdirTemp`, so a pre-existing match is a killed
+run's leftover or an exited sibling arm's, and left in place it enters the bracket, making later
+evidence depend on sibling order (against §9's single-subject claim) and re-staling every later
+recording when the leftover set changes. The sweep is the
 directive's own declared-forfeit semantics, scoped to declared patterns — never a general cleanup. The
 declaration exists because the identity-only testlog cannot distinguish a bench's own scratch
 (created, read, and removed within the run — recording it is unre-observable noise whose random
@@ -551,8 +559,9 @@ per-run names permanently churn evidence comparison) from an absence-probe whose
 must stale the recording; the directive supplies that missing bit, and its author takes the one
 forfeited protection — absence-probes matching the pattern lose their appearance-pin, one namespace
 wide — as a caller-side soundness responsibility, exactly like a path exclusion. The resulting
-completed observation's manifest and digest ride the recording (`pew-runtime-inputs`,
-`pew-runtime`), so the runtime-input guard is real
+completed observation's manifest and digest ride its benchmark's recording (`pew-runtime-inputs`,
+`pew-runtime`) — each recording carries the manifest of exactly its own invocation's reads, never
+a package-wide union — so the runtime-input guard is real
 evidence: a moved observed input stales the recording instead of hiding behind blanket
 incompleteness, and content the ingest itself cannot vouch for (an unrecognized operation, a moved
 bracket) stays fail-closed inside the manifest as its own unverifiable entries.
@@ -644,6 +653,36 @@ by identity.
 pew drives `go test` rather than ingesting arbitrary output, so results are statistics-grade and
 provenance is captured atomically with the run:
 
+- **Single-subject execution: each benchmark measures in its own `go test` process.** The
+  measurement invocation's `-bench` pattern is restricted to exactly one top-level benchmark (the
+  caller's sub-benchmark selections preserved), so subjects never share process state — warmed
+  caches, `sync.Pool` contents, testing-framework state — and a recording is a function of
+  (source, subject, machine) alone, independent of which siblings a campaign or a single-arm
+  re-record happened to select (for declared run-scratch namespaces the claim is upheld by the
+  per-arm sweep, §7.8: an exited sibling's leftover is removed before this arm's brackets form,
+  never observed as sibling-order-dependent state). The premise is load-bearing beyond variance: gofresh's
+  audited-pooling admission (freshness analysis of `sync.Pool` globals) is sound only under
+  single-subject execution — with siblings sharing a process, pool-content dispatch can
+  manufacture a false-verifiable — and the per-benchmark runtime-input evidence (§7.8) gives each
+  recording the exact manifest of its own invocation rather than a package-wide union. The
+  testlog capture, the observation bracket, the throttle bracket, and the repository-state
+  bracket are all per invocation (§7.8, and the throttled evidence below); the warmup build stays
+  one per package — the build cache is shared, and compilation is not measurement. A failing
+  benchmark process discards only its own recording: the package's other arms record normally,
+  the failed arms are reported, and the run exits non-zero.
+  **Each arm measures inside its own repository-state bracket.** State moved across an arm's
+  bracket refuses that arm alone — reported alongside any process failure of the same arm, never
+  masked by it — and every later arm's bracket opens from a fresh snapshot, so a refused
+  sibling's residue is pre-existing state to it, observed fail-closed like any other pre-existing
+  state. The package write gate then verifies exactly what the recordings' validity rests on: the
+  fingerprints hash source inputs, so the pre-write view re-validation proves the source closures
+  unchanged across the whole measurement span and the recorded commit must still name HEAD — a
+  source-input or HEAD move aborts every write (the fingerprints no longer describe the tree),
+  while non-source worktree residue never discards completed sibling measurements.
+  **A single-subject stream owns all of its corruption evidence.** Corruption attributed to any
+  benchmark other than the invocation's subject — a parseable result row or an unparseable line
+  naming a sibling — is the same splice evidence either way and refuses the arm; there is no
+  other arm in the stream for it to belong to.
 - `-run=^$ -bench=<pattern>` (benchmarks only), **`-count=10`** (enough for a real benchmath CI;
   n=3 gives a degenerate interval), **`-benchtime=1s`** time-based (works with Go 1.24+ `b.Loop()`;
   per-op comparison makes the auto-scaled iteration count fine). The benchmark pattern, count, and
@@ -690,14 +729,16 @@ provenance is captured atomically with the run:
   only in its absence — conflicting signals never resolve toward enabled.
   **Thermal throttling is run-scoped evidence, not a pre-check.** The CPU
   `thermal_throttle/*_throttle_count` counters are cumulative since boot, so their standing value
-  says nothing about this run; pew compiles the package's test binary **before** the bracket
+  says nothing about this run; pew compiles the package's test binary **before** any bracket
   opens (compilation is a thermal-event source of its own — the discarded artifact warms the
-  build cache the measurement run reuses; the measured invocation still performs its own link of
-  the cached objects, the far smaller residual inside the bracket), then snapshots the counters
-  bracketing the measurement run and records the delta verdict: `throttled=true` iff a counter increased within the bracket,
-  `false` when counters were comparable and still, `unknown` when none were. A throttled package
+  build cache every measurement invocation reuses; each measured invocation still performs its
+  own link of the cached objects, the far smaller residual inside its bracket), then snapshots
+  the counters bracketing each benchmark's measurement invocation and records the delta verdict
+  per benchmark: `throttled=true` iff a counter increased within that arm's bracket,
+  `false` when counters were comparable and still, `unknown` when none were. A throttled benchmark
   warns right after its measurement — the only moment the evidence exists — and under `--strict`
-  is **refused**: not recorded, its prior recording untouched, the run exits non-zero.
+  is **refused**: not recorded, its prior recording untouched, the package's other benchmarks
+  unaffected, the run exits non-zero.
 - **Run conditions are recorded as provenance, never identity.** The observation that produces the
   quiesce warnings is also recorded in-band as the mandatory `pew-runconditions` config line — one
   per recording, uniform per invocation:
@@ -709,9 +750,9 @@ provenance is captured atomically with the run:
   warn/`--strict` gate, from one pre-run observation taken once per `pew run` invocation before
   execution — uniform per invocation, so the gate and the recording can never disagree about what
   was observed, and mid-run drift is not re-observed (drift is caught by the statistics, §8).
-  `throttled` is the exception by construction: it is the per-package measurement-bracket delta
-  above, so it may differ between packages of one invocation and is exactly as run-scoped as the
-  measurement it annotates. A governor value that is not a plain token
+  `throttled` is the exception by construction: it is the per-benchmark measurement-bracket delta
+  above, so it may differ between the recordings of one invocation and is exactly as run-scoped
+  as the measurement it annotates. A governor value that is not a plain token
   (`[A-Za-z0-9_.-]+`) is *recorded* as `unknown` — field values never carry separators that could
   corrupt the line's `key=value` structure — while the advisory warning may still name the raw
   value (warnings are stderr text, not persisted structure). The line answers the audit question "was this number
@@ -736,30 +777,38 @@ provenance is captured atomically with the run:
     with corruption evidence attributed to it (an unparseable line naming it, an orphaned
     measurement-fields line following its output), is **refused**: not recorded, its prior
     recording left untouched, the refusal reported with the offending lines — while the package's
-    other benchmarks record normally wherever the corruption is attributable, and the run still
-    exits non-zero. An orphaned measurement-fields line attributable to no benchmark of the run
-    refuses the whole package (a sample was destroyed or replaced somewhere pew cannot localize),
-    and a selected benchmark left with no parseable rows and no attributed evidence fails the
-    package (indistinguishable from a benchmark that never ran).
-  - A `go test` exit failure still records nothing for the package — the process is suspect, not
-    merely its transcript. The reserved-key refusal (§5) is unchanged and fail-closed.
+    other benchmarks, each a separate process, record normally, and the run still exits non-zero.
+    An orphaned measurement-fields line attributable to no named benchmark refuses the
+    invocation's own subject: the single-subject process ran exactly one benchmark, so the
+    destroyed or replaced sample can belong to no other recording. A parseable result row naming
+    a benchmark the invocation did not select is fabricated or spliced output and refuses the
+    arm. A selected benchmark left with no parseable rows and no attributed evidence fails its
+    own arm (indistinguishable from a benchmark that never ran).
+  - A `go test` exit failure still records nothing for its benchmark — the process is suspect,
+    not merely its transcript; sibling benchmarks' processes are independent and record normally,
+    with the failure reported and the run exiting non-zero. The reserved-key refusal (§5) is
+    unchanged and fail-closed, scoped like every stream judgment to the single-subject invocation
+    that produced the stream.
   - Recordings carry no salvage artifacts: corrupt-line reports, counts, and refusal reasons are
     command output only, never persisted.
   - *Detection boundary:* a spliced line that still parses as a well-formed result row is
     textually indistinguishable from a genuine one, and a foreign unterminated write can prepend
     bytes to a detached tail so it evades orphan detection. Detection is therefore best-effort
-    over a text stream: the sample floor catches every corruption that changes a row's count and
-    orphan evidence catches tail-preserving fabrication, but a splice that both fabricates a
-    parseable row and masks its detached tail is undetectable — the same exposure every consumer
+    over a text stream: the sample floor catches every corruption that changes a row's count,
+    orphan evidence catches tail-preserving fabrication, and single-subject execution narrows the
+    boundary further — a fabricated row naming any benchmark but the invocation's own subject is
+    refused outright. The residual undetectable case is a splice that fabricates a parseable row
+    for the arm's own subject while masking its detached tail — the same exposure every consumer
     of the text format has.
 - Records provenance (§5), computes the run-commit closure hash (§7), and records runtime-input
   evidence (`pew-runtime*`, §7.8) at run time: the completed observation conjunction, or the
   canonical incomplete disposition with its honest reason when the conjunction cannot complete.
 - Captures one ordinary measurement view and every benchmark fingerprint before execution. The
-  result-contributing process is the package test binary launched by the `go test` driver. Pew
-  finalizes exactly one observation for that package test binary — completed under the §7.8
-  conjunction (pre-spawn bracket, testlog capture, completed-process ingest), incomplete with the
-  stated reason otherwise. It validates the view and the sealed runtime state before
+  result-contributing process for each benchmark is the package test binary launched by that
+  benchmark's own `go test` driver invocation (single-subject execution above). Pew finalizes
+  exactly one observation per invocation — completed under the §7.8 conjunction (pre-spawn
+  bracket, testlog capture, completed-process ingest), incomplete with the stated reason
+  otherwise. It validates the view and the sealed runtime state before
   writing any result. One immutable complete process-environment snapshot configures the view, the
   driver and inherited package test binary, and the observation's construction — spawn and
   ingestion use the same environment, with `PWD` pinned to the package directory the driver gives
@@ -767,7 +816,9 @@ provenance is captured atomically with the run:
   env, and module probes alike: the working directory is resolved symlink-free and `PWD` pinned
   to it, so the resolved-directory premise holds by construction through a symlinked checkout
   whose shell exports the alias, with no per-site bridging. Source, guard,
-  purity, commit, or worktree-state drift aborts the package write. Every destination is
+  purity, or commit drift aborts the package write; worktree-state drift is arm-scoped — an arm
+  whose own repository-state bracket moved is refused alone (single-subject execution above), and
+  non-source residue never aborts the write of the sibling arms' recordings. Every destination is
   staged before replacement and every returned commit failure restores the prior complete set, so one
   package run is one producer transaction across ordinary filesystem errors. Each file is individually
   temp-and-rename safe; sudden process death during a multi-file commit may leave a recording absent,
@@ -1048,10 +1099,12 @@ Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred
 - **INV-11 — Recording sample completeness.** A recording produced by `pew run` carries exactly
   the demanded `--count` samples for every result row; a benchmark whose stream output shows
   corruption evidence (unparseable lines naming it, orphaned measurement fields, sample-count
-  deviation) is refused rather than recorded (§9 sample floor); localizable corruption in one
-  benchmark's output never discards another benchmark's completed measurements — only the §5
-  reserved-key refusal and §9's unattributable-corruption cases refuse a whole package — and no
-  corrupt line's content is ever recorded, as measurement data or as salvage artifact.
+  deviation) is refused rather than recorded (§9 sample floor); corruption or repository-state
+  motion in one benchmark's arm never discards another benchmark's completed measurements —
+  single-subject execution (§9) makes every stream and state judgment arm-local, so neither
+  output corruption nor non-source residue refuses a whole package; only source-input or HEAD
+  drift (the premise every fingerprint shares) aborts a package write — and no corrupt line's
+  content is ever recorded, as measurement data or as salvage artifact.
   *Violation:* a dependency's logger splices one line into one result row and either (a) the whole
   package's completed run — ~30 minutes of untouched benchmarks — is discarded, or (b) the
   affected benchmark records silently with fewer samples than demanded, and `pew stat` later
@@ -1059,7 +1112,7 @@ Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred
   (§9 statistics-grade defaults + §5 provenance honesty). *Anchor tests:* a stream captured from a
   real consensus-node-logging run ⇒ the affected benchmark refused with the spliced line reported
   verbatim, the clean benchmark recorded with its full sample set; an orphaned-fields line with no
-  attributable benchmark ⇒ the package refused.
+  attributable benchmark ⇒ the producing arm's own benchmark refused, its sibling recorded.
 - **INV-12 — The recording key set is closed.** Every recording `pew run` stores carries
   file-configuration keys drawn only from the closed set of §5: the toolchain's four stream keys,
   pew's provenance/guard/manifest keys, `pew-closure`, and `pure`; every other stream-derived

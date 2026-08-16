@@ -25,8 +25,9 @@ type runConfig struct {
 	strict, staleOnly    bool
 	pure, impure         map[string]bool // benchmark names flagged --assume-pure / --impure
 	// throttle snapshots the thermal-throttle counters bracketing each
-	// package's measurement (spec §9); nil means run.SnapshotThrottle. A seam
-	// so tests control the observed delta deterministically.
+	// benchmark's measurement invocation (spec §9); nil means
+	// run.SnapshotThrottle. A seam so tests control the observed delta
+	// deterministically.
 	throttle func() run.ThrottleSnapshot
 	// execute runs one go-test invocation; nil means run.Execute. A seam so
 	// tests can observe invocation order against the throttle bracket.
@@ -360,10 +361,11 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 		return err
 	}
 
-	// Build the test binary before the throttle bracket opens: compilation is
+	// Build the test binary before any throttle bracket opens: compilation is
 	// a thermal-event source of its own, and the recorded throttled verdict
-	// covers the measurement, not the build (spec §9). The artifact is
-	// discarded — the build cache is what the measurement run reuses.
+	// covers the measurement, not the build (spec §9). One build serves every
+	// per-benchmark invocation — the build cache is shared — and the artifact
+	// itself is discarded.
 	warmup, err := os.CreateTemp("", "pew-testbin-*")
 	if err != nil {
 		return err
@@ -374,66 +376,305 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 	if _, err := rc.executeGo(p.Module.Dir, "", env, run.BuildArgs(p.ImportPath, warmupPath)); err != nil {
 		return err
 	}
-	// The completed-observation conjunction (spec §7.8): classification
-	// roots and the pre-spawn bracket are captured before the throttle
-	// bracket opens — both are exec/IO work, not measurement — and the
-	// measurement invocation carries the testlog capture through the
-	// test binary's own flag.
+	// Environment truths are per package, not per process: the classification
+	// roots and the target platform come from the same toolchain and
+	// environment every per-benchmark invocation runs under.
 	envRoots, err := run.ReadGoEnvRoots(p.Module.Dir, env)
 	if err != nil {
 		return err
 	}
+	goos, goarch, err := run.ReadTargetPlatform(p.Module.Dir, env)
+	if err != nil {
+		return err
+	}
+	truth := run.ToolchainTruth{GOOS: goos, GOARCH: goarch, ImportPath: p.ImportPath}
+
+	// Single-subject execution (spec §9): each benchmark measures in its own
+	// `go test` process, inside its own repository-state bracket, so
+	// subjects never share process state and every piece of run evidence —
+	// testlog, observation bracket, throttle bracket, state bracket —
+	// attributes to exactly one recording. A failing or refused arm
+	// discards only its own recording; the package's other arms record,
+	// the failures are reported below, and the command exits non-zero. An
+	// arm can both fail and be refused (a crashing bench that also moved
+	// the tree): both facts surface, neither masks the other.
+	measured := make(map[string]armMeasurement, len(runBenches))
+	armFailed := map[string]error{}
+	armRefused := map[string][]string{}
+	for _, name := range runBenches {
+		m, refused, err := measureBench(ctx, errw, rc, gc, p, env, opts, pkgRel, name, envRoots, truth, scratch, conditions)
+		if err != nil {
+			armFailed[name] = err
+		}
+		if len(refused) > 0 {
+			armRefused[name] = refused
+		}
+		if err == nil && len(refused) == 0 {
+			measured[name] = m
+		}
+	}
+
+	written := []string{}
+	if len(measured) > 0 {
+		if err := view.Validate(ctx); err != nil {
+			return err
+		}
+		dirty := initialDirty
+		if !dirty {
+			dirty, err = sourceInputsDirty(p.Module.Dir, commit, view.SourceFiles())
+			if err != nil {
+				return err
+			}
+		}
+		var writes []store.WriteRequest
+		for _, name := range runBenches {
+			m, ok := measured[name]
+			if !ok {
+				continue
+			}
+			fp, ok := fingerprints[name]
+			if !ok {
+				return fmt.Errorf("benchmark %s was not captured in the producer view", name)
+			}
+			recs := m.recs
+			// The run conditions carry this arm's own throttle-bracket
+			// delta (spec §9), and the runtime-input evidence is this arm's
+			// own digest and manifest (spec §7.8) — each recording
+			// describes exactly its own invocation.
+			for _, cfg := range run.ProvenanceConfig(commit, dirty, fp.Guards, m.conditions) {
+				recs = withConfig(recs, cfg)
+			}
+			recs = withConfig(recs, run.ClosureConfig(fp.MaximalClosure))
+			recs = withConfig(recs, run.TestVariantConfig(fp.TestVariantClosure))
+			recs = withConfig(recs, run.TestVariantLedgerConfig(encodedLedger))
+			for _, cfg := range run.RuntimeConfig(m.digest, m.manifest) {
+				recs = withConfig(recs, cfg)
+			}
+			for _, cfg := range run.GofreshEvidenceConfigs(fp.PurityAssertion, fp.DynamicStateVouches) {
+				recs = withConfig(recs, cfg)
+			}
+			// Purity flags are per-benchmark (spec §7.5): apply only to the named ones.
+			if rc.pure[name] {
+				recs = withConfig(recs, run.PureConfig("true"))
+			} else if rc.impure[name] {
+				recs = withConfig(recs, run.PureConfig("false"))
+			}
+			// A new GOMAXPROCS variant lineage records loudly, not silently:
+			// result names embed the suffix (BenchmarkX-24), so a --pin run
+			// on a wider host mints rows nothing on record can bridge, and
+			// the operator must not learn that from a later stat - after the
+			// measurement time is spent (spec §10.1's grouping never bridges
+			// suffixes). Warning, never refusal: first recordings and
+			// deliberate profile changes are legitimate.
+			warnNewVariantLineage(errw, st, pkgRel, name, rc.label, recs)
+			writes = append(writes, store.WriteRequest{PkgRel: pkgRel, Bench: name, Label: rc.label, Results: recs})
+			written = append(written, name)
+		}
+		sort.Slice(writes, func(i, j int) bool { return writes[i].Bench < writes[j].Bench })
+		recordingPaths := make([]string, 0, len(writes))
+		for _, write := range writes {
+			path, err := st.Path(write.PkgRel, write.Bench, write.Label)
+			if err != nil {
+				return err
+			}
+			recordingPaths = append(recordingPaths, path)
+		}
+		if err := rejectStoreCoveredSources(view.SourceFiles(), gc.exclude...); err != nil {
+			return err
+		}
+		if err := rejectRecordingDestinations(view.SourceFiles(), recordingPaths); err != nil {
+			return err
+		}
+		if err := view.Validate(ctx); err != nil {
+			return err
+		}
+		// The PGO profile is a build input outside the git-tracked source
+		// snapshots, so it gets its own pre-write revalidation: the recorded
+		// buildconfig must describe the exact bytes the measured compile consumed.
+		goflagsAtWrite, err := run.EffectiveGoflags(p.Module.Dir, env)
+		if err != nil {
+			return err
+		}
+		pgoAtWrite, err := run.PGOInput(p.Module.Dir, p.Dir, p.Name == "main", goflagsAtWrite)
+		if err != nil {
+			return err
+		}
+		if pgoAtWrite != pgoInput {
+			return fmt.Errorf("effective PGO input changed during the benchmark run")
+		}
+		// The write gate verifies exactly what the recordings' validity
+		// rests on (spec §9): the fingerprints hash source inputs, so the
+		// view re-validation above proves the source closures unchanged
+		// across the whole measurement span, and the recorded commit must
+		// still name HEAD. Non-source worktree residue (a failed arm's
+		// crash leftovers) is arm-scoped evidence — the arm that wrote it
+		// refused on its own moved state bracket — and never discards
+		// completed sibling measurements.
+		stateAtWrite, err := gc.snapshot(p.Module.Dir)
+		if err != nil {
+			return err
+		}
+		if stateAtWrite.Commit != commit {
+			return fmt.Errorf("repository HEAD moved during the benchmark run")
+		}
+		if err := st.WriteBatch(writes); err != nil {
+			return err
+		}
+		sort.Strings(written)
+		for _, name := range written {
+			fmt.Fprintf(w, "recorded     %s.%s\n", p.ImportPath, name)
+		}
+	}
+
+	var problems []string
+	if len(armFailed) > 0 {
+		failed := make([]string, 0, len(armFailed))
+		for bench := range armFailed {
+			failed = append(failed, bench)
+		}
+		sort.Strings(failed)
+		details := make([]string, 0, len(failed))
+		for _, bench := range failed {
+			details = append(details, bench+": "+armFailed[bench].Error())
+		}
+		problems = append(problems, fmt.Sprintf("%d benchmark(s) failed: %s",
+			len(failed), strings.Join(details, " | ")))
+	}
+	if len(armRefused) > 0 {
+		refused := make([]string, 0, len(armRefused))
+		for bench := range armRefused {
+			refused = append(refused, bench)
+		}
+		sort.Strings(refused)
+		details := make([]string, 0, len(refused))
+		for _, bench := range refused {
+			details = append(details, bench+": "+strings.Join(armRefused[bench], "; "))
+		}
+		problems = append(problems, fmt.Sprintf("refused %d benchmark(s) without recording: %s",
+			len(refused), strings.Join(details, " | ")))
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("%s (%d recorded)", strings.Join(problems, "; "), len(written))
+	}
+	return nil
+}
+
+// armMeasurement is one benchmark's single-subject measurement (spec §9): its
+// result rows, its own runtime-input evidence (spec §7.8), and the shared
+// pre-run conditions carrying this arm's throttle-bracket delta.
+type armMeasurement struct {
+	recs             []*benchfmt.Result
+	digest, manifest string
+	conditions       run.Conditions
+}
+
+// measureBench executes exactly one top-level benchmark in its own `go test`
+// process (spec §9, single-subject execution): the caller's -bench pattern is
+// restricted to this benchmark (sub-benchmark selections preserved), and the
+// testlog capture, observation frame, throttle bracket, and repository-state
+// bracket are all fresh per invocation, so every piece of evidence attributes
+// to exactly this subject. A non-nil error is an arm failure — a suspect
+// process records nothing — and non-empty refusal reasons are the spec §9
+// arm refusal (sample floor, corruption, or a moved state bracket); both may
+// hold at once and both are returned — a crash that also moved the tree
+// surfaces as a crash and as a moved bracket, neither masking the other. In
+// every case only this arm's recording is discarded, its prior recording
+// untouched.
+func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, env []string, opts run.Options, pkgRel, name string, envRoots run.GoEnvRoots, truth run.ToolchainTruth, scratch []string, base run.Conditions) (armMeasurement, []string, error) {
+	pattern, err := restrictBenchmarkPattern(opts.Bench, []string{name})
+	if err != nil {
+		return armMeasurement{}, nil, err
+	}
+	armOpts := opts
+	armOpts.Bench = pattern
+	// Re-sweep the declared run-scratch namespaces before this arm's
+	// brackets form (spec §7.8): a prior arm's exited process may have left
+	// declared-scratch residue, and left in place it would enter this arm's
+	// brackets as pre-existing state — making the manifest depend on
+	// sibling order, against §9's (source, subject, machine) claim. The
+	// declared-forfeit semantics apply exactly as at command entry, and
+	// every removal prints. Non-scratch residue needs no sweep: the arm
+	// that wrote it refuses on its own moved state bracket below, and later
+	// arms observe it as stable pre-existing state, fail-closed.
+	if err := sweepScratchLeftovers(errw, p.Dir, scratch); err != nil {
+		return armMeasurement{}, nil, err
+	}
+	// The arm's repository-state bracket (spec §9): state moved across
+	// exactly this invocation refuses exactly this arm, and the next arm's
+	// own bracket starts from a fresh snapshot — a refused sibling's
+	// residue is pre-existing state to it, never a package abort.
+	armStart, err := gc.snapshot(p.Module.Dir)
+	if err != nil {
+		return armMeasurement{}, nil, err
+	}
+	// The completed-observation conjunction (spec §7.8), per invocation:
+	// the pre-spawn bracket is fingerprinted immediately before this
+	// benchmark's process spawns — exec/IO work, outside the throttle
+	// bracket — and the measurement invocation carries its own testlog
+	// capture through the test binary's flag.
 	frame := run.CaptureObservationFrame(ctx, p.Module.Dir, pkgRel)
 	testlog, err := os.CreateTemp("", "pew-testlog-*")
 	if err != nil {
-		return err
+		return armMeasurement{}, nil, err
 	}
 	testlogPath := testlog.Name()
 	_ = testlog.Close()
 	defer os.Remove(testlogPath)
-	// A benchmark failure makes `go test` exit non-zero and discards the whole
-	// package's run (the successful benches too) — a suspect package records
-	// nothing rather than a partial set.
 	// run.Execute resolves the working directory and pins PWD to it by
 	// construction, so the go driver hands the test binary the same
 	// resolved package directory the ingest pins — byte-faithful even
 	// through a symlinked checkout, with no per-site bridging.
 	throttleBase := rc.snapshotThrottle()
-	out, err := rc.executeGo(p.Module.Dir, rc.pin, env, append(run.TestArgs(p.ImportPath, opts), "-args", "-test.testlogfile="+testlogPath))
-	if err != nil {
-		return err
-	}
+	out, execErr := rc.executeGo(p.Module.Dir, rc.pin, env, append(run.TestArgs(p.ImportPath, armOpts), "-args", "-test.testlogfile="+testlogPath))
 	// Throttling is run-scoped evidence (spec §9): the recorded value is the
-	// counter delta across exactly this package's measurement, warned here —
-	// the only moment it is observable — and fatal under --strict, refusing
-	// the suspect measurement before anything is recorded.
-	conditions.Throttled = throttleBase.Delta(rc.snapshotThrottle())
-	if conditions.Throttled != nil && *conditions.Throttled {
-		fmt.Fprintf(errw, "pew: warning: thermal throttling occurred during %s measurement\n", p.ImportPath)
+	// counter delta across exactly this benchmark's measurement, warned
+	// here — the only moment the evidence exists — and fatal under
+	// --strict, refusing the suspect arm before anything is recorded.
+	throttled := throttleBase.Delta(rc.snapshotThrottle())
+	armEnd, err := gc.snapshot(p.Module.Dir)
+	if err != nil {
+		return armMeasurement{}, nil, err
+	}
+	var moved []string
+	if !armStart.Equal(armEnd) {
+		// The recording's evidence premise broke inside this arm's own
+		// bracket; the refusal rides alongside any process failure below —
+		// both facts reach the package report.
+		moved = []string{fmt.Sprintf("repository state moved during %s measurement", name)}
+	}
+	if execErr != nil {
+		// The process is suspect, not merely its transcript (spec §9); it
+		// records nothing, while sibling arms — separate processes — are
+		// untouched.
+		return armMeasurement{}, moved, execErr
+	}
+	if throttled != nil && *throttled {
+		fmt.Fprintf(errw, "pew: warning: thermal throttling occurred during %s.%s measurement\n", p.ImportPath, name)
 		if rc.strict {
-			return fmt.Errorf("run: %s: thermal throttling during measurement (--strict)", p.ImportPath)
+			return armMeasurement{}, moved, fmt.Errorf("thermal throttling during measurement (--strict)")
 		}
 	}
+	if len(moved) > 0 {
+		return armMeasurement{}, moved, nil
+	}
+	armConditions := base
+	armConditions.Throttled = throttled
 	runtimeState, err := run.IngestObservation(ctx, frame, testlogPath, "package-test-binary:"+p.ImportPath, env, envRoots, scratch...)
 	if err != nil {
-		return err
+		return armMeasurement{}, nil, err
 	}
 	// The stream is transient input, not a recording (spec §9): interleaved
 	// foreign stdout output corrupts individual result lines, so corruption is
 	// surfaced per line and enforced per benchmark — never fatal per line.
 	results, corrupt, dropped, err := run.Parse(out)
 	if err != nil {
-		return err
+		return armMeasurement{}, nil, err
 	}
 	// The stream's own toolchain keys are verified against out-of-band
 	// truth: a value benchfmt would happily record can still be a
 	// dependency's spoof (spec §5, INV-12's value-trust arm).
-	goos, goarch, err := run.ReadTargetPlatform(p.Module.Dir, env)
-	if err != nil {
-		return err
-	}
-	if err := run.VerifyToolchainConfig(results, run.ToolchainTruth{GOOS: goos, GOARCH: goarch, ImportPath: p.ImportPath}); err != nil {
-		return err
+	if err := run.VerifyToolchainConfig(results, truth); err != nil {
+		return armMeasurement{}, nil, err
 	}
 	for _, cl := range corrupt {
 		fmt.Fprintf(errw, "pew: warning: corrupt benchmark output line %d: %q (%s)\n", cl.Line, cl.Text, cl.Cause)
@@ -441,137 +682,46 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 	for _, dc := range dropped {
 		fmt.Fprintf(errw, "pew: warning: dropping stream configuration key %q (value %q): not a toolchain benchmark key (spec §5)\n", dc.Key, dc.Value)
 	}
-	audit := run.AuditStream(results, corrupt, opts.Count, runBenches)
+	audit := run.AuditStream(results, corrupt, opts.Count, []string{name})
 	if audit.PackageCause != "" {
-		return fmt.Errorf("benchmark output corrupted: %s", audit.PackageCause)
+		// This process ran only this benchmark, so evidence the shared-stream
+		// model could not localize refuses exactly this arm (spec §9): the
+		// destroyed or replaced sample can belong to no other recording.
+		return armMeasurement{}, []string{audit.PackageCause}, nil
 	}
-	refused := make([]string, 0, len(audit.Refused))
-	for bench := range audit.Refused {
-		refused = append(refused, bench)
+	reasons := audit.Refused[name]
+	// Corruption evidence attributed to any other benchmark is as impossible
+	// in a single-subject stream as a foreign result row — the same splice
+	// evidence, the same refusal (spec §9). The shared-stream audit drops it
+	// as another arm's concern; here there is no other arm.
+	for _, cl := range corrupt {
+		if cl.Bench != "" && cl.Bench != name {
+			reasons = append(reasons, fmt.Sprintf("line %d: %q (%s; names %s, which this single-subject invocation did not run)",
+				cl.Line, cl.Text, cl.Cause, cl.Bench))
+		}
 	}
-	sort.Strings(refused)
-
+	if len(reasons) > 0 {
+		return armMeasurement{}, reasons, nil
+	}
 	groups := run.Demux(results, nil)
-	recordable := make([]string, 0, len(runBenches))
-	for _, bench := range runBenches {
-		if _, ok := audit.Refused[bench]; ok {
-			delete(groups, bench)
-			continue
+	if err := requireBenchmarkGroups([]string{name}, groups); err != nil {
+		return armMeasurement{}, nil, err
+	}
+	recs := groups[name]
+	delete(groups, name)
+	if len(groups) > 0 {
+		// The invocation selected exactly one subject, so a parseable result
+		// row naming any other benchmark is fabricated or spliced output
+		// (spec §9's detection boundary, narrowed by single-subject
+		// execution).
+		foreign := make([]string, 0, len(groups))
+		for other := range groups {
+			foreign = append(foreign, other)
 		}
-		recordable = append(recordable, bench)
+		sort.Strings(foreign)
+		return armMeasurement{}, []string{fmt.Sprintf("stream carries result rows for %s, which this single-subject invocation did not run", strings.Join(foreign, ", "))}, nil
 	}
-	if err := requireBenchmarkGroups(recordable, groups); err != nil {
-		return err
-	}
-	if err := view.Validate(ctx); err != nil {
-		return err
-	}
-	dirty := initialDirty
-	if !dirty {
-		dirty, err = sourceInputsDirty(p.Module.Dir, commit, view.SourceFiles())
-		if err != nil {
-			return err
-		}
-	}
-	finalState, err := gc.snapshot(p.Module.Dir)
-	if err != nil {
-		return err
-	}
-	if !startState.Equal(finalState) {
-		return fmt.Errorf("repository state moved during benchmark run")
-	}
-
-	written := []string{}
-	var writes []store.WriteRequest
-	for name, recs := range groups {
-		fp, ok := fingerprints[name]
-		if !ok {
-			return fmt.Errorf("benchmark %s was not captured in the producer view", name)
-		}
-		for _, cfg := range run.ProvenanceConfig(commit, dirty, fp.Guards, conditions) {
-			recs = withConfig(recs, cfg)
-		}
-		recs = withConfig(recs, run.ClosureConfig(fp.MaximalClosure))
-		recs = withConfig(recs, run.TestVariantConfig(fp.TestVariantClosure))
-		recs = withConfig(recs, run.TestVariantLedgerConfig(encodedLedger))
-		for _, cfg := range run.RuntimeConfig(runtimeState.Digest, runtimeState.Manifest) {
-			recs = withConfig(recs, cfg)
-		}
-		for _, cfg := range run.GofreshEvidenceConfigs(fp.PurityAssertion, fp.DynamicStateVouches) {
-			recs = withConfig(recs, cfg)
-		}
-		// Purity flags are per-benchmark (spec §7.5): apply only to the named ones.
-		if rc.pure[name] {
-			recs = withConfig(recs, run.PureConfig("true"))
-		} else if rc.impure[name] {
-			recs = withConfig(recs, run.PureConfig("false"))
-		}
-		// A new GOMAXPROCS variant lineage records loudly, not silently:
-		// result names embed the suffix (BenchmarkX-24), so a --pin run
-		// on a wider host mints rows nothing on record can bridge, and
-		// the operator must not learn that from a later stat - after the
-		// measurement time is spent (spec §10.1's grouping never bridges
-		// suffixes). Warning, never refusal: first recordings and
-		// deliberate profile changes are legitimate.
-		warnNewVariantLineage(errw, st, pkgRel, name, rc.label, recs)
-		writes = append(writes, store.WriteRequest{PkgRel: pkgRel, Bench: name, Label: rc.label, Results: recs})
-		written = append(written, name)
-	}
-	sort.Slice(writes, func(i, j int) bool { return writes[i].Bench < writes[j].Bench })
-	recordingPaths := make([]string, 0, len(writes))
-	for _, write := range writes {
-		path, err := st.Path(write.PkgRel, write.Bench, write.Label)
-		if err != nil {
-			return err
-		}
-		recordingPaths = append(recordingPaths, path)
-	}
-	if err := rejectStoreCoveredSources(view.SourceFiles(), gc.exclude...); err != nil {
-		return err
-	}
-	if err := rejectRecordingDestinations(view.SourceFiles(), recordingPaths); err != nil {
-		return err
-	}
-	if err := view.Validate(ctx); err != nil {
-		return err
-	}
-	// The PGO profile is a build input outside the git-tracked source
-	// snapshots, so it gets its own pre-write revalidation: the recorded
-	// buildconfig must describe the exact bytes the measured compile consumed.
-	goflagsAtWrite, err := run.EffectiveGoflags(p.Module.Dir, env)
-	if err != nil {
-		return err
-	}
-	pgoAtWrite, err := run.PGOInput(p.Module.Dir, p.Dir, p.Name == "main", goflagsAtWrite)
-	if err != nil {
-		return err
-	}
-	if pgoAtWrite != pgoInput {
-		return fmt.Errorf("effective PGO input changed during the benchmark run")
-	}
-	stateAtWrite, err := gc.snapshot(p.Module.Dir)
-	if err != nil {
-		return err
-	}
-	if !finalState.Equal(stateAtWrite) {
-		return fmt.Errorf("repository state moved during benchmark validation")
-	}
-	if err := st.WriteBatch(writes); err != nil {
-		return err
-	}
-	sort.Strings(written)
-	for _, name := range written {
-		fmt.Fprintf(w, "recorded     %s.%s\n", p.ImportPath, name)
-	}
-	if len(refused) > 0 {
-		details := make([]string, 0, len(refused))
-		for _, bench := range refused {
-			details = append(details, bench+": "+strings.Join(audit.Refused[bench], "; "))
-		}
-		return fmt.Errorf("output corruption refused %d benchmark(s) (%d recorded): %s",
-			len(refused), len(written), strings.Join(details, " | "))
-	}
-	return nil
+	return armMeasurement{recs: recs, digest: runtimeState.Digest, manifest: runtimeState.Manifest, conditions: armConditions}, nil, nil
 }
 
 func requireBenchmarkGroups(names []string, groups map[string][]*benchfmt.Result) error {

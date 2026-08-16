@@ -5,10 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"runtime/pprof"
 	"strconv"
 	"strings"
@@ -429,7 +431,7 @@ func TestRunPackageRecordsThrottleDelta(t *testing.T) {
 		if got := recs[0].GetConfig("pew-runconditions"); !strings.Contains(got, "throttled=true") {
 			t.Fatalf("recorded conditions = %q, want throttled=true from the bracket delta", got)
 		}
-		if !strings.Contains(errOut.String(), "thermal throttling occurred during example.com/throttlewire measurement") {
+		if !strings.Contains(errOut.String(), "thermal throttling occurred during example.com/throttlewire.BenchmarkHot measurement") {
 			t.Fatalf("stderr = %q, want the post-measurement throttling warning", errOut.String())
 		}
 	})
@@ -1005,11 +1007,14 @@ func TestRunPackageDropsForeignStreamConfig(t *testing.T) {
 	}
 }
 
-// TestRunPackageRefusesUnattributableOrphan drives the package-refusal arm of
-// the spec §9 sample floor end to end: a detached-measurement-fields line with
-// no preceding benchmark name (foreign output printed before the first result)
-// means a sample was destroyed or replaced somewhere pew cannot localize, so
-// nothing at all may be recorded.
+// TestRunPackageRefusesUnattributableOrphan drives the unattributable-orphan
+// arm of the spec §9 sample floor end to end: a detached-measurement-fields
+// line with no preceding benchmark name (foreign output printed before the
+// first result) means a sample was destroyed or replaced somewhere the stream
+// cannot localize. Under single-subject execution the suspect process ran
+// exactly one benchmark, so the refusal is arm-scoped: the orphan-producing
+// benchmark records nothing while its sibling — a separate process with a
+// clean stream — records normally.
 func TestRunPackageRefusesUnattributableOrphan(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{
@@ -1060,14 +1065,18 @@ func TestRunPackageRefusesUnattributableOrphan(t *testing.T) {
 	if refusal == nil {
 		t.Fatalf("unattributable orphan reported no error\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
 	}
-	if !strings.Contains(refusal.Error(), "not attributable") {
-		t.Errorf("refusal error = %q, want the unattributable-orphan cause", refusal)
+	if !strings.Contains(refusal.Error(), "not attributable") || !strings.Contains(refusal.Error(), "BenchmarkAAATail") {
+		t.Errorf("refusal error = %q, want the unattributable-orphan cause on BenchmarkAAATail", refusal)
 	}
-	if strings.Contains(out.String(), "recorded") {
-		t.Errorf("package-refused run recorded something:\n%s", out.String())
+	st := store.New(benchDir)
+	if _, err := st.Read("", "BenchmarkAAATail", ""); !errors.Is(err, store.ErrNotRecorded) {
+		t.Errorf("orphan-tainted arm read error = %v, want not recorded", err)
 	}
-	if entries, err := os.ReadDir(benchDir); err == nil && len(entries) > 0 {
-		t.Errorf("package-refused run left recordings: %v", entries)
+	if _, err := st.Read("", "BenchmarkClean", ""); err != nil {
+		t.Errorf("sibling arm not recorded: %v", err)
+	}
+	if !strings.Contains(out.String(), "recorded     example.com/orphantail.BenchmarkClean") {
+		t.Errorf("clean sibling arm missing from stdout:\n%s", out.String())
 	}
 }
 
@@ -1469,5 +1478,544 @@ func TestRejectStoreCoveredSources(t *testing.T) {
 	outside := filepath.Join(base, "pkg", "code.go")
 	if err := rejectStoreCoveredSources([]string{outside}, store); err != nil {
 		t.Fatalf("source outside the store refused: %v", err)
+	}
+}
+
+// TestRunPerArmRuntimeManifestAttribution pins single-subject execution's
+// evidence attribution (spec §9, §7.8): each benchmark measures in its own
+// `go test` process with its own testlog capture, so a recording's
+// runtime-input manifest carries exactly its own benchmark's reads. A
+// shared-process model serves one union manifest to every sibling, so this
+// fails there by construction.
+func TestRunPerArmRuntimeManifestAttribution(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/armattrib\n\ngo 1.26.4\n",
+		"bench_test.go": "package armattrib\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\n" +
+			"func BenchmarkAlpha(b *testing.B) { _, _ = os.ReadFile(\"alpha_input.txt\") }\n" +
+			"func BenchmarkBeta(b *testing.B) { _, _ = os.ReadFile(\"beta_input.txt\") }\n",
+		"alpha_input.txt": "alpha\n",
+		"beta_input.txt":  "beta\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	benchDir := filepath.Join(t.TempDir(), "benchmarks")
+	withWorkingDir(t, dir)
+
+	var out, errOut bytes.Buffer
+	if err := runRun(&out, &errOut, runConfig{
+		benchDir: benchDir,
+		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
+	}, []string{"."}); err != nil {
+		t.Fatalf("runRun: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+	st := store.New(benchDir)
+	for bench, want := range map[string]struct{ own, sibling string }{
+		"BenchmarkAlpha": {own: "alpha_input.txt", sibling: "beta_input.txt"},
+		"BenchmarkBeta":  {own: "beta_input.txt", sibling: "alpha_input.txt"},
+	} {
+		recs, err := st.Read("", bench, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		fp, _, _, ok := fingerprintFromConfig(recs[0].Config)
+		if !ok {
+			t.Fatalf("%s recording lacks current format", bench)
+		}
+		manifest, err := base64.RawURLEncoding.DecodeString(fp.RuntimeInputs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(manifest), want.own) {
+			t.Errorf("%s manifest lacks its own read %s: %s", bench, want.own, manifest)
+		}
+		if strings.Contains(string(manifest), want.sibling) {
+			t.Errorf("%s manifest carries the sibling's read %s: %s", bench, want.sibling, manifest)
+		}
+	}
+}
+
+// TestRunSingleSubjectProcessIsolation pins that sibling benchmarks never
+// share process state (spec §9): BenchmarkMutate increments a package-level
+// counter; BenchmarkObserve reports the counter as a metric. In one shared
+// process (source and sorted order both run Mutate first) the increments
+// leak into the observed metric; in per-benchmark processes the counter is
+// untouched at observation time, so the recorded metric is exactly zero.
+func TestRunSingleSubjectProcessIsolation(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/procisolation\n\ngo 1.26.4\n",
+		"bench_test.go": "package procisolation\n\nimport \"testing\"\n\nvar n int\n\n" +
+			"func BenchmarkMutate(b *testing.B) {\n\tfor i := 0; i < b.N; i++ {\n\t\tn++\n\t}\n}\n\n" +
+			"func BenchmarkObserve(b *testing.B) {\n\tb.ReportMetric(float64(n), \"leak\")\n}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	benchDir := filepath.Join(t.TempDir(), "benchmarks")
+	withWorkingDir(t, dir)
+
+	var out, errOut bytes.Buffer
+	if err := runRun(&out, &errOut, runConfig{
+		benchDir: benchDir,
+		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
+	}, []string{"."}); err != nil {
+		t.Fatalf("runRun: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+	recs, err := store.New(benchDir).Read("", "BenchmarkObserve", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, rec := range recs {
+		for _, v := range rec.Values {
+			if v.Unit == "leak" {
+				found = true
+				if v.Value != 0 {
+					t.Fatalf("leak metric = %v, want 0: sibling process state leaked into the measurement", v.Value)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("BenchmarkObserve recording carries no leak metric")
+	}
+}
+
+// TestRunFailingArmDiscardsOnlyItsRecording pins spec §9's failure isolation
+// under single-subject execution: a benchmark whose process fails (b.Fatal)
+// records nothing, the sibling arm's process records a complete well-formed
+// recording, and the command still reports the failure and exits non-zero.
+func TestRunFailingArmDiscardsOnlyItsRecording(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/armfail\n\ngo 1.26.4\n",
+		"bench_test.go": "package armfail\n\nimport \"testing\"\n\n" +
+			"func BenchmarkGood(b *testing.B) {}\n" +
+			"func BenchmarkBad(b *testing.B) { b.Fatal(\"boom\") }\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	benchDir := filepath.Join(t.TempDir(), "benchmarks")
+	withWorkingDir(t, dir)
+
+	var out, errOut bytes.Buffer
+	err = runRun(&out, &errOut, runConfig{
+		benchDir: benchDir,
+		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
+	}, []string{"."})
+	if err == nil {
+		t.Fatalf("runRun succeeded despite a failing arm\nstdout:\n%s", out.String())
+	}
+	if !strings.Contains(err.Error(), "example.com/armfail") {
+		t.Errorf("err = %v, want the failing package named", err)
+	}
+	if !strings.Contains(out.String(), "BenchmarkBad") {
+		t.Errorf("stdout does not name the failed arm:\n%s", out.String())
+	}
+	st := store.New(benchDir)
+	if _, err := st.Read("", "BenchmarkBad", ""); !errors.Is(err, store.ErrNotRecorded) {
+		t.Errorf("failing arm read error = %v, want not recorded", err)
+	}
+	recs, err := st.Read("", "BenchmarkGood", "")
+	if err != nil {
+		t.Fatalf("sibling arm not recorded: %v", err)
+	}
+	if _, _, _, ok := fingerprintFromConfig(recs[0].Config); !ok {
+		t.Error("sibling arm's recording lacks the current well-formed format")
+	}
+	assertRunConditionsLine(t, "BenchmarkGood", recs[0].GetConfig("pew-runconditions"))
+	if !strings.Contains(out.String(), "recorded     example.com/armfail.BenchmarkGood") {
+		t.Errorf("sibling arm missing from stdout:\n%s", out.String())
+	}
+}
+
+// TestRunPackagePerArmThrottleAttribution pins that the throttle bracket and
+// its recorded verdict are per benchmark (spec §9): with counters that move
+// only across the second arm's measurement, the first arm records
+// throttled=false and the second throttled=true, the warning names the
+// throttled benchmark, and the invocation order is one build followed by a
+// snapshot/measure/snapshot bracket per arm.
+func TestRunPackagePerArmThrottleAttribution(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/armthrottle\n\ngo 1.26.4\n",
+		"bench_test.go": "package armthrottle\n\nimport \"testing\"\n\n" +
+			"func BenchmarkFirst(b *testing.B) {}\n" +
+			"func BenchmarkSecond(b *testing.B) {}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	benchDir := filepath.Join(t.TempDir(), "benchmarks")
+	withWorkingDir(t, dir)
+	pkgs, err := resolvePackages([]string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := os.Environ()
+	e, _, err := newEngineForPkg(pkgs[0], env)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var events []string
+	snapshots := 0
+	rc := runConfig{
+		benchDir: benchDir,
+		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
+		throttle: func() runpkg.ThrottleSnapshot {
+			snapshots++
+			events = append(events, "snapshot")
+			// Snapshots 1+2 bracket the first arm (counter still); snapshots
+			// 3+4 bracket the second (counter moves within the bracket).
+			n := uint64(1)
+			if snapshots >= 4 {
+				n = 2
+			}
+			return runpkg.ThrottleSnapshot{"c0": n}
+		},
+		execute: func(moduleDir, pin string, env, args []string) ([]byte, error) {
+			for _, a := range args {
+				if a == "-c" {
+					events = append(events, "build")
+					return nil, nil
+				}
+			}
+			pattern := ""
+			for i, a := range args {
+				if a == "-bench" && i+1 < len(args) {
+					pattern = args[i+1]
+				}
+			}
+			name := "First"
+			if strings.Contains(pattern, "Second") {
+				name = "Second"
+			}
+			events = append(events, "measure"+name)
+			return []byte(fmt.Sprintf("goos: %s\ngoarch: %s\npkg: example.com/armthrottle\ncpu: T\nBenchmark%s-8 1 5 ns/op\nPASS\n", runtime.GOOS, runtime.GOARCH, name)), nil
+		},
+	}
+	var out, errOut bytes.Buffer
+	if err := runPackage(&out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
+		t.Fatalf("runPackage: %v\nstderr:\n%s", err, errOut.String())
+	}
+	want := []string{"build", "snapshot", "measureFirst", "snapshot", "snapshot", "measureSecond", "snapshot"}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("invocation order = %v, want %v", events, want)
+	}
+	st := store.New(benchDir)
+	for bench, wantThrottled := range map[string]string{"BenchmarkFirst": "throttled=false", "BenchmarkSecond": "throttled=true"} {
+		recs, err := st.Read("", bench, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := recs[0].GetConfig("pew-runconditions"); !strings.Contains(got, wantThrottled) {
+			t.Errorf("%s conditions = %q, want %s from its own bracket delta", bench, got, wantThrottled)
+		}
+	}
+	if !strings.Contains(errOut.String(), "thermal throttling occurred during example.com/armthrottle.BenchmarkSecond measurement") {
+		t.Errorf("stderr = %q, want the throttled arm named", errOut.String())
+	}
+	if strings.Contains(errOut.String(), "BenchmarkFirst measurement") {
+		t.Errorf("stderr wrongly implicates the quiet arm:\n%s", errOut.String())
+	}
+}
+
+// TestRunFailingArmResidueRefusesOnlyItsArm pins the per-arm repository-state
+// bracket (spec §9): a crashing benchmark that also leaves worktree residue
+// breaks only its own arm's evidence premise. The sibling — whose own bracket
+// opens after the residue exists and holds across its measurement — still
+// records, and the package error names BOTH facts about the broken arm: the
+// process failure and the moved state bracket, neither masking the other.
+func TestRunFailingArmResidueRefusesOnlyItsArm(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/armresidue\n\ngo 1.26.4\n",
+		"bench_test.go": "package armresidue\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\n" +
+			"func BenchmarkBad(b *testing.B) {\n\tif err := os.WriteFile(\"crash-residue.txt\", []byte(\"x\"), 0o644); err != nil {\n\t\tb.Fatal(err)\n\t}\n\tb.Fatal(\"boom\")\n}\n\n" +
+			"func BenchmarkGood(b *testing.B) {}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	benchDir := filepath.Join(t.TempDir(), "benchmarks")
+	withWorkingDir(t, dir)
+
+	var out, errOut bytes.Buffer
+	err = runRun(&out, &errOut, runConfig{
+		benchDir: benchDir,
+		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
+	}, []string{"."})
+	if err == nil {
+		t.Fatalf("runRun succeeded despite a crashing, residue-leaving arm\nstdout:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "BenchmarkBad") {
+		t.Errorf("stdout does not name the failed arm:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "repository state moved during BenchmarkBad measurement") {
+		t.Errorf("stdout does not name the moved-state refusal for the writing arm:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "benchmark(s) failed") {
+		t.Errorf("stdout does not report the process failure alongside the refusal:\n%s", out.String())
+	}
+	st := store.New(benchDir)
+	if _, err := st.Read("", "BenchmarkBad", ""); !errors.Is(err, store.ErrNotRecorded) {
+		t.Errorf("residue-leaving arm read error = %v, want not recorded", err)
+	}
+	recs, err := st.Read("", "BenchmarkGood", "")
+	if err != nil {
+		t.Fatalf("sibling arm not recorded despite a clean bracket of its own: %v", err)
+	}
+	if _, _, _, ok := fingerprintFromConfig(recs[0].Config); !ok {
+		t.Error("sibling arm's recording lacks the current well-formed format")
+	}
+	if !strings.Contains(out.String(), "recorded     example.com/armresidue.BenchmarkGood") {
+		t.Errorf("sibling arm missing from stdout:\n%s", out.String())
+	}
+}
+
+// TestRunPackageRefusesForeignCorruptEvidence pins the single-subject audit's
+// fail-closed handling of corruption attributed to a non-subject benchmark
+// (spec §9): a single-subject stream cannot legitimately carry any sibling's
+// name, so an unparseable line beginning with one is the same splice evidence
+// as a parseable foreign row and refuses the arm — never a stderr warning
+// that lets the arm record.
+func TestRunPackageRefusesForeignCorruptEvidence(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/foreigncorrupt\n\ngo 1.26.4\n",
+		"bench_test.go": "package foreigncorrupt\n\nimport \"testing\"\n\n" +
+			"func BenchmarkOther(b *testing.B) {}\n" +
+			"func BenchmarkSubject(b *testing.B) {}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	benchDir := filepath.Join(t.TempDir(), "benchmarks")
+	withWorkingDir(t, dir)
+	pkgs, err := resolvePackages([]string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := os.Environ()
+	e, _, err := newEngineForPkg(pkgs[0], env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc := runConfig{
+		benchDir: benchDir,
+		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
+		execute: func(moduleDir, pin string, env, args []string) ([]byte, error) {
+			for _, a := range args {
+				if a == "-c" {
+					return nil, nil
+				}
+			}
+			pattern := ""
+			for i, a := range args {
+				if a == "-bench" && i+1 < len(args) {
+					pattern = args[i+1]
+				}
+			}
+			header := fmt.Sprintf("goos: %s\ngoarch: %s\npkg: example.com/foreigncorrupt\ncpu: T\n", runtime.GOOS, runtime.GOARCH)
+			if strings.Contains(pattern, "Subject") {
+				// The subject's clean row plus one unparseable line that
+				// begins with the sibling's name: corrupt evidence attributed
+				// to a benchmark this invocation did not run.
+				return []byte(header + "BenchmarkSubject-8 1 5 ns/op\nBenchmarkOther-8 1x 5 ns/op\nPASS\n"), nil
+			}
+			return []byte(header + "BenchmarkOther-8 1 5 ns/op\nPASS\n"), nil
+		},
+	}
+	var out, errOut bytes.Buffer
+	refusal := runPackage(&out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, "")
+	if refusal == nil {
+		t.Fatalf("foreign corrupt evidence reported no error\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+	if !strings.Contains(refusal.Error(), "BenchmarkSubject") || !strings.Contains(refusal.Error(), "which this single-subject invocation did not run") {
+		t.Errorf("refusal error = %q, want the subject arm refused on the foreign-named evidence", refusal)
+	}
+	st := store.New(benchDir)
+	if _, err := st.Read("", "BenchmarkSubject", ""); !errors.Is(err, store.ErrNotRecorded) {
+		t.Errorf("tainted arm read error = %v, want not recorded", err)
+	}
+	if _, err := st.Read("", "BenchmarkOther", ""); err != nil {
+		t.Errorf("clean arm not recorded: %v", err)
+	}
+}
+
+// TestRunPerArmScratchSweepIsolation pins the per-arm declared-scratch sweep
+// (spec §7.8, §9): a benchmark that leaves its declared scratch behind is
+// refused on its own moved state bracket — the hygiene bug surfaces at its
+// source — and the leftover is swept (with a printed notice) before the next
+// arm's brackets form, so the sibling's recording and manifest are
+// independent of sibling order.
+func TestRunPerArmScratchSweepIsolation(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/armsweep\n\ngo 1.26.4\n",
+		"bench_test.go": "//pew:scratch sb-*\npackage armsweep\n\nimport (\n\t\"os\"\n\t\"path/filepath\"\n\t\"testing\"\n)\n\n" +
+			"func BenchmarkLeave(b *testing.B) {\n\td, err := os.MkdirTemp(\".\", \"sb-*\")\n\tif err != nil {\n\t\tb.Fatal(err)\n\t}\n\tif err := os.WriteFile(filepath.Join(d, \"out.txt\"), []byte(\"x\"), 0o644); err != nil {\n\t\tb.Fatal(err)\n\t}\n}\n\n" +
+			"func BenchmarkRead(b *testing.B) { _, _ = os.ReadFile(\"input.txt\") }\n",
+		"input.txt": "input\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := raw.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.AddGlob("."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	benchDir := filepath.Join(t.TempDir(), "benchmarks")
+	withWorkingDir(t, dir)
+
+	var out, errOut bytes.Buffer
+	err = runRun(&out, &errOut, runConfig{
+		benchDir: benchDir,
+		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
+	}, []string{"."})
+	if err == nil {
+		t.Fatalf("runRun succeeded despite a scratch-leaving arm\nstdout:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "repository state moved during BenchmarkLeave measurement") {
+		t.Errorf("stdout does not refuse the scratch-leaving arm on its own bracket:\n%s", out.String())
+	}
+	// The between-arm sweep removed the leftover, loudly, before the
+	// sibling's brackets formed.
+	if !strings.Contains(errOut.String(), "swept stale run-scratch") || !strings.Contains(errOut.String(), "sb-") {
+		t.Errorf("between-arm sweep notice missing:\n%s", errOut.String())
+	}
+	st := store.New(benchDir)
+	if _, err := st.Read("", "BenchmarkLeave", ""); !errors.Is(err, store.ErrNotRecorded) {
+		t.Errorf("scratch-leaving arm read error = %v, want not recorded", err)
+	}
+	recs, err := st.Read("", "BenchmarkRead", "")
+	if err != nil {
+		t.Fatalf("sibling arm not recorded: %v", err)
+	}
+	fp, _, _, ok := fingerprintFromConfig(recs[0].Config)
+	if !ok {
+		t.Fatal("sibling recording lacks current format")
+	}
+	manifest, err := base64.RawURLEncoding.DecodeString(fp.RuntimeInputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(manifest), "input.txt") {
+		t.Errorf("sibling manifest lacks its own read: %s", manifest)
+	}
+	if strings.Contains(string(manifest), "sb-") {
+		t.Errorf("sibling manifest carries the leaving arm's scratch leftover: %s", manifest)
 	}
 }
