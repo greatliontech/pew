@@ -429,6 +429,21 @@ func ProvenanceConfig(commit string, dirty bool, g guard.Guards, conditions Cond
 	}
 }
 
+// GuardConfig returns only the four comparison-guard lines (§10.1's guard
+// set), for a producer whose rows never reach the store — the ab derivation
+// path, which must satisfy the comparator's guards without minting the
+// recording path's full §5 provenance (commit and dirty are per-side facts
+// the A/B report already names, and a store-shaped record here would
+// contradict the never-a-stat-baseline contract).
+func GuardConfig(g guard.Guards) []benchfmt.Config {
+	return []benchfmt.Config{
+		{Key: "toolchain", Value: []byte(g.Toolchain), File: true},
+		{Key: "machine", Value: []byte(g.Machine), File: true},
+		{Key: "buildconfig", Value: []byte(g.BuildConfig), File: true},
+		{Key: "runtimeconfig", Value: []byte(g.RuntimeConfig), File: true},
+	}
+}
+
 // ClosureConfig is the recorded closure-hash line. File:true so benchfmt.Writer
 // emits it (it omits File==false config as internal).
 func ClosureConfig(hash string) benchfmt.Config {

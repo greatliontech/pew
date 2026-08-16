@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
@@ -121,6 +122,217 @@ func TestABInterleavesAfterBothSidesBuild(t *testing.T) {
 	}
 	if _, err := os.Stat(bDir); !os.IsNotExist(err) {
 		t.Fatalf("worktree survived cleanup: %v", err)
+	}
+}
+
+// The comparator enforces §10.1's guard provenance; raw go-test streams
+// carry none, so ab must stamp each side's captured guards or every
+// benchmark refuses with "missing machine provenance" and the command
+// reports no verdict at all. Shared guards must yield a real comparison
+// table; a genuine per-side difference in a build-identity guard must
+// still refuse with the mismatch named.
+func TestABStampsGuardProvenance(t *testing.T) {
+	dir := abFixtureRepo(t)
+	prior, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(dir, "p")); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(prior)
+
+	base := abConfig{
+		bench: ".", count: 3, ref: "HEAD",
+		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{} },
+		build:    func(string, []string, []string) error { return nil },
+	}
+
+	shared := base
+	var events []string
+	var sharedDirs, buildDirs, execDirs []string
+	var buildArgs [][]string
+	shared.build = func(buildDir string, env []string, args []string) error {
+		buildDirs = append(buildDirs, buildDir)
+		buildArgs = append(buildArgs, args)
+		return nil
+	}
+	shared.guards = func(moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
+		events = append(events, "guards")
+		sharedDirs = append(sharedDirs, moduleDir)
+		return guard.Guards{Toolchain: "go1", BuildConfig: "b1", Machine: "m1", RuntimeConfig: "r1"}, nil
+	}
+	shared.execute = func(execDir, pin string, env []string, bin string, args []string) ([]byte, error) {
+		events = append(events, "run")
+		execDirs = append(execDirs, execDir)
+		ns := 90
+		if strings.HasSuffix(bin, "b.test") {
+			ns = 100
+		}
+		return []byte(fmt.Sprintf("BenchmarkWork-8 1000 %d ns/op\n", ns)), nil
+	}
+	var out, errOut bytes.Buffer
+	if err := runAB(&out, &errOut, shared, []string{"."}); err != nil {
+		t.Fatalf("runAB: %v\nstderr: %s", err, errOut.String())
+	}
+	if strings.Contains(out.String(), "not compared") {
+		t.Fatalf("guard-satisfied sides refused:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "sec/op") || !strings.Contains(out.String(), "vs base") {
+		t.Fatalf("no comparison table for guard-satisfied sides:\n%s", out.String())
+	}
+	// Each side's guards are captured in its OWN tree (side B's build
+	// identity lives at the ref's worktree), and captured at BUILD time:
+	// the repository stays writable during measurement, so a stamp taken
+	// afterwards could describe an edit the standing binaries never saw.
+	if len(sharedDirs) != 2 || sharedDirs[0] == sharedDirs[1] {
+		t.Fatalf("guard capture dirs = %v, want one per side in distinct trees", sharedDirs)
+	}
+	// The invariant is that the STAMPED captures precede measurement — a
+	// future post-measurement revalidation capture would be legal, so the
+	// assertion demands both sides captured before the first run rather
+	// than forbidding late guard events outright.
+	if len(events) < 2 || events[0] != "guards" || events[1] != "guards" {
+		t.Fatalf("both sides' guard captures must precede measurement — stamps carry build-time identity: %v", events)
+	}
+	// Builds run at each side's MODULE root (the parent of the package
+	// dir the side executes in): a relative -pgo in GOFLAGS resolves
+	// against the build cwd, and the guard digest pins the module-root
+	// resolution.
+	if len(buildDirs) != 2 || len(execDirs) < 2 {
+		t.Fatalf("buildDirs = %v, execDirs = %v", buildDirs, execDirs)
+	}
+	for i := range 2 {
+		if filepath.Dir(execDirs[i]) != buildDirs[i] {
+			t.Fatalf("side %d built at %s but ran at %s — build cwd must be the module root the guard digested", i, buildDirs[i], execDirs[i])
+		}
+	}
+	for i, args := range buildArgs {
+		if got := args[len(args)-1]; got != "./p" {
+			t.Fatalf("side %d build target = %q, want the package relative to the module root", i, got)
+		}
+	}
+
+	// A per-side build-identity difference is a genuine mismatch: the
+	// refusal machinery must stay live through the stamping, and side B
+	// (the ref) must land as base. The working-tree module dir repeats
+	// across runs while each run's worktree is unique, so membership in
+	// the first run's dirs identifies side A without any call-order
+	// assumption.
+	split := base
+	split.execute = shared.execute
+	split.guards = func(moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
+		g := guard.Guards{Toolchain: "go1", BuildConfig: "b1", Machine: "m1", RuntimeConfig: "r1"}
+		seenInSharedRun := false
+		for _, d := range sharedDirs {
+			if d == moduleDir {
+				seenInSharedRun = true
+			}
+		}
+		if !seenInSharedRun {
+			g.Toolchain = "go2"
+		}
+		return g, nil
+	}
+	out.Reset()
+	errOut.Reset()
+	if err := runAB(&out, &errOut, split, []string{"."}); err != nil {
+		t.Fatalf("runAB: %v\nstderr: %s", err, errOut.String())
+	}
+	if !strings.Contains(out.String(), "toolchain mismatch (base=go2 new=go1)") || !strings.Contains(out.String(), "not compared") {
+		t.Fatalf("differing toolchain guards did not refuse with side B as base:\n%s", out.String())
+	}
+}
+
+// Side B's package kind is the REF's, not the working tree's: default.pgo
+// applies to a tested main package, so a package that is main at the ref
+// but a library in the working tree must still resolve side B's PGO as
+// main — deriving both sides' kind from the working tree silently passes
+// a genuine per-ref PGO difference through the buildconfig guard.
+func TestABSideBPackageKindFromRef(t *testing.T) {
+	dir := abFixtureRepo(t)
+	// The commit holds package main; the working tree renames it to a
+	// library. go list resolves the working tree, the worktree holds the
+	// ref's shape.
+	mainSrc := "package main\n\nfunc main() {}\n\nfunc Work(n int) int {\n\ts := 0\n\tfor i := 0; i < n; i++ {\n\t\ts += i\n\t}\n\treturn s\n}\n"
+	mainTest := "package main\n\nimport \"testing\"\n\nfunc BenchmarkWork(b *testing.B) {\n\tfor i := 0; i < b.N; i++ {\n\t\tWork(100)\n\t}\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "p/p.go"), []byte(mainSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "p/p_test.go"), []byte(mainTest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"add", "-A"},
+		{"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "main-shape"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	librarySrc := "package p\n\nfunc Work(n int) int {\n\ts := 0\n\tfor i := 0; i < n; i++ {\n\t\ts += i\n\t}\n\treturn s\n}\n"
+	libraryTest := "package p\n\nimport \"testing\"\n\nfunc BenchmarkWork(b *testing.B) {\n\tfor i := 0; i < b.N; i++ {\n\t\tWork(100)\n\t}\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "p/p.go"), []byte(librarySrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "p/p_test.go"), []byte(libraryTest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prior, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(dir, "p")); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(prior)
+
+	kinds := map[string]bool{}
+	ac := abConfig{
+		bench: ".", count: 1, ref: "HEAD",
+		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{} },
+		build:    func(string, []string, []string) error { return nil },
+		execute: func(execDir, pin string, env []string, bin string, args []string) ([]byte, error) {
+			return []byte("BenchmarkWork-8 1000 100 ns/op\n"), nil
+		},
+		guards: func(moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
+			kinds[moduleDir] = mainPkg
+			return guard.Guards{Toolchain: "go1", BuildConfig: "b1", Machine: "m1", RuntimeConfig: "r1"}, nil
+		},
+	}
+	var out, errOut bytes.Buffer
+	if err := runAB(&out, &errOut, ac, []string{"."}); err != nil {
+		t.Fatalf("runAB: %v\nstderr: %s", err, errOut.String())
+	}
+	// Side A is the fixture module (the working tree, a library); the
+	// other capture dir is the ref's worktree, main at the ref. Symlink
+	// resolution matches go list's.
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kinds) != 2 {
+		t.Fatalf("guard capture dirs = %v, want one per side", kinds)
+	}
+	seenA, seenB := false, false
+	for d, mainPkg := range kinds {
+		if d == resolved {
+			seenA = true
+			if mainPkg {
+				t.Fatalf("side A package kind = main, want the working tree's library shape")
+			}
+		} else {
+			seenB = true
+			if !mainPkg {
+				t.Fatalf("side B package kind = library, want the ref's main shape")
+			}
+		}
+	}
+	if !seenA || !seenB {
+		t.Fatalf("capture dirs %v did not cover both sides (fixture root %s)", kinds, resolved)
 	}
 }
 

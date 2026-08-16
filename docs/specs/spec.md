@@ -882,7 +882,14 @@ Five commands; names follow the `go test` / benchstat idiom.
   and crash-safe by construction (a killed run leaves a removable worktree, never a stashed
   tree; the repository stays writable throughout). Each side runs from its own tree so
   cwd-sensitive benchmarks resolve correctly. Machine hygiene is §9's (`--pin`, `--strict`,
-  the throttle bracket). The verdict uses §10's significance machinery with side B as base.
+  the throttle bracket). The verdict uses §10's significance machinery with side B as base;
+  §10.1's comparison guards apply, so ab captures each side's guard values in that side's own
+  tree at build time, before measurement — the repository stays writable throughout, and the
+  stamps must describe the binaries actually built, not a later edit — (per-side toolchain and
+  build-config identity — a ref pinning a different toolchain or shipping different PGO bytes
+  refuses with the mismatch named; machine and runtime-config are shared process facts) and
+  stamps them onto the parsed rows — raw `go test` streams carry no guard provenance of their
+  own.
   Nothing is written to the recording store: the output is a derivation artifact, and `--out`
   stores both raw streams in one file marked `pew-ab`/`dirty` — by shape never a stat baseline.
   `--bench`, `--benchtime`, `--benchmem` select and shape the measurement per side.

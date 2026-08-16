@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -8,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/greatliontech/gofresh/guard"
 	"github.com/spf13/cobra"
 
 	"github.com/greatliontech/pew/internal/compare"
@@ -29,6 +32,51 @@ type abConfig struct {
 	throttle  func() run.ThrottleSnapshot
 	execute   func(dir, pin string, env []string, bin string, args []string) ([]byte, error)
 	build     func(dir string, env []string, args []string) error
+	guards    func(moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error)
+}
+
+// sideGuards captures one side's comparison-guard values in that side's own
+// tree: the toolchain and build-config guards are the side's build identity
+// (a ref pinning a different toolchain directive, or shipping a different
+// PGO profile, is a genuine mismatch the comparator must refuse), while the
+// machine and runtime-config guards are process facts the two sides share by
+// construction. The PGO profile rides in as a content digest exactly as the
+// recording path's engine takes it.
+func (ac abConfig) sideGuards(moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
+	if ac.guards != nil {
+		return ac.guards(moduleDir, pkgDir, mainPkg, env)
+	}
+	goflags, err := run.EffectiveGoflags(moduleDir, env)
+	if err != nil {
+		return guard.Guards{}, err
+	}
+	pgo, err := run.PGOInput(moduleDir, pkgDir, mainPkg, goflags)
+	if err != nil {
+		return guard.Guards{}, err
+	}
+	var buildInputs []string
+	if pgo != "" {
+		buildInputs = append(buildInputs, pgo)
+	}
+	return guard.CaptureForContextEnv(context.Background(), moduleDir, env, guard.Measurement, buildInputs...)
+}
+
+// abPackageName resolves a package directory's package name with the same
+// toolchain environment the builds use.
+func abPackageName(dir string, env []string) (string, error) {
+	cmd := exec.Command("go", "list", "-f", "{{.Name}}", ".")
+	resolved := gotool.CommandDir(dir)
+	cmd.Dir = resolved
+	cmd.Env = gotool.CommandEnvironment(env, resolved)
+	out, err := cmd.Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
+			return "", fmt.Errorf("go list: %w: %s", err, strings.TrimSpace(string(ee.Stderr)))
+		}
+		return "", fmt.Errorf("go list: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func (ac abConfig) snapshotThrottle() run.ThrottleSnapshot {
@@ -165,11 +213,40 @@ func abPackage(w, errw io.Writer, ac abConfig, p pkgMeta, repoRoot, worktree, mo
 	defer os.RemoveAll(tmp)
 	binA := filepath.Join(tmp, "a.test")
 	binB := filepath.Join(tmp, "b.test")
-	if err := ac.buildBinary(p.Dir, env, []string{"test", "-c", "-o", binA, "."}); err != nil {
+	// Builds run at each side's MODULE root with a relative package
+	// target, exactly as the recording path builds: a relative -pgo in
+	// GOFLAGS resolves against the build cwd, and the guard digest pins
+	// the module-root resolution — building anywhere else lets the
+	// compile consume bytes the guard never digested.
+	relTarget := "."
+	if pkgRelToModule != "." {
+		relTarget = "./" + filepath.ToSlash(pkgRelToModule)
+	}
+	if err := ac.buildBinary(p.Module.Dir, env, []string{"test", "-c", "-o", binA, relTarget}); err != nil {
 		return fmt.Errorf("ab: building side A (working tree): %w", err)
 	}
-	if err := ac.buildBinary(sideBPkgDir, env, []string{"test", "-c", "-o", binB, "."}); err != nil {
+	if err := ac.buildBinary(sideBModule, env, []string{"test", "-c", "-o", binB, relTarget}); err != nil {
 		return fmt.Errorf("ab: building side B (%s): %w", ac.ref, err)
+	}
+	// Guards are captured at build time, not after measurement: the stamp
+	// claims the BUILD identity of the two standing binaries, and the
+	// repository stays writable throughout — a mid-measurement edit to
+	// default.pgo or go.mod must not rewrite what the already-built sides
+	// are claimed to be. Capture failure also surfaces before the
+	// measurement spend, not after it. Side B's package kind comes from
+	// the ref's own tree: a package that is main at the ref resolves its
+	// default.pgo there regardless of what the working tree renamed.
+	nameB, err := abPackageName(sideBPkgDir, env)
+	if err != nil {
+		return fmt.Errorf("ab: resolving side B package at %s: %w", ac.ref, err)
+	}
+	guardsA, err := ac.sideGuards(p.Module.Dir, p.Dir, p.Name == "main", env)
+	if err != nil {
+		return fmt.Errorf("ab: capturing side A guards: %w", err)
+	}
+	guardsB, err := ac.sideGuards(sideBModule, sideBPkgDir, nameB == "main", env)
+	if err != nil {
+		return fmt.Errorf("ab: capturing side B guards: %w", err)
 	}
 	args := []string{"-test.run=^$", "-test.bench=" + ac.bench, "-test.count=1"}
 	if ac.benchtime != "" {
@@ -219,6 +296,18 @@ func abPackage(w, errw io.Writer, ac abConfig, p pkgMeta, repoRoot, worktree, mo
 	}
 	if len(rowsA) == 0 || len(rowsB) == 0 {
 		return fmt.Errorf("ab: %s: pattern %q produced no results on %s", p.ImportPath, ac.bench, map[bool]string{true: "side A", false: "side B"}[len(rowsA) == 0])
+	}
+	// The comparator enforces §10.1's guard provenance on both sides; raw
+	// go-test streams carry none (Parse refuses reserved keys), so the
+	// build-time captures stamp here. Shared process facts (machine,
+	// runtime config) satisfy the guards by construction; a genuine
+	// per-side build identity difference (toolchain directive, PGO bytes)
+	// still refuses.
+	for _, cfg := range run.GuardConfig(guardsA) {
+		rowsA = withConfig(rowsA, cfg)
+	}
+	for _, cfg := range run.GuardConfig(guardsB) {
+		rowsB = withConfig(rowsB, cfg)
 	}
 	fmt.Fprintf(w, "pew ab: %s  A=working-tree  B=%s  (%d interleaved iterations)\n", p.ImportPath, ac.ref, ac.count)
 	result := compare.Compare(rowsB, rowsA, compare.DefaultOptions())
