@@ -383,6 +383,7 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 					// exactly as status and run --stale do (spec §7.9); stat
 					// stays read-only, so the returned ledger is dropped and
 					// no recording is rewritten here.
+					warnForeignKeys(errw, cur.importPath, key.bench, store.ForeignConfigKeys(newRecs))
 					if v, reason, fp, _, e := verdictForRecs(engine, cur.importPath, cur.moduleDir, key.bench, newRecs); e != nil {
 						fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, e)
 					} else if v != verdictValid {

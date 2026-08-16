@@ -603,3 +603,89 @@ func DecodeLedger(encoded string) (Ledger, error) {
 	}
 	return out, nil
 }
+
+// ToolchainTruth is the out-of-band ground truth for the stream-derived
+// configuration keys pew can verify independently: the build target it
+// requested and the import path it ran. An in-stream value disagreeing
+// with it is a spoofed or corrupt stream - a dependency's logger can
+// emit the same lowercase-colon shape the toolchain does, and benchfmt's
+// same-key overwrite would make the spoofed value the recorded one
+// (spec §5, INV-12's value-trust arm).
+type ToolchainTruth struct {
+	GOOS, GOARCH string
+	ImportPath   string
+}
+
+// VerifyToolchainConfig refuses a parsed stream whose toolchain
+// configuration disagrees with the out-of-band truth (goos, goarch,
+// pkg), or whose cpu value is inconsistent across results - the
+// toolchain emits its header once per run, so two differing cpu values
+// mean an in-stream overwrite happened, whichever side of it was real.
+// cpu has no out-of-band source of truth; consistency is its
+// enforceable bound (spec §5).
+func VerifyToolchainConfig(results []*benchfmt.Result, truth ToolchainTruth) error {
+	want := map[string]string{"goos": truth.GOOS, "goarch": truth.GOARCH, "pkg": truth.ImportPath}
+	cpu := ""
+	for _, r := range results {
+		for _, c := range r.Config {
+			if !c.File {
+				continue
+			}
+			switch c.Key {
+			case "goos", "goarch", "pkg":
+				if w := want[c.Key]; w != "" && string(c.Value) != w {
+					return fmt.Errorf("run: stream %s %q disagrees with the toolchain's %q - spoofed or corrupt output refuses recording", c.Key, c.Value, w)
+				}
+			case "cpu":
+				v := string(c.Value)
+				if cpu == "" {
+					cpu = v
+				} else if v != cpu {
+					return fmt.Errorf("run: stream carries conflicting cpu configuration (%q then %q) - an in-stream overwrite refuses recording", cpu, v)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// ReadTargetPlatform reads the build target (GOOS, GOARCH) from the same
+// toolchain and environment the measurement runs under - the out-of-band
+// truth VerifyToolchainConfig judges the stream against.
+func ReadTargetPlatform(moduleDir string, env []string) (goos, goarch string, err error) {
+	cmd := exec.Command("go", "env", "-json", "GOOS", "GOARCH")
+	resolved := gotool.CommandDir(moduleDir)
+	cmd.Dir = resolved
+	cmd.Env = gotool.CommandEnvironment(env, resolved)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", "", fmt.Errorf("go env: %w", err)
+	}
+	var v struct{ GOOS, GOARCH string }
+	if err := json.Unmarshal(out, &v); err != nil {
+		return "", "", fmt.Errorf("go env: %w", err)
+	}
+	return v.GOOS, v.GOARCH, nil
+}
+
+// ExecuteBinary runs an already-built test binary (optionally pinned via
+// `taskset -c <pin>`) in dir and returns stdout - the A/B derivation
+// path executes standing binaries so both sides build before either
+// side measures and the tree is never mutated (spec §12, pew ab).
+func ExecuteBinary(dir, pin string, env []string, bin string, args []string) ([]byte, error) {
+	name, full := bin, args
+	if pin != "" {
+		name, full = "taskset", append([]string{"-c", pin, bin}, args...)
+	}
+	cmd := exec.Command(name, full...)
+	resolved := gotool.CommandDir(dir)
+	cmd.Dir = resolved
+	cmd.Env = gotool.CommandEnvironment(env, resolved)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("run: %s %s: %w: %s",
+			name, strings.Join(full, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.Bytes(), nil
+}

@@ -291,7 +291,7 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 
 	opts := rc.opts
 	if rc.staleOnly {
-		need, err := nonValid(st, e, p.ImportPath, pkgRel, p.Module.Dir, rc.label, runBenches)
+		need, err := nonValid(errw, st, e, p.ImportPath, pkgRel, p.Module.Dir, rc.label, runBenches)
 		if err != nil {
 			return err
 		}
@@ -408,6 +408,16 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 	if err != nil {
 		return err
 	}
+	// The stream's own toolchain keys are verified against out-of-band
+	// truth: a value benchfmt would happily record can still be a
+	// dependency's spoof (spec §5, INV-12's value-trust arm).
+	goos, goarch, err := run.ReadTargetPlatform(p.Module.Dir, env)
+	if err != nil {
+		return err
+	}
+	if err := run.VerifyToolchainConfig(results, run.ToolchainTruth{GOOS: goos, GOARCH: goarch, ImportPath: p.ImportPath}); err != nil {
+		return err
+	}
 	for _, cl := range corrupt {
 		fmt.Fprintf(errw, "pew: warning: corrupt benchmark output line %d: %q (%s)\n", cl.Line, cl.Text, cl.Cause)
 	}
@@ -479,6 +489,14 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 		} else if rc.impure[name] {
 			recs = withConfig(recs, run.PureConfig("false"))
 		}
+		// A new GOMAXPROCS variant lineage records loudly, not silently:
+		// result names embed the suffix (BenchmarkX-24), so a --pin run
+		// on a wider host mints rows nothing on record can bridge, and
+		// the operator must not learn that from a later stat - after the
+		// measurement time is spent (spec §10.1's grouping never bridges
+		// suffixes). Warning, never refusal: first recordings and
+		// deliberate profile changes are legitimate.
+		warnNewVariantLineage(errw, st, pkgRel, name, rc.label, recs)
 		writes = append(writes, store.WriteRequest{PkgRel: pkgRel, Bench: name, Label: rc.label, Results: recs})
 		written = append(written, name)
 	}
@@ -699,13 +717,16 @@ func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {
 	return recs
 }
 
-func nonValid(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, label string, benches []string) ([]string, error) {
+func nonValid(errw io.Writer, st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, label string, benches []string) ([]string, error) {
 	var need []string
+	rows, err := checkPackage(st, e, pkgPath, pkgRel, moduleDir, benches, label)
+	if err != nil {
+		return nil, err
+	}
 	for _, b := range benches {
-		v, _, fp, grownLedger, err := checkOne(st, e, pkgPath, pkgRel, moduleDir, b, label)
-		if err != nil {
-			return nil, err
-		}
+		bv := rows[b]
+		v, fp, grownLedger := bv.v, bv.fp, bv.grownLedger
+		warnForeignKeys(errw, pkgPath, b, bv.foreign)
 		if v == verdictValid && grownLedger != "" {
 			// The verdict rode the inert-growth rule (spec §7.9): rewrite
 			// the recording under the refreshed compartment pin and current
@@ -744,4 +765,75 @@ func refreshRecording(st *store.Store, pkgRel, bench, label, pin, ledger string)
 		}
 	}
 	return st.Write(pkgRel, bench, label, recs)
+}
+
+// warnNewVariantLineage compares the GOMAXPROCS suffixes of the rows
+// about to be written against the stored recording's rows: a suffix
+// with no prior lineage while a sibling suffix is on record will not
+// bridge in comparisons, and the divergence must surface at record
+// time, not at a later stat (spec §10.1).
+func warnNewVariantLineage(errw io.Writer, st *store.Store, pkgRel, bench, label string, recs []*benchfmt.Result) {
+	prior, err := st.Read(pkgRel, bench, label)
+	if err != nil {
+		// No readable prior recording (first recording, or an unreadable
+		// store): nothing on record to diverge from.
+		return
+	}
+	stored, incoming := lineageSuffixes(prior), lineageSuffixes(recs)
+	var others []string
+	for old := range stored {
+		others = append(others, lineageWord(old))
+	}
+	sort.Strings(others)
+	var warned []string
+	for s := range incoming {
+		if !stored[s] {
+			warned = append(warned, lineageWord(s))
+		}
+	}
+	sort.Strings(warned)
+	for _, s := range warned {
+		fmt.Fprintf(errw, "pew: warning: %s records a new variant lineage (%s); stored lineage: %s - comparisons will not bridge GOMAXPROCS variants\n", bench, s, strings.Join(others, ", "))
+	}
+}
+
+// lineageSuffixes maps each result row to its GOMAXPROCS lineage: the
+// trailing -<digits> of the name's last path element, or the empty
+// lineage for GOMAXPROCS=1 rows, which the testing package emits with
+// no suffix at all - a lineage exactly as bridgeless as any other. A
+// trailing dash segment that is not all digits (a sub-benchmark case
+// name) is part of the name, never a lineage.
+func lineageSuffixes(rows []*benchfmt.Result) map[string]bool {
+	out := map[string]bool{}
+	for _, r := range rows {
+		name := string(r.Name)
+		if i := strings.LastIndex(name, "/"); i >= 0 {
+			name = name[i+1:]
+		}
+		suffix := ""
+		if i := strings.LastIndex(name, "-"); i > 0 && allDigits(name[i+1:]) {
+			suffix = name[i:]
+		}
+		out[suffix] = true
+	}
+	return out
+}
+
+func allDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func lineageWord(suffix string) string {
+	if suffix == "" {
+		return "unsuffixed"
+	}
+	return suffix
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,7 +114,7 @@ func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
 	// reports nothing to run and the next verdict is plainly valid. The
 	// rewrite lands under the recording store, which the repository-state
 	// bracket excludes wholesale (spec §5) — no per-write registration.
-	need, err := nonValid(st, e, pkg, "", tmp, "", []string{bench})
+	need, err := nonValid(io.Discard, st, e, pkg, "", tmp, "", []string{bench})
 	if err != nil || len(need) != 0 {
 		t.Fatalf("nonValid after inert growth = %v, %v; want none", need, err)
 	}

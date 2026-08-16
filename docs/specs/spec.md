@@ -120,7 +120,18 @@ colon-terminated as configuration, so a dependency's logger (`raft: appending en
 otherwise record transient log text as durable configuration and fragment comparison grouping
 (§10.1) — a benchmark silently falling out of comparison because a dependency logged once.
 Deliberately emitted custom benchmark configuration is therefore **not** a supported recording
-input; supporting it is a spec change, not a pass-through. `pew run` stores recordings whose
+input; supporting it is a spec change, not a pass-through. The closed set is key-based; two value
+arms complete the trust posture. First, the toolchain keys' VALUES are verified against
+out-of-band truth where pew has one: `goos`/`goarch` against the build target (`go env`) and
+`pkg` against the import path pew ran — an in-stream disagreement is a spoofed or corrupt stream
+and refuses the recording outright, since a dependency's logger emitting the same
+lowercase-colon shape would otherwise overwrite the real value via benchfmt's same-key rule.
+`cpu` has no out-of-band source of truth; its enforceable bound is consistency — two differing
+`cpu` values in one stream mean an in-stream overwrite happened, whichever side was real, and
+refuse the recording. Second, read paths detect what write-side enforcement predates: a stored
+recording carrying a file-configuration key outside the closed set (written before the
+enforcement, or hand-edited) is surfaced with a warning naming the key at every verdict read —
+it fragments comparison grouping silently, and regeneration is the remediation. `pew run` stores recordings whose
 configuration keys are drawn only from the closed set: the toolchain's four, the §5
 provenance/guard keys, `pew-closure`, `pew-test-variants`, `pew-test-variant-ledger`, and the
 per-benchmark `pure` line. This is a producer
@@ -860,7 +871,21 @@ go-git keeps pew self-contained (`go install` works with no external binary beyo
 
 ## 12. CLI surface
 
-Four commands; names follow the `go test` / benchstat idiom.
+Five commands; names follow the `go test` / benchstat idiom.
+
+- **`pew ab [packages] [flags]`** — A/B-compare the uncommitted working tree (side A) against a
+  git rev (side B, `--ref`, default `HEAD`) without touching either: side B materializes in a
+  disposable detached worktree, both sides build before either measures, and executions
+  interleave A/B per iteration (`--count`, default 6) so slow machine drift cancels instead of
+  folding into the measured delta (A leads each pair, so only the first sample of one side
+  carries the cold-start boundary) — statistically stronger than any block-ordered stash cycle,
+  and crash-safe by construction (a killed run leaves a removable worktree, never a stashed
+  tree; the repository stays writable throughout). Each side runs from its own tree so
+  cwd-sensitive benchmarks resolve correctly. Machine hygiene is §9's (`--pin`, `--strict`,
+  the throttle bracket). The verdict uses §10's significance machinery with side B as base.
+  Nothing is written to the recording store: the output is a derivation artifact, and `--out`
+  stores both raw streams in one file marked `pew-ab`/`dirty` — by shape never a stat baseline.
+  `--bench`, `--benchtime`, `--benchmem` select and shape the measurement per side.
 
 - **`pew run [packages] [flags]`** — run with hygiene (§9), store (overwrite, in-band provenance §5).
   - selection: `[packages]` (default `./...`), `--bench <pat>` (default `.`)
@@ -872,7 +897,11 @@ Four commands; names follow the `go test` / benchstat idiom.
     dependency variable accepted as stable after initialization (gofresh's vouch contract; the
     colon pair makes a bare package unrepresentable); discharges exactly that variable's
     shared-dynamic-state downgrade, the load-bearing set recorded as `pew-vouches`
-  - storage: `--bench-dir <dir>` (default `<module>/benchmarks`), `--label <name>` (§6);
+  - storage: `--bench-dir <dir>` (default `<module>/benchmarks`), `--label <name>` (§6); a run
+    minting a new GOMAXPROCS variant lineage for a benchmark already on record (result names
+    embed the suffix, e.g. a `--pin` narrower than the recorded runs') warns at record time —
+    §10.1's grouping never bridges the suffix, and the operator must not learn that from a
+    later `stat` after the measurement time is spent. A warning, never a refusal;
     purity overrides: `--assume-pure <bench>` (§7.5), `--impure <bench>` (§7.3). Both assertions
     also have durable in-code forms honored by the shared engine: `//gofresh:pure` and
     `//gofresh:external` (§7.3, §7.5).
@@ -1019,7 +1048,12 @@ Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred
 - **INV-12 — The recording key set is closed.** Every recording `pew run` stores carries
   file-configuration keys drawn only from the closed set of §5: the toolchain's four stream keys,
   pew's provenance/guard/manifest keys, `pew-closure`, and `pure`; every other stream-derived
-  configuration key is dropped before storage with a warning. *Violation:* a benchmark dependency logs one `key: value`-shaped line to
+  configuration key is dropped before storage with a warning. The toolchain keys' values are
+  verified against out-of-band truth where one exists (`goos`/`goarch`/`pkg`) and against
+  in-stream consistency for `cpu`, refusing the recording on disagreement; read paths warn on
+  stored keys outside the closed set (§5's value arms). *Anchor tests for the value arms:*
+  `TestVerifyToolchainConfigRefusesSpoofedValues`,
+  `TestForeignConfigKeysDetectsHistoricalJunk`, `TestWarnNewVariantLineage`. *Violation:* a benchmark dependency logs one `key: value`-shaped line to
   stdout; the key is recorded as durable configuration in this run but is absent from the baseline;
   §10.1's config grouping fragments and the benchmark drops out of comparison one-sided — a
   regression hides behind a log line while every other invariant holds. *Kind:* entailed (§5

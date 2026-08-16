@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"golang.org/x/perf/benchfmt"
@@ -789,6 +790,42 @@ func rawFormatValid(data []byte) bool {
 func recordingConfigKey(key string) bool {
 	switch key {
 	case "pew-format", "commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pew-runconditions", "pew-closure", "pew-test-variants", "pew-test-variant-ledger", "pew-runtime", "pew-runtime-inputs", "pew-purity", "pew-vouches", "pure":
+		return true
+	default:
+		return false
+	}
+}
+
+// ForeignConfigKeys lists the file-configuration keys a stored recording
+// carries outside both the toolchain benchmark keys and the recording
+// provenance set - a recording written before the closed-set
+// enforcement, or hand-edited. Such keys fragment comparison grouping
+// silently; detection is the read-time trust residual, regeneration the
+// remediation (spec §5, INV-12's read arm).
+func ForeignConfigKeys(recs []*benchfmt.Result) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range recs {
+		for _, c := range r.Config {
+			if !c.File || seen[c.Key] {
+				continue
+			}
+			if toolchainBenchKey(c.Key) || recordingConfigKey(c.Key) {
+				continue
+			}
+			seen[c.Key] = true
+			out = append(out, c.Key)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// toolchainBenchKey mirrors the run-side whitelist of stream-derived
+// keys a recording legitimately carries.
+func toolchainBenchKey(key string) bool {
+	switch key {
+	case "goos", "goarch", "pkg", "cpu":
 		return true
 	default:
 		return false

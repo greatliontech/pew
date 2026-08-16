@@ -657,3 +657,41 @@ func TestLedgerCodecRefusals(t *testing.T) {
 		t.Fatal("trailing data accepted")
 	}
 }
+
+// The stream's toolchain keys are verified against out-of-band truth: a
+// dependency's logger can emit the same shape the toolchain does, and
+// benchfmt's same-key overwrite would record the spoof (spec §5,
+// INV-12's value-trust arm). cpu has no out-of-band truth; consistency
+// across one stream is its enforceable bound.
+func TestVerifyToolchainConfigRefusesSpoofedValues(t *testing.T) {
+	parse := func(src string) []*benchfmt.Result {
+		t.Helper()
+		results, _, _, err := Parse([]byte(src))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return results
+	}
+	truth := ToolchainTruth{GOOS: "linux", GOARCH: "amd64", ImportPath: "example.com/p"}
+	clean := "goos: linux\ngoarch: amd64\npkg: example.com/p\ncpu: X\nBenchmarkA-8 1 10 ns/op\n"
+	if err := VerifyToolchainConfig(parse(clean), truth); err != nil {
+		t.Fatalf("clean stream refused: %v", err)
+	}
+	spoofedPkg := "goos: linux\ngoarch: amd64\npkg: example.com/other\nBenchmarkA-8 1 10 ns/op\n"
+	if err := VerifyToolchainConfig(parse(spoofedPkg), truth); err == nil || !strings.Contains(err.Error(), "pkg") {
+		t.Fatalf("spoofed pkg admitted: %v", err)
+	}
+	spoofedGoos := "goos: plan9\npkg: example.com/p\nBenchmarkA-8 1 10 ns/op\n"
+	if err := VerifyToolchainConfig(parse(spoofedGoos), truth); err == nil || !strings.Contains(err.Error(), "goos") {
+		t.Fatalf("spoofed goos admitted: %v", err)
+	}
+	conflictingCPU := "cpu: real\nBenchmarkA-8 1 10 ns/op\ncpu: spoofed\nBenchmarkB-8 1 10 ns/op\n"
+	if err := VerifyToolchainConfig(parse(conflictingCPU), truth); err == nil || !strings.Contains(err.Error(), "cpu") {
+		t.Fatalf("conflicting cpu admitted: %v", err)
+	}
+	// Absent keys are not an error: verification judges present values.
+	bare := "BenchmarkA-8 1 10 ns/op\n"
+	if err := VerifyToolchainConfig(parse(bare), truth); err != nil {
+		t.Fatalf("bare stream refused: %v", err)
+	}
+}

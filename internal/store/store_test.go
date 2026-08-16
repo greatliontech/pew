@@ -659,3 +659,19 @@ func TestParseLiftsOversizedConfigLine(t *testing.T) {
 		t.Fatal("oversized non-recording line: want loud failure, got success")
 	}
 }
+
+// Read-time foreign-key detection: a recording written before the
+// closed-set enforcement (or hand-edited) carries keys that fragment
+// comparison grouping silently; detection is the read-time trust
+// residual (spec §5, INV-12's read arm).
+func TestForeignConfigKeysDetectsHistoricalJunk(t *testing.T) {
+	recs := parse(t, "goos: linux\npkg: example.com/p\ninjected: junk\npew-format: 2\nBenchmarkA-8 1 10 ns/op\n")
+	got := ForeignConfigKeys(recs)
+	if len(got) != 1 || got[0] != "injected" {
+		t.Fatalf("foreign keys = %v, want [injected]", got)
+	}
+	clean := parse(t, "goos: linux\npkg: example.com/p\npew-format: 2\ncommit: abc\nBenchmarkA-8 1 10 ns/op\n")
+	if got := ForeignConfigKeys(clean); len(got) != 0 {
+		t.Fatalf("clean recording flagged: %v", got)
+	}
+}

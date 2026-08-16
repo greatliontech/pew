@@ -645,11 +645,17 @@ func generateCPUProfile(t *testing.T) []byte {
 	if err := pprof.StartCPUProfile(&buf); err != nil {
 		t.Fatal(err)
 	}
+	// The busy work hashes PRIVATE data: the profile buffer is being
+	// written concurrently by pprof's builder goroutine, so reading it
+	// mid-profile is a data race (it fired under -race on three PGO
+	// tests before this seed replaced buf.Bytes()).
+	seed := [32]byte{1}
 	deadline := time.Now().Add(20 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		_ = sha256.Sum256(buf.Bytes())
+		seed = sha256.Sum256(seed[:])
 	}
 	pprof.StopCPUProfile()
+	_ = seed
 	return buf.Bytes()
 }
 
