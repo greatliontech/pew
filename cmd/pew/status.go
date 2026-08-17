@@ -163,7 +163,13 @@ func parseDynamicStateVouches(entries []string) ([]string, error) {
 }
 
 func buildEngine(moduleDir string, env []string, pgo string) (*gofresh.Engine, error) {
-	opts := []gofresh.Option{gofresh.WithDir(moduleDir), gofresh.WithEnv(env...)}
+	// Every pew engine attests single-subject execution: `pew run`
+	// measures each benchmark in a process of its own (spec §9), and
+	// status/stat must judge recordings under the same premise they
+	// were produced under — the attestation arms gofresh's audited
+	// pooling discharge and rides the fact identity, so a split here
+	// would make verdict surfaces disagree with the producer.
+	opts := []gofresh.Option{gofresh.WithDir(moduleDir), gofresh.WithEnv(env...), gofresh.WithSingleSubjectExecution()}
 	if pgo != "" {
 		opts = append(opts, gofresh.WithBuildInputs(pgo))
 	}
