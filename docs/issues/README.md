@@ -6,6 +6,8 @@ close-out convention.
 
 | slug | summary | Lands |
 |------|---------|-------|
+| [go127-generic-method-closure-analysis](go127-generic-method-closure-analysis.md) | consumer-filed twin: go1.27 generic-method shapes fail gofresh closure analysis | with the gofresh fix, then the pew bump |
+| [gofresh-six-version-integration](gofresh-six-version-integration.md) | v0.70-installed vs v0.82-current: six versions + the DynamicStateStrategy recording field, then re-judge the wal reading | with the tool-phase pew visit, after the gofresh go1.27 fix |
 | [remote-bench-execution](remote-bench-execution.md) | run measurements on a dedicated homelab bench machine: gRPC-over-SSH `pew agent`, machine lease, off-box builds, calibration drift-vet | when a dedicated bench machine is provisioned and measurements first need to run on it |
 | [profile-capture-attribution](profile-capture-attribution.md) | subject attribution is consumer hand protocol: capture profiles with recordings, attribution verdict in status, profile diff in stat | cross-tool train chunk 15 |
 | [per-arm-noise-floors](per-arm-noise-floors.md) | one global `--threshold` vs ±10% layout-only cross-commit drift on ns-class arms (run-to-run CV measured 0.2–1.4%); false regressions get hand-inspected — derive per-arm floors from lineage history | cross-tool train chunk 15 |
