@@ -131,9 +131,10 @@ func (e *nothingComparedError) Error() string {
 // name its cause (spec §10.1): the informational view prints it, and under
 // --fail-on-regression the failure carries it.
 type statTally struct {
-	inventoried int // comparison keys with at least one readable side
-	staleFormat int // skipped: recording files failing shape/format, per file
-	dirty       int // skipped: dirty ref-resolved recording files, per file
+	inventoried   int // comparison keys with at least one readable side
+	staleFormat   int // skipped: recording files failing shape/format, per file
+	staleStrategy int // skipped: working-tree side recorded under another dynamic-state strategy (at most once per key)
+	dirty         int // skipped: dirty ref-resolved recording files, per file
 }
 
 // emptyReason names why a comparison produced no gated rows: nothing recorded,
@@ -158,6 +159,7 @@ func (t statTally) emptyReason(res *compare.Result, gateUnits map[string]bool) s
 		}
 	}
 	add(t.staleFormat, "stale format")
+	add(t.staleStrategy, "stale dynamic-state strategy")
 	add(t.dirty, "dirty recording")
 	add(res.OneSided, "one-sided benchmarks")
 	add(res.GuardMismatch, "guard-mismatched benchmarks")
@@ -286,7 +288,13 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 		if err := addStatInventory(m, bl, sc.label); err != nil {
 			return err
 		}
-		checkStale := bl.newRef == ""
+		// newSideIsWorkingTree is the per-side property both consumers
+		// derive from: the new side is the working tree exactly when no
+		// new ref is pinned — that side is re-recordable and is the one
+		// whose freshness verdict is computed (the engine's staleness
+		// arm and the strategy skip both key on it; ref-resolved sides
+		// get neither).
+		newSideIsWorkingTree := bl.newRef == ""
 
 		for _, key := range sortedStatKeys(m.keys) {
 			baseRecs, baseOK, err := m.readSide(bl.baseRef, key.pkgRel, key.bench, key.label)
@@ -321,6 +329,23 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 			if baseStale || newStale {
 				continue
 			}
+			// A recording under another dynamic-state strategy reads fine
+			// and its measured numbers are strategy-independent — only its
+			// freshness verdict is not this engine's. The skip therefore
+			// cuts PER SIDE: the working-tree side (re-recordable and the
+			// verdict-bearing side, present exactly when
+			// newSideIsWorkingTree) skips and re-records; a ref-resolved
+			// side — a pinned tag, auto's
+			// HEAD, either A/B ref — cannot be re-run into and always
+			// compares, a strategy difference surfacing as compare's audit
+			// note (spec §5's strategy row, scoped by §7's exclusion). The
+			// base side enters no engine verdict on any path, so there is
+			// no laundering channel to guard there.
+			if newSideIsWorkingTree && newOK && !recordingStrategyCurrent(newRecs) {
+				fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is stale (dynamic-state strategy); skipping — re-run `pew run`\n", key.pkgRel, key.bench)
+				tally.staleStrategy++
+				continue
+			}
 			// A dirty recording's commit does not faithfully describe its source
 			// (§5), so it is never usable as a baseline (§5, §10: "Pinned refs must
 			// resolve to non-dirty recordings"). A baseline always comes from a ref
@@ -341,7 +366,7 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 			if baseDirty || newDirty {
 				continue
 			}
-			if checkStale && newOK {
+			if newSideIsWorkingTree && newOK {
 				cur, ok := m.current[key]
 				if !ok {
 					fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s has no current benchmark declaration; comparison may not reflect HEAD — re-run `pew run`\n", key.pkgRel, key.bench)
@@ -715,6 +740,18 @@ func sortedStatKeys(keys map[statKey]bool) []statKey {
 		return out[i].label < out[j].label
 	})
 	return out
+}
+
+// recordingStrategyCurrent reports whether a recording was computed
+// under the engine's current dynamic-state strategy — another
+// strategy's, or a predating recording's empty, verdict semantics are
+// not this engine's. Its one caller applies it to the WORKING-TREE
+// side only (spec §5's pew-dynamic-state row): that side is
+// re-recordable and verdict-bearing, so it skips and re-records, while
+// a ref-resolved side always compares, a strategy difference surfacing
+// as compare's audit note — never a refusal.
+func recordingStrategyCurrent(recs []*benchfmt.Result) bool {
+	return len(recs) > 0 && recs[0].GetConfig("pew-dynamic-state") == gofresh.DynamicStateStrategy
 }
 
 // recordingCurrent reports whether a side's recording carries the current

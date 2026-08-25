@@ -143,6 +143,83 @@ func TestStatABIncludesHistoricalOnlyRecording(t *testing.T) {
 	}
 }
 
+// TestStatBaseOnlyKeyIsOneSidedNotStrategyStale pins the newOK
+// conjunct on the strategy skip: a benchmark recorded at the ref but
+// absent from the working tree has no working-tree recording to judge,
+// so it surfaces as one-sided (spec §10's cause), never as a phantom
+// "working-tree recording is stale (dynamic-state strategy)" for a
+// file that does not exist.
+func TestStatBaseOnlyKeyIsOneSidedNotStrategyStale(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statoneside\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	writeStatRecording(t, st, "pkg", "BenchmarkGone", 100)
+	commitAll(t, repo, "base")
+	recordingPath, err := st.Path("pkg", "BenchmarkGone", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(recordingPath); err != nil {
+		t.Fatal(err)
+	}
+
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	if err := runStat(&out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, nil); err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if strings.Contains(errOut.String(), "dynamic-state strategy") {
+		t.Fatalf("base-only key hit the strategy skip for a file that does not exist:\n%s", errOut.String())
+	}
+	if !strings.Contains(out.String(), "only present in") {
+		t.Fatalf("base-only key not surfaced as one-sided:\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+}
+
+// TestStatABComparesAcrossStrategies pins spec §7's exclusion on the
+// strategy gate: a two-ref comparison computes no freshness verdict, so
+// recordings under a non-current (even mutually differing) dynamic-state
+// strategy still compare — the difference surfaces as compare's audit
+// note, never as the verdict-computing paths' skip. A strategy bump must
+// not brick historical A/B.
+func TestStatABComparesAcrossStrategies(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statabstrategy\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	writeStatRecordingStrategy(t, st, "pkg", "BenchmarkOld", 100, "gofresh/dynamic-state@legacy-a")
+	base := commitAll(t, repo, "base")
+	writeStatRecordingStrategy(t, st, "pkg", "BenchmarkOld", 120, "gofresh/dynamic-state@legacy-b")
+	newer := commitAll(t, repo, "newer")
+
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	err = runStat(&out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	if err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if strings.Contains(errOut.String(), "dynamic-state strategy); skipping") {
+		t.Fatalf("two-ref A/B applied the verdict-computing strategy skip:\n%s", errOut.String())
+	}
+	if !strings.Contains(out.String(), "BenchmarkOld") {
+		t.Fatalf("cross-strategy A/B did not compare:\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "dynamic-state strategies differ") {
+		t.Fatalf("strategy difference not surfaced as a note:\nstdout:\n%s", out.String())
+	}
+}
+
 func TestStatABFallsBackToModuleWithoutCurrentPackages(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statnopkg\n\ngo 1.26.4\n")
@@ -275,6 +352,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 	}
 	st := store.New(filepath.Join(dir, "benchmarks"))
 	cfg := append(runpkg.ProvenanceConfig("c1", false, fp.Guards, runpkg.Conditions{}), runpkg.ClosureConfig(fp.MaximalClosure))
+	cfg = append(cfg, runpkg.DynamicStateStrategyConfig(fp.DynamicStateStrategy))
 	cfg = append(cfg, runpkg.TestVariantConfig(fp.TestVariantClosure))
 	cfg = append(cfg, runpkg.TestVariantLedgerConfig("ledger-placeholder"))
 	cfg = append(cfg, runpkg.RuntimeConfig(observation.Digest, observation.Manifest)...)
@@ -329,6 +407,139 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "is stale (closure)") {
 		t.Fatalf("stale working-tree recording did not warn:\n%s", errOut.String())
+	}
+}
+
+// TestStatRecordingPredatingDynamicStateKeyIsStale pins the clean break
+// on stat's side: a recording written before the pew-dynamic-state key —
+// or under another strategy — is skipped loudly ("stale (dynamic-state
+// strategy)"), never compared as a baseline, because its verdicts were
+// not this engine's (spec §5's pew-dynamic-state comparison clause).
+func TestStatRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statstrategy\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "bench_test.go"), "package statstrategy\n\nimport \"testing\"\n\nfunc BenchmarkNop(b *testing.B) { for range b.N {} }\n")
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withWorkingDir(t, dir)
+	e, _, err := newEngineAt(dir, dir, false, os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := gofresh.Subject{Package: "example.com/statstrategy", Symbol: "BenchmarkNop"}
+	fp, err := e.CaptureFor(t.Context(), subject, dir, gofresh.Measurement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation, err := runtimeinput.Incomplete(dir, "package-test-binary:example.com/statstrategy", "testlog lacks operation outcome evidence")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	cfg := append(runpkg.ProvenanceConfig("c1", false, fp.Guards, runpkg.Conditions{}), runpkg.ClosureConfig(fp.MaximalClosure))
+	cfg = append(cfg, runpkg.DynamicStateStrategyConfig(fp.DynamicStateStrategy))
+	cfg = append(cfg, runpkg.TestVariantConfig(fp.TestVariantClosure))
+	cfg = append(cfg, runpkg.TestVariantLedgerConfig("ledger-placeholder"))
+	cfg = append(cfg, runpkg.RuntimeConfig(observation.Digest, observation.Manifest)...)
+	cfg = append(cfg, runpkg.GofreshPurityConfig(fp.PurityAssertion))
+	recs := []*benchfmt.Result{{Name: benchfmt.Name("Nop"), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
+	if err := st.Write("", "BenchmarkNop", "", recs); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, repo, "recording")
+
+	recordingPath, err := st.Path("", "BenchmarkNop", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recording, err := os.ReadFile(recordingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	strategyLine := "pew-dynamic-state: " + fp.DynamicStateStrategy + "\n"
+	predating := bytes.Replace(recording, []byte(strategyLine), nil, 1)
+	if bytes.Equal(predating, recording) {
+		t.Fatalf("recording lacks the strategy line %q:\n%s", strategyLine, recording)
+	}
+	if err := os.WriteFile(recordingPath, predating, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if err := runStat(&out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
+		t.Fatalf("runStat predating: %v", err)
+	}
+	// The "; skipping" form is the per-side skip chain's own warning —
+	// the engine's working-tree staleness warning uses different text,
+	// so this pins the skip chain, not the engine's new-side check.
+	if !strings.Contains(errOut.String(), "working-tree recording .BenchmarkNop is stale (dynamic-state strategy); skipping") {
+		t.Fatalf("predating NEW side did not hit the strategy skip chain:\n%s", errOut.String())
+	}
+	if strings.Contains(out.String(), "BenchmarkNop") {
+		t.Fatalf("predating recording still compared:\nstdout:\n%s", out.String())
+	}
+
+	// The base arm cuts the other way (spec §5's strategy row): commit
+	// the predating recording so HEAD (auto-mode baseline) lacks the
+	// strategy line, and restore the current one to the working tree —
+	// the ref-resolved base enters no verdict and cannot be re-run
+	// into, so it COMPARES, the difference surfacing as the audit note,
+	// never a skip.
+	commitAll(t, repo, "predating recording")
+	if err := os.WriteFile(recordingPath, recording, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if err := runStat(&out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
+		t.Fatalf("runStat base-predating: %v", err)
+	}
+	if strings.Contains(errOut.String(), "dynamic-state strategy); skipping") {
+		t.Fatalf("ref-resolved base side wrongly skipped:\n%s", errOut.String())
+	}
+	if !strings.Contains(out.String(), "Nop") {
+		t.Fatalf("predating ref-resolved baseline did not compare:\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "dynamic-state strategies differ (base: (none); new: "+gofresh.DynamicStateStrategy) {
+		t.Fatalf("strategy difference not surfaced as a note:\nstdout:\n%s", out.String())
+	}
+}
+
+// TestStatPinnedComparesStrategyStaleBaseline pins the per-side cut in
+// pinned mode: a release-tag baseline recorded under a legacy strategy
+// cannot be re-run into, so `pew stat <ref>` compares it against a
+// current working tree, the difference surfacing as the audit note — a
+// strategy bump never bricks archived baselines (spec §5's strategy
+// row).
+func TestStatPinnedComparesStrategyStaleBaseline(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statpinstrategy\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	writeStatRecordingStrategy(t, st, "pkg", "BenchmarkOld", 100, "gofresh/dynamic-state@legacy-a")
+	base := commitAll(t, repo, "base")
+	writeStatRecording(t, st, "pkg", "BenchmarkOld", 120)
+
+	withWorkingDir(t, dir)
+	var out, errOut bytes.Buffer
+	err = runStat(&out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String()})
+	if err != nil {
+		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if strings.Contains(errOut.String(), "dynamic-state strategy); skipping") {
+		t.Fatalf("pinned ref-resolved baseline wrongly skipped:\n%s", errOut.String())
+	}
+	if !strings.Contains(out.String(), "BenchmarkOld") {
+		t.Fatalf("legacy-strategy pinned baseline did not compare:\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "dynamic-state strategies differ") {
+		t.Fatalf("strategy difference not surfaced as a note:\nstdout:\n%s", out.String())
 	}
 }
 
@@ -693,7 +904,22 @@ func writeStatRecordingSamples(t *testing.T, st *store.Store, pkgRel, bench stri
 	writeStatRecordingSamplesConditions(t, st, pkgRel, bench, value, samples, "governor=performance turbo=off load1=0.03 throttled=false battery=false")
 }
 
+// writeStatRecordingStrategy writes a recording under an explicit
+// dynamic-state strategy value — the historical-recording shape.
+func writeStatRecordingStrategy(t *testing.T, st *store.Store, pkgRel, bench string, value float64, strategy string) {
+	t.Helper()
+	writeStatRecordingFull(t, st, pkgRel, bench, value, 8, "governor=performance turbo=off load1=0.03 throttled=false battery=false", strategy)
+}
+
 func writeStatRecordingSamplesConditions(t *testing.T, st *store.Store, pkgRel, bench string, value float64, samples int, conditions string) {
+	t.Helper()
+	writeStatRecordingFull(t, st, pkgRel, bench, value, samples, conditions, gofresh.DynamicStateStrategy)
+}
+
+// writeStatRecordingFull is the one recording writer every wrapper
+// fills defaults into — the next varied key extends this signature
+// instead of minting another copy of the config block.
+func writeStatRecordingFull(t *testing.T, st *store.Store, pkgRel, bench string, value float64, samples int, conditions, strategy string) {
 	t.Helper()
 	var recs []*benchfmt.Result
 	for i := range samples {
@@ -713,6 +939,7 @@ func writeStatRecordingSamplesConditions(t *testing.T, st *store.Store, pkgRel, 
 				{Key: "dirty", Value: []byte("false"), File: true},
 				{Key: "pew-runconditions", Value: []byte(conditions), File: true},
 				{Key: "pew-closure", Value: []byte("cl1"), File: true},
+				{Key: "pew-dynamic-state", Value: []byte(strategy), File: true},
 				{Key: "pew-test-variants", Value: []byte("tv1"), File: true},
 				{Key: "pew-test-variant-ledger", Value: []byte("ledger1"), File: true},
 				{Key: "pew-runtime", Value: []byte("rt1"), File: true},
@@ -788,6 +1015,7 @@ func TestNonValidUsesLabel(t *testing.T) {
 			{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
 			{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
 			{Key: "pew-closure", Value: []byte(hash), File: true},
+			{Key: "pew-dynamic-state", Value: []byte(gofresh.DynamicStateStrategy), File: true},
 			{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
 			{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
 			{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
@@ -849,6 +1077,7 @@ func TestRunConditionsDoNotAffectValidity(t *testing.T) {
 			{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
 			{Key: "pew-runconditions", Value: []byte(conditions), File: true},
 			{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
+			{Key: "pew-dynamic-state", Value: []byte(fp.DynamicStateStrategy), File: true},
 			{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
 			{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
 			{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
@@ -937,6 +1166,7 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
 		{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
 		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
+		{Key: "pew-dynamic-state", Value: []byte(fp.DynamicStateStrategy), File: true},
 		{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
 		{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
 		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
@@ -966,6 +1196,7 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
 		{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
 		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
+		{Key: "pew-dynamic-state", Value: []byte(fp.DynamicStateStrategy), File: true},
 		{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
 		{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
 		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},

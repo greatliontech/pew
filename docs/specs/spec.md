@@ -97,6 +97,9 @@ profile differs between packages (§9):
 | `pew-runtime-inputs` | encoded runtime-input manifest or incomplete disposition (§7.8) | yes            |
 | `pew-purity`         | attributable Gofresh purity evidence used for this fingerprint | yes            |
 | `pew-vouches`        | dynamic-state vouches that discharged culprits for this fingerprint (gofresh's sorted comma-joined identities) — audit riding the recording, never a validity key: verdicts derive from the current engine's own set, the line is omitted when no vouch was load-bearing, and two sides differing in it compare with a note, never fragmenting (the run-conditions precedent) | derived |
+| `pew-dynamic-state`  | the gofresh shared-dynamic-state derivation the fingerprint was computed under — a VALIDITY key like `pew-closure`: the engine refuses to serve a recording computed under another strategy, and a recording predating the key reads as the empty strategy and judges stale (`dynamic-state strategy`) — the clean-break shape, no back-fill. The comparison arm cuts per side: `stat` skips the **working-tree** side when its recorded strategy is not the current engine's (`stale (dynamic-state strategy)`, a warning and a distinct empty-comparison cause, §10) — that side is re-recordable and the one whose freshness verdict is computed, so `pew run` is the reachable remedy; a **ref-resolved** side (a pinned tag, auto's `HEAD`, either A/B ref) enters no verdict and cannot be re-run into, so it always compares and a strategy difference surfaces as a note (§10.1), never a refusal — measured numbers are strategy-independent | derived |
+| `pew-single-subject-discharges` | package-level variables whose shared-dynamic-state discharge rested on the single-subject-process attestation for this fingerprint (gofresh's sorted comma-joined identities) — audit exactly as `pew-vouches`, omitted when empty | derived |
+| `pew-package-process-discharges` | package-level variables discharged by the package-process attestation's binary-scoped reachability judgment — audit exactly as `pew-vouches`, omitted when empty | derived |
 | `pew-test-variants`  | test-variant compartment hash of the benchmark's package (§7.9) | derived        |
 | `pew-test-variant-ledger` | encoded compartment declaration ledger — §7.9's diff base | derived        |
 
@@ -268,6 +271,23 @@ result, not a verdict about an existing result.
 
 Exact format validation is a prerequisite to the six-guard predicate below. A format failure is
 `stale (format)` without interpreting any guard or purity field.
+
+**Engine toolchain provenance is a prerequisite to computing any freshness verdict.** Every
+invocation that computes one — `run`, `status`, and `stat`'s working-tree staleness arm — samples
+the ambient toolchain as the target module resolves it (`go env GOVERSION` in the module
+directory — under `GOTOOLCHAIN=auto` the module's directive can select a toolchain the tool's cwd
+would not) before constructing an engine, and refuses when the binary's compiled-in analysis
+frontend cannot faithfully read what that toolchain builds, per the engine's skew contract:
+directional within a major (an older frontend refuses newer sources; a newer frontend reads older
+language under the Go 1 compatibility promise), total across majors, and an unidentifiable version
+on either side refuses; a failed sample leaves the ambient side unidentifiable and refuses
+identically. Invocations that analyze no sources and compute no verdict — `stat` comparing two
+recorded refs, `ab` — need no sample: the refusal protects verdict evidence, and there is none to
+protect. When it fires, the refusal is invocation-level and computes **no verdicts** — a skewed
+frontend misparsing sources would not fail a guard, it would silently shift the evidence every
+guard is computed from, so degrading per package is not sound. A skew refusal names both language
+series and the rebuild that clears it; an unidentifiable or failed-sample refusal names what it
+could read and the failing sample.
 
 - **valid** (reuse `R`) — all six guards below provably hold over a soundly over-approximated
   closure, and either neither the closure nor runtime-input manifest carries an unverifiable
@@ -864,8 +884,9 @@ flags real-but-trivial changes; a floor without significance flags noise.
 - **The gate never passes vacuously.** `--fail-on-regression` asserts "compared and clean", not
   merely "no regression seen": exit status `0` requires at least one gated-unit comparison to have
   actually been performed with no gated regression. When zero benchmarks are statistically compared
-  on any gated unit — nothing recorded on either side, every candidate skipped (stale format, dirty
-  baseline, one-sided, provenance guard mismatch, no shared metric unit), or metrics compared but
+  on any gated unit — nothing recorded on either side, every candidate skipped (stale format, stale
+  dynamic-state strategy, dirty baseline, one-sided, provenance guard mismatch, no shared metric
+  unit), or metrics compared but
   none among the gated units — the exit is non-zero and **distinct from the regression exit**: a
   detected regression exits `1`, an empty gated comparison exits `2`, each with a diagnostic on
   stderr naming its cause. In a partial comparison the compared subset alone governs the exit;
@@ -1031,7 +1052,10 @@ Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred
   performance. Every blind spot is **resolved** to a precise edge, **widened** to the maximal non-std
   closure, or **downgraded** to `unverifiable` — never silently dropped, never narrowing the covered
   set. An unresolved blind spot yields `unverifiable` unless an applicable explicit purity assertion
-  accepts responsibility for that disposition; purity never waives the six guards. *Violation (strongest):* a reachable
+  accepts responsibility for that disposition; purity never waives the six guards. The six-guard
+  predicate is itself computed only under a provenance-sound engine (§7's toolchain-provenance
+  prerequisite): a verdict-computing invocation whose ambient toolchain skews from the binary's
+  compiled-in frontend refuses outright rather than judging over misread sources. *Violation (strongest):* a reachable
   `const`/type/embed `B` depends on changes while `B`'s call graph is byte-identical, the closure
   hash is unchanged, and `B` is reported `valid` → silent regression behind a stale baseline (the
   core failure pew exists to prevent). *Kind:* entailed.

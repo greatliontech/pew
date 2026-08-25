@@ -169,6 +169,9 @@ func buildEngine(moduleDir string, env []string, pgo string) (*gofresh.Engine, e
 	// were produced under — the attestation arms gofresh's audited
 	// pooling discharge and rides the fact identity, so a split here
 	// would make verdict surfaces disagree with the producer.
+	if err := checkToolchainProvenance(moduleDir, env); err != nil {
+		return nil, err
+	}
 	opts := []gofresh.Option{gofresh.WithDir(moduleDir), gofresh.WithEnv(env...), gofresh.WithSingleSubjectExecution()}
 	if pgo != "" {
 		opts = append(opts, gofresh.WithBuildInputs(pgo))
@@ -200,6 +203,10 @@ func runStatus(w io.Writer, benchDir, label string, staleOnly, explain, jsonOut 
 		}
 		e, _, err := newEngineForPkg(p, os.Environ())
 		if err != nil {
+			var pe *toolchainProvenanceError
+			if errors.As(err, &pe) {
+				return err
+			}
 			reportErr(err)
 			continue
 		}
@@ -511,11 +518,14 @@ func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, 
 			Machine:       m["machine"],
 			RuntimeConfig: m["runtimeconfig"],
 		},
-		PurityAssertion:     m["pew-purity"],
-		DynamicStateVouches: m["pew-vouches"],
-		RuntimeInputs:       m["pew-runtime-inputs"],
-		RuntimeDigest:       m["pew-runtime"],
-		ResultKind:          gofresh.Measurement,
+		PurityAssertion:          m["pew-purity"],
+		DynamicStateVouches:      m["pew-vouches"],
+		SingleSubjectDischarges:  m["pew-single-subject-discharges"],
+		PackageProcessDischarges: m["pew-package-process-discharges"],
+		DynamicStateStrategy:     m["pew-dynamic-state"],
+		RuntimeInputs:            m["pew-runtime-inputs"],
+		RuntimeDigest:            m["pew-runtime"],
+		ResultKind:               gofresh.Measurement,
 	}, m["pure"], m["pew-test-variant-ledger"], true
 }
 

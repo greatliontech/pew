@@ -77,6 +77,7 @@ func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
 			{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
 			{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
 			{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
+			{Key: "pew-dynamic-state", Value: []byte(fp.DynamicStateStrategy), File: true},
 			{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
 			{Key: "pew-test-variant-ledger", Value: []byte(encoded), File: true},
 			{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},

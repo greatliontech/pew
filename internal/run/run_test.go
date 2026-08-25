@@ -374,13 +374,9 @@ func TestRecordingConfigKeySetIsClosed(t *testing.T) {
 	extra := ProvenanceConfig("c1", false, guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"}, Conditions{})
 	extra = append(extra, RuntimeConfig("rt", "manifest")...)
 	extra = append(extra, ClosureConfig("cl"), TestVariantConfig("tv"), TestVariantLedgerConfig("lg"), GofreshPurityConfig("d"), PureConfig("true"))
-	closed := map[string]bool{
-		"goos": true, "goarch": true, "pkg": true, "cpu": true,
-		"pew-format": true, "commit": true, "toolchain": true, "machine": true,
-		"buildconfig": true, "runtimeconfig": true, "dirty": true,
-		"pew-runconditions": true, "pew-runtime": true, "pew-runtime-inputs": true,
-		"pew-closure": true, "pew-test-variants": true, "pew-test-variant-ledger": true,
-		"pew-purity": true, "pure": true,
+	closed := map[string]bool{"goos": true, "goarch": true, "pkg": true, "cpu": true}
+	for _, k := range RecordingConfigKeys {
+		closed[k] = true
 	}
 	for _, group := range Demux(results, extra) {
 		for _, r := range group {
@@ -389,6 +385,46 @@ func TestRecordingConfigKeySetIsClosed(t *testing.T) {
 					t.Errorf("recording would carry key %q outside the closed set", c.Key)
 				}
 			}
+		}
+	}
+}
+
+// TestRecordingConfigKeysMirrorSpec binds the exported registry to spec
+// §5's table — the one hand-written mirror of the spec, so the registry
+// (and everything derived from it: the store's closed set, compare's
+// grouping projection) moves only together with the spec.
+func TestRecordingConfigKeysMirrorSpec(t *testing.T) {
+	specTable := []string{
+		// §5 key table, row order:
+		"pew-format", "commit", "toolchain", "machine", "buildconfig",
+		"runtimeconfig", "dirty", "pew-runconditions", "pew-runtime",
+		"pew-runtime-inputs", "pew-purity", "pew-vouches",
+		"pew-dynamic-state", "pew-single-subject-discharges",
+		"pew-package-process-discharges", "pew-test-variants",
+		"pew-test-variant-ledger",
+		// plus the in-band derived closure line and the per-benchmark
+		// purity flag (§5 prose, §7.5):
+		"pew-closure", "pure",
+	}
+	want := map[string]bool{}
+	for _, k := range specTable {
+		want[k] = true
+	}
+	got := map[string]bool{}
+	for _, k := range RecordingConfigKeys {
+		if got[k] {
+			t.Errorf("RecordingConfigKeys lists %q twice", k)
+		}
+		got[k] = true
+	}
+	for k := range want {
+		if !got[k] {
+			t.Errorf("registry missing spec §5 key %q", k)
+		}
+	}
+	for k := range got {
+		if !want[k] {
+			t.Errorf("registry key %q is not in spec §5's table", k)
 		}
 	}
 }

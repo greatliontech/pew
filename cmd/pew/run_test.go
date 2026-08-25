@@ -140,6 +140,11 @@ func TestGitStateCacheExcludesRecordingStoresAcrossModules(t *testing.T) {
 }
 
 func TestRunRunKeepsSharedRepositoryModulesClean(t *testing.T) {
+	// The test writes its own go.work; the ambient GOWORK must not
+	// redirect module resolution (and a workspace-off oracle — gomutant's
+	// ephemeral runs with GOWORK=off — must see the same tree).
+	t.Setenv("GOWORK", "")
+
 	root := t.TempDir()
 	nested := filepath.Join(root, "nested")
 	if err := os.Mkdir(nested, 0o755); err != nil {
@@ -990,13 +995,9 @@ func TestRunPackageDropsForeignStreamConfig(t *testing.T) {
 	// The recording's keys must be drawn only from spec §5's closed set
 	// (INV-12) — this reads back what the real run path composed and wrote,
 	// so a provenance key added anywhere along it surfaces here.
-	closed := map[string]bool{
-		"goos": true, "goarch": true, "pkg": true, "cpu": true,
-		"pew-format": true, "commit": true, "toolchain": true, "machine": true,
-		"buildconfig": true, "runtimeconfig": true, "dirty": true,
-		"pew-runconditions": true, "pew-runtime": true, "pew-runtime-inputs": true,
-		"pew-closure": true, "pew-test-variants": true, "pew-test-variant-ledger": true,
-		"pew-purity": true, "pure": true,
+	closed := map[string]bool{"goos": true, "goarch": true, "pkg": true, "cpu": true}
+	for _, k := range runpkg.RecordingConfigKeys {
+		closed[k] = true
 	}
 	for _, rec := range recs {
 		for _, cfg := range rec.Config {

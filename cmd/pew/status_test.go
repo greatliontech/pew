@@ -46,6 +46,7 @@ func TestStatusPackageUsesLabel(t *testing.T) {
 		{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
 		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
 		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
+		{Key: "pew-dynamic-state", Value: []byte(fp.DynamicStateStrategy), File: true},
 		{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
 		{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
 		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
@@ -124,6 +125,7 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 			{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
 			{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
 			{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
+			{Key: "pew-dynamic-state", Value: []byte(fp.DynamicStateStrategy), File: true},
 			{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
 			{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
 			{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
@@ -194,6 +196,7 @@ func TestStatusExplainNamesTheMovingGuard(t *testing.T) {
 		{Key: "buildconfig", Value: []byte("recorded-elsewhere"), File: true},
 		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
 		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
+		{Key: "pew-dynamic-state", Value: []byte(fp.DynamicStateStrategy), File: true},
 		{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
 		{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
 		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
@@ -404,6 +407,7 @@ func TestStatusWarnsOnForeignConfigKeys(t *testing.T) {
 		{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
 		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
 		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
+		{Key: "pew-dynamic-state", Value: []byte(fp.DynamicStateStrategy), File: true},
 		{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
 		{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
 		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
@@ -426,5 +430,59 @@ func TestStatusWarnsOnForeignConfigKeys(t *testing.T) {
 	}
 	if !strings.Contains(errw.String(), "foreign configuration key \"injected\"") {
 		t.Fatalf("foreign-key warning missing: %q", errw.String())
+	}
+}
+
+// TestStatusRecordingPredatingDynamicStateKeyIsStale pins the clean
+// break: a recording written before the pew-dynamic-state key reads as
+// the empty strategy and judges stale ("dynamic-state strategy") — it
+// stays a recognized recording (never alien), it is simply re-measured,
+// no back-fill (spec §5's pew-dynamic-state row).
+func TestStatusRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
+	e, err := gofresh.New()
+	if err != nil {
+		t.Fatalf("New engine: %v", err)
+	}
+	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
+	const bench = "BenchmarkDecode"
+	fp, err := e.CaptureFor(t.Context(), gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	rt, err := runtimeinput.Incomplete(".", "package-test-binary:predate", "testlog lacks operation outcome evidence")
+	if err != nil {
+		t.Fatalf("runtime inputs: %v", err)
+	}
+	st := store.New(t.TempDir())
+	cfg := []benchfmt.Config{
+		{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
+		{Key: "commit", Value: []byte("c1"), File: true},
+		{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
+		{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
+		{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
+		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
+		// Deliberately NO pew-dynamic-state line: the predates-the-key shape.
+		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
+		{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
+		{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
+		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
+		{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
+		{Key: "pew-purity", Value: []byte(fp.PurityAssertion), File: true},
+		{Key: "dirty", Value: []byte("false"), File: true},
+		{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
+	}
+	recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
+	if err := st.Write("internal/fixtures/bench", bench, "", recs); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	p := pkgMeta{ImportPath: pkg, Dir: "../../internal/fixtures/bench", TestGoFiles: []string{"bench_test.go"}}
+	p.Module.Path = "github.com/greatliontech/pew"
+	p.Module.Dir = "."
+	var out strings.Builder
+	if err := statusPackage(&out, io.Discard, e, st.Root, "", false, false, false, p); err != nil {
+		t.Fatalf("statusPackage: %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "stale") || !strings.Contains(got, "dynamic-state strategy") {
+		t.Errorf("predating recording status = %q, want stale (dynamic-state strategy)", got)
 	}
 }

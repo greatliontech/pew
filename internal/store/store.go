@@ -787,13 +787,19 @@ func rawFormatValid(data []byte) bool {
 	return counts["pew-format"] == 1 && valid
 }
 
-func recordingConfigKey(key string) bool {
-	switch key {
-	case "pew-format", "commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pew-runconditions", "pew-closure", "pew-test-variants", "pew-test-variant-ledger", "pew-runtime", "pew-runtime-inputs", "pew-purity", "pew-vouches", "pure":
-		return true
-	default:
-		return false
+// recordingConfigKeys is derived from the producer's single registry
+// (run.RecordingConfigKeys) — the store enforces exactly the set the
+// producer can write, never a hand-mirrored copy of it.
+var recordingConfigKeys = func() map[string]bool {
+	m := make(map[string]bool, len(run.RecordingConfigKeys))
+	for _, k := range run.RecordingConfigKeys {
+		m[k] = true
 	}
+	return m
+}()
+
+func recordingConfigKey(key string) bool {
+	return recordingConfigKeys[key]
 }
 
 // ForeignConfigKeys lists the file-configuration keys a stored recording

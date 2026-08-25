@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -165,6 +166,10 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 		// of the tree.
 		e, pgoInput, err := newEngineForPkg(p, env)
 		if err != nil {
+			var pe *toolchainProvenanceError
+			if errors.As(err, &pe) {
+				return err
+			}
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
 			failures = append(failures, p.ImportPath)
 			continue
@@ -444,13 +449,7 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 			for _, cfg := range run.ProvenanceConfig(commit, dirty, fp.Guards, m.conditions) {
 				recs = withConfig(recs, cfg)
 			}
-			recs = withConfig(recs, run.ClosureConfig(fp.MaximalClosure))
-			recs = withConfig(recs, run.TestVariantConfig(fp.TestVariantClosure))
-			recs = withConfig(recs, run.TestVariantLedgerConfig(encodedLedger))
-			for _, cfg := range run.RuntimeConfig(m.digest, m.manifest) {
-				recs = withConfig(recs, cfg)
-			}
-			for _, cfg := range run.GofreshEvidenceConfigs(fp.PurityAssertion, fp.DynamicStateVouches) {
+			for _, cfg := range fingerprintConfigs(fp, encodedLedger, m.digest, m.manifest) {
 				recs = withConfig(recs, cfg)
 			}
 			// Purity flags are per-benchmark (spec §7.5): apply only to the named ones.
@@ -875,6 +874,24 @@ func requiredBenchmarks(all, stale []string, impure map[string]bool) []string {
 		}
 	}
 	return result
+}
+
+// fingerprintConfigs is the writer-side enumeration of the recording
+// lines fingerprintFromConfig reads back into a gofresh.Fingerprint
+// (beyond ProvenanceConfig's guard lines). The two enumerations are a
+// matched pair pinned end-to-end by TestFingerprintConfigRoundTrip: a
+// line dropped on either side breaks the round trip instead of
+// silently narrowing the verdict evidence.
+func fingerprintConfigs(fp gofresh.Fingerprint, encodedLedger, runtimeDigest, runtimeManifest string) []benchfmt.Config {
+	cfgs := []benchfmt.Config{
+		run.ClosureConfig(fp.MaximalClosure),
+		run.DynamicStateStrategyConfig(fp.DynamicStateStrategy),
+		run.TestVariantConfig(fp.TestVariantClosure),
+		run.TestVariantLedgerConfig(encodedLedger),
+	}
+	cfgs = append(cfgs, run.RuntimeConfig(runtimeDigest, runtimeManifest)...)
+	cfgs = append(cfgs, run.GofreshEvidenceConfigs(fp.PurityAssertion, fp.DynamicStateVouches, fp.SingleSubjectDischarges, fp.PackageProcessDischarges)...)
+	return cfgs
 }
 
 func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {

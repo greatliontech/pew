@@ -32,6 +32,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/greatliontech/pew/internal/run"
 	"golang.org/x/perf/benchfmt"
 	"golang.org/x/perf/benchmath"
 	"golang.org/x/perf/benchproc"
@@ -42,8 +43,10 @@ import (
 // the two sides (which legitimately differ in commit, closure, runtime-input
 // digest, and dirty flag) still line up for comparison (§10.1). Variant guards
 // are ignored here too so they do not fragment grouping, but are enforced
-// separately by compareGuards.
-const pewIgnore = "pew-format commit toolchain machine buildconfig runtimeconfig dirty pew-runconditions pew-closure pew-test-variants pew-test-variant-ledger pew-runtime pew-runtime-inputs pew-purity pew-vouches pure"
+// separately by compareGuards. Derived from the producer's single
+// registry, so a new recorded key can never fragment grouping by
+// omission here.
+var pewIgnore = strings.Join(run.RecordingConfigKeys, " ")
 
 var compareGuards = []string{"machine", "toolchain", "buildconfig", "runtimeconfig"}
 
@@ -174,12 +177,15 @@ type group struct {
 	// side. Unlike the guards it never blocks a comparison (spec §10.1, INV-9):
 	// a difference is surfaced as a note and the comparison proceeds.
 	baseConds, newConds guardValue
-	// baseVouches/newVouches track the recorded `pew-vouches` audit per
-	// side: two sides measured under different acceptances compare with
-	// a note, never fragment (the run-conditions precedent).
-	baseVouches, newVouches guardValue
-	units                   []string // first-seen order, deduplicated
-	cells                   map[string]*cell
+	// baseAudit/newAudit track the recorded gofresh provenance per side
+	// — the vouches, the dynamic-state strategy, and the
+	// attestation-borne discharge sets: two sides differing in one
+	// compare with a note, never fragment (the run-conditions
+	// precedent; spec §5's audit rows and the strategy row's
+	// comparison clause).
+	baseAudit, newAudit map[string]guardValue
+	units               []string // first-seen order, deduplicated
+	cells               map[string]*cell
 }
 
 type guardValue struct {
@@ -246,10 +252,20 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 			}
 			if isBase {
 				g.baseConds = recordGuard(g.baseConds, r.GetConfig("pew-runconditions"))
-				g.baseVouches = recordGuard(g.baseVouches, r.GetConfig("pew-vouches"))
+				if g.baseAudit == nil {
+					g.baseAudit = map[string]guardValue{}
+				}
+				for _, key := range auditNoteKeys {
+					g.baseAudit[key] = recordGuard(g.baseAudit[key], r.GetConfig(key))
+				}
 			} else {
 				g.newConds = recordGuard(g.newConds, r.GetConfig("pew-runconditions"))
-				g.newVouches = recordGuard(g.newVouches, r.GetConfig("pew-vouches"))
+				if g.newAudit == nil {
+					g.newAudit = map[string]guardValue{}
+				}
+				for _, key := range auditNoteKeys {
+					g.newAudit[key] = recordGuard(g.newAudit[key], r.GetConfig(key))
+				}
 			}
 			for _, v := range r.Values {
 				c := g.cells[v.Unit]
@@ -360,17 +376,10 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 			if hasCondNote && (g.baseConds.mixed || g.newConds.mixed) {
 				res.Notes = append(res.Notes, condNote)
 			}
-			if vouchNote, has := g.vouchesNote(); has {
-				res.Notes = append(res.Notes, vouchNote)
-			}
-		} else {
-			if hasCondNote {
-				res.Notes = append(res.Notes, condNote)
-			}
-			if vouchNote, has := g.vouchesNote(); has {
-				res.Notes = append(res.Notes, vouchNote)
-			}
+		} else if hasCondNote {
+			res.Notes = append(res.Notes, condNote)
 		}
+		res.Notes = append(res.Notes, g.auditNotes()...)
 	}
 
 	res.Tables = make([]*Table, 0, len(tables))
@@ -452,40 +461,65 @@ func (g *group) conditionsNote() (string, bool) {
 // recorded context, never a trigger.
 var conditionCategoricalFields = []string{"governor", "turbo", "throttled", "battery"}
 
+// auditNoteKeys are the recorded gofresh provenance lines that surface
+// as comparison notes with their display names: audit provenance, so a
+// note, never a grouping key. A side where some samples carry a line
+// and some omit it is itself mixed provenance and reports as such, so
+// a partially-recorded side can never silently read as one value.
+var auditNoteKeys = []string{"pew-vouches", "pew-dynamic-state", "pew-single-subject-discharges", "pew-package-process-discharges"}
+
+var auditNoteNames = map[string]string{
+	"pew-vouches":                    "dynamic-state vouches",
+	"pew-dynamic-state":              "dynamic-state strategies",
+	"pew-single-subject-discharges":  "single-subject discharges",
+	"pew-package-process-discharges": "package-process discharges",
+}
+
+// auditNotes surfaces sides whose recorded gofresh provenance differs —
+// one mechanism for all four lines. For the strategy line the note is
+// the surface for every REF-RESOLVED side (a pinned tag, auto's HEAD,
+// either A/B ref): those sides always compare — stat skips only the
+// working-tree side before Compare sees it (spec §5's strategy row) —
+// so a cross-strategy comparison lands here. The mixed-within-a-side
+// arm additionally catches rows disagreeing past the first, which the
+// skip's row-0 gate cannot see.
+func (g *group) auditNotes() []string {
+	var notes []string
+	for _, key := range auditNoteKeys {
+		base, newer := g.baseAudit[key], g.newAudit[key]
+		name := auditNoteNames[key]
+		baseMixed := base.mixed || (base.seen && base.missing && base.value != "")
+		newMixed := newer.mixed || (newer.seen && newer.missing && newer.value != "")
+		if baseMixed || newMixed {
+			switch {
+			case baseMixed && newMixed:
+				notes = append(notes, fmt.Sprintf("%s: mixed %s within both sides", g.label(), name))
+			case baseMixed:
+				notes = append(notes, fmt.Sprintf("%s: mixed %s within the base side", g.label(), name))
+			default:
+				notes = append(notes, fmt.Sprintf("%s: mixed %s within the new side", g.label(), name))
+			}
+			continue
+		}
+		baseValue, newValue := base.value, newer.value
+		if !base.seen || baseValue == "" {
+			baseValue = "(none)"
+		}
+		if !newer.seen || newValue == "" {
+			newValue = "(none)"
+		}
+		if baseValue != newValue {
+			notes = append(notes, fmt.Sprintf("%s: %s differ (base: %s; new: %s)", g.label(), name, baseValue, newValue))
+		}
+	}
+	return notes
+}
+
 // conditionsDiffer compares two recorded `pew-runconditions` values on their
 // categorical fields. Parsing is fail-closed for hand-edited recordings: a
 // missing or malformed field reads as "unknown", so garbage never silently
 // equals an observed value — and two identically-unknown sides (e.g. two
 // non-Linux recordings) do not differ.
-// vouchesNote surfaces two sides measured under different dynamic-state
-// acceptances - audit provenance, so a note, never a key. A side where
-// some samples carry the line and some omit it is itself mixed
-// acceptance provenance and reports as such, so a partially-recorded
-// side can never silently read as unvouched.
-func (g *group) vouchesNote() (string, bool) {
-	base, newer := g.baseVouches, g.newVouches
-	baseMixed := base.mixed || (base.seen && base.missing && base.value != "")
-	newMixed := newer.mixed || (newer.seen && newer.missing && newer.value != "")
-	if baseMixed || newMixed {
-		side := "base"
-		if !baseMixed {
-			side = "new"
-		}
-		return fmt.Sprintf("%s: mixed dynamic-state vouches within the %s side", g.label(), side), true
-	}
-	baseValue, newValue := base.value, newer.value
-	if !base.seen || baseValue == "" {
-		baseValue = "(none)"
-	}
-	if !newer.seen || newValue == "" {
-		newValue = "(none)"
-	}
-	if baseValue != newValue {
-		return fmt.Sprintf("%s: dynamic-state vouches differ (base: %s; new: %s)", g.label(), baseValue, newValue), true
-	}
-	return "", false
-}
-
 func conditionsDiffer(base, newer string) bool {
 	b, n := conditionCategorical(base), conditionCategorical(newer)
 	for _, field := range conditionCategoricalFields {

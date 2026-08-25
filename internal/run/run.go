@@ -411,6 +411,21 @@ func BuildArgs(importPath, out string) []string {
 	return []string{"test", "-c", "-o", out, importPath}
 }
 
+// RecordingConfigKeys is spec §5's closed key set: every provenance,
+// guard, derived, and purity line a pew recording may carry beyond the
+// toolchain benchmark keys (goos/goarch/pkg/cpu). This is the single
+// registry — every producer line is constructed in this package, the
+// store's closed-set enforcement and compare's grouping projection
+// derive from it, and TestRecordingConfigKeysMirrorSpec binds it to
+// the spec table, so a key added anywhere else is unrepresentable.
+var RecordingConfigKeys = []string{
+	"pew-format", "commit", "toolchain", "machine", "buildconfig",
+	"runtimeconfig", "dirty", "pew-runconditions", "pew-closure",
+	"pew-dynamic-state", "pew-test-variants", "pew-test-variant-ledger",
+	"pew-runtime", "pew-runtime-inputs", "pew-purity", "pew-vouches",
+	"pew-single-subject-discharges", "pew-package-process-discharges", "pure",
+}
+
 // ProvenanceConfig returns the in-band provenance lines in spec §5 order: the
 // measured commit and dirty flag from pew's git layer, the gofresh guard
 // values, and the observed run conditions (§9 — provenance only, never a guard,
@@ -462,18 +477,36 @@ func GofreshVouchesConfig(vouches string) benchfmt.Config {
 	return benchfmt.Config{Key: "pew-vouches", Value: []byte(vouches), File: true}
 }
 
+// DynamicStateStrategyConfig records the shared-dynamic-state
+// derivation the fingerprint was computed under — a VALIDITY key like
+// the closure hash, not audit: gofresh refuses to serve a recording
+// whose strategy is not the current engine's, and a recording
+// predating the key reads as the empty strategy and judges stale
+// ("dynamic-state strategy") — the clean-break shape, no back-fill
+// (the go1.27 toolchain move staled every lineage regardless).
+func DynamicStateStrategyConfig(strategy string) benchfmt.Config {
+	return benchfmt.Config{Key: "pew-dynamic-state", Value: []byte(strategy), File: true}
+}
+
 // GofreshEvidenceConfigs composes the attributable gofresh evidence
-// lines: the purity attribution and the load-bearing vouch set, each
-// emitted exactly when non-empty - the two are independent, so a
-// benchmark whose only impurity was a vouched culprit still records
-// its acceptance.
-func GofreshEvidenceConfigs(purity, vouches string) []benchfmt.Config {
+// lines: the purity attribution, the load-bearing vouch set, and the
+// attestation-borne discharge sets (single-subject and
+// package-process), each emitted exactly when non-empty — every
+// acceptance visible in the evidence, never silent (gofresh's
+// REQ-vouch-recorded, carried into the store).
+func GofreshEvidenceConfigs(purity, vouches, singleSubject, packageProcess string) []benchfmt.Config {
 	var cfgs []benchfmt.Config
 	if purity != "" {
 		cfgs = append(cfgs, GofreshPurityConfig(purity))
 	}
 	if vouches != "" {
 		cfgs = append(cfgs, GofreshVouchesConfig(vouches))
+	}
+	if singleSubject != "" {
+		cfgs = append(cfgs, benchfmt.Config{Key: "pew-single-subject-discharges", Value: []byte(singleSubject), File: true})
+	}
+	if packageProcess != "" {
+		cfgs = append(cfgs, benchfmt.Config{Key: "pew-package-process-discharges", Value: []byte(packageProcess), File: true})
 	}
 	return cfgs
 }
