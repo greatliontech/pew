@@ -13,6 +13,7 @@ close-out convention.
 | [gitblob-linked-worktree-object-lookup](gitblob-linked-worktree-object-lookup.md) | pew run fails in linked worktrees ("gitblob: worktree status: object not found") — resolve the git common dir through the gitdir indirection | cross-tool train chunk 115 |
 | [observed-fingerprint-recording-path](observed-fingerprint-recording-path.md) | plain-Capture recordings leave every true-external-effect benchmark permanently unverifiable; adopt CaptureObserved per arm and retire §7.8's no-proof sentence | cross-tool train chunk 127 (opens with a design discussion) |
 | [verdict-ladder-shared-admissibility](verdict-ladder-shared-admissibility.md) | status and stat hand-order the same recording-admissibility ladder (format → dynamic-state strategy → verdict); collapse to one shared function so a new stale class cannot land on one surface only | cross-tool train chunk 115 |
+| [installed-binary-skew](installed-binary-skew.md) | installed pew binary (be03654e9e6f) lags repo HEAD (d3bf2301731b) — fleet sweep 2026-08-27; reinstall at the landed HEAD | cross-tool train chunk 134 (the pew leg's close) |
 
 ## In-spec upgrade paths (tracked inline, not here)
 
