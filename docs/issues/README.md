@@ -25,3 +25,4 @@ index:
 - per-declaration hashing *into* cache deps (§7.7)
 - gitignored persistent closure memo (§6)
 - same-identity sample merge (§6)
+| [repo-level-vouch-source](repo-level-vouch-source.md) | vouch sets live only as flags, hand-mirrored (tugboat CLAUDE.md + the fleet sweep); the unsafe drift direction is silent | rides cross-tool train chunk 115 |
