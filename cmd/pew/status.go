@@ -162,6 +162,24 @@ func parseDynamicStateVouches(entries []string) ([]string, error) {
 	return identities, nil
 }
 
+// engineDiagnostics receives payload-bearing gofresh diagnostics from
+// every engine a command builds — command-wide configuration like the
+// vouch set (a var, not a threaded parameter). The read is
+// unsynchronized on analysis goroutines: tests may swap it only while
+// no engine is live, and only engine-free tests do.
+var engineDiagnostics io.Writer = os.Stderr
+
+// emitEngineDiagnostic writes a payload-bearing gofresh event
+// (per-subject analysis-unavailable provenance, the unlisted-toolchain
+// notice) to the operator's log; detail-free keep-alives stay silent.
+// Without a consumer, an unlisted release surfaces only as scattered
+// stale/unverifiable verdicts with nothing naming the walk needed.
+func emitEngineDiagnostic(p gofresh.Progress) {
+	if p.Detail != "" {
+		fmt.Fprintf(engineDiagnostics, "gofresh: %s %s — %s\n", p.Phase, p.Package, p.Detail)
+	}
+}
+
 func buildEngine(moduleDir string, env []string, pgo string) (*gofresh.Engine, error) {
 	// Every pew engine attests single-subject execution: `pew run`
 	// measures each benchmark in a process of its own (spec §9), and
@@ -172,7 +190,8 @@ func buildEngine(moduleDir string, env []string, pgo string) (*gofresh.Engine, e
 	if err := checkToolchainProvenance(moduleDir, env); err != nil {
 		return nil, err
 	}
-	opts := []gofresh.Option{gofresh.WithDir(moduleDir), gofresh.WithEnv(env...), gofresh.WithSingleSubjectExecution()}
+	opts := []gofresh.Option{gofresh.WithDir(moduleDir), gofresh.WithEnv(env...), gofresh.WithSingleSubjectExecution(),
+		gofresh.WithProgress(emitEngineDiagnostic)}
 	if pgo != "" {
 		opts = append(opts, gofresh.WithBuildInputs(pgo))
 	}
