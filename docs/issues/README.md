@@ -14,6 +14,7 @@ close-out convention.
 | [observed-fingerprint-recording-path](observed-fingerprint-recording-path.md) | plain-Capture recordings leave every true-external-effect benchmark permanently unverifiable; adopt CaptureObserved per arm and retire §7.8's no-proof sentence | cross-tool train chunk 127 (opens with a design discussion) |
 | [verdict-ladder-shared-admissibility](verdict-ladder-shared-admissibility.md) | status and stat hand-order the same recording-admissibility ladder (format → dynamic-state strategy → verdict); collapse to one shared function so a new stale class cannot land on one surface only | cross-tool train chunk 115 |
 | [derived-state-recompute-invariance-witness](derived-state-recompute-invariance-witness.md) | `REQ-pew-derived-state`'s recompute/discard-invariance clause has no pew-side witness (engine-owned path; the bound tests pin only the strategy-break authority arm; a gap cannot express a per-clause shortfall) | when a pew-side integration anchor exercising the gofresh engine's derived-state discard/recompute path lands in the test surface |
+| [spec-wide-requirement-forming](spec-wide-requirement-forming.md) | only §13 is REQ-formed; a test witnessing a §§1–12 contract has no id to bind against — convert sections on demand, same structure-only discipline | when a binding needs to claim a §§1–12 contract that carries no REQ id |
 
 ## In-spec upgrade paths (tracked inline, not here)
 
