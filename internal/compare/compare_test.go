@@ -390,7 +390,7 @@ func condSet(name, conditions string, units map[string][]float64) []*benchfmt.Re
 
 const quietConds = "governor=performance turbo=off load1=0.03 throttled=false battery=false"
 
-// TestRunConditionsNoteStillCompares encodes the §10.1 / INV-9 contract: two
+// TestRunConditionsNoteStillCompares encodes the §10.1 / REQ-pew-runconditions-provenance contract: two
 // sides recorded under different run conditions get a differing-conditions note
 // AND a full comparison — the note surfaces, never gates, and the provenance key
 // must not fragment the benchproc grouping.

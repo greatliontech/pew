@@ -936,7 +936,7 @@ func TestRunPackageSalvagesCorruptStream(t *testing.T) {
 }
 
 // TestRunPackageDropsForeignStreamConfig drives spec §5's closed recording key
-// set (INV-12) end to end: a package whose init logs a `key: value`-shaped
+// set (REQ-pew-key-set) end to end: a package whose init logs a `key: value`-shaped
 // line before the benchmark header emits a standalone stream line that the
 // benchmark-format reader takes as file configuration — no corruption, so
 // nothing else refuses it. The run must record the benchmark without the
@@ -993,7 +993,7 @@ func TestRunPackageDropsForeignStreamConfig(t *testing.T) {
 		t.Fatalf("recording missing: %v", err)
 	}
 	// The recording's keys must be drawn only from spec §5's closed set
-	// (INV-12) — this reads back what the real run path composed and wrote,
+	// (REQ-pew-key-set) — this reads back what the real run path composed and wrote,
 	// so a provenance key added anywhere along it surfaces here.
 	closed := map[string]bool{"goos": true, "goarch": true, "pkg": true, "cpu": true}
 	for _, k := range runpkg.RecordingConfigKeys {

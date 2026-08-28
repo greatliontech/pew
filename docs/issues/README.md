@@ -13,6 +13,7 @@ close-out convention.
 | [gitblob-linked-worktree-object-lookup](gitblob-linked-worktree-object-lookup.md) | pew run fails in linked worktrees ("gitblob: worktree status: object not found") — resolve the git common dir through the gitdir indirection | cross-tool train chunk 115 |
 | [observed-fingerprint-recording-path](observed-fingerprint-recording-path.md) | plain-Capture recordings leave every true-external-effect benchmark permanently unverifiable; adopt CaptureObserved per arm and retire §7.8's no-proof sentence | cross-tool train chunk 127 (opens with a design discussion) |
 | [verdict-ladder-shared-admissibility](verdict-ladder-shared-admissibility.md) | status and stat hand-order the same recording-admissibility ladder (format → dynamic-state strategy → verdict); collapse to one shared function so a new stale class cannot land on one surface only | cross-tool train chunk 115 |
+| [derived-state-recompute-invariance-witness](derived-state-recompute-invariance-witness.md) | `REQ-pew-derived-state`'s recompute/discard-invariance clause has no pew-side witness (engine-owned path; the bound tests pin only the strategy-break authority arm; a gap cannot express a per-clause shortfall) | when a pew-side integration anchor exercising the gofresh engine's derived-state discard/recompute path lands in the test surface |
 
 ## In-spec upgrade paths (tracked inline, not here)
 

@@ -106,7 +106,7 @@ profile differs between packages (§9):
 `pew-format` occurs exactly once as the byte-exact LF-terminated line `pew-format: 2`. A recording
 with no discriminator, a duplicate, alternate whitespace or line endings, or another value —
 format-1 recordings included — is
-`stale (format)` and MUST be regenerated; Pew never interprets it as an earlier shape. Benchmark
+`stale (format)` and is regenerated, never interpreted as an earlier shape. Benchmark
 output that attempts to define `pew-*` or any other Pew-owned provenance, guard, or purity key is
 refused before storage. A recording of the current format missing any mandatory field is likewise `stale (format)`
 before guard or purity interpretation. Duplicate rejection applies to every recording key — the
@@ -115,7 +115,7 @@ a recording that repeats any of them is `stale (format)`. A format-2 recording's
 set includes `pew-test-variants` and `pew-test-variant-ledger`.
 Format governs interpretation rather than measurement identity and is projected from comparisons.
 
-**The recording key set is closed** (INV-12). Stream-derived configuration keys other than the four
+**The recording key set is closed** (REQ-pew-key-set). Stream-derived configuration keys other than the four
 the toolchain itself emits (`goos`, `goarch`, `pkg`, `cpu`) are dropped before storage, each
 distinct dropped key reported with a warning naming the key and its first observed value. The
 benchmark-format reader treats any stdout line whose first word is lowercase, space-free, and
@@ -144,7 +144,7 @@ when capture used no purity assertion; omission is the canonical no-attribution 
 
 **The closure hash rides in-band** as a namespaced `pew-closure` config line (no sidecar index). It
 is *derived*, not provenance (recomputable from commit + toolchain + build-config), so it is never
-the source of truth and recomputing it never changes a verdict (INV-5). In-band is sound because
+the source of truth and recomputing it never changes a verdict (REQ-pew-derived-state). In-band is sound because
 overwrite makes each file single-block, so the key cannot fragment a benchstat projection; pew
 additionally strips `pew-*` keys from its own comparison projections (§10). The `.txt` is therefore
 fully self-describing — everything needed to evaluate its own validity lives in one file.
@@ -208,7 +208,7 @@ commit is a coarse "some code somewhere changed" signal — correct for *naming 
 fatally over-broad for *deciding a re-run*. The closure is the precise "code this benchmark exercises
 changed" signal, and runtime inputs are the precise "observed non-source input changed" signal.
 Swapping commit for closure in the validity predicate is the classic trap closure analysis exists to
-avoid (see INV-6).
+avoid (see REQ-pew-sha-independence).
 
 ## 6. Storage layout
 
@@ -298,7 +298,7 @@ could read and the failing sample.
   external dependence pew cannot hash (Class B, §7.3), or the runtime-input manifest carries an
   unverifiable disposition such as explicit incomplete outcome evidence. Operationally a re-run,
   but distinct from `stale`: the user can assert purity to override (§7.5). Absence of proof never
-  collapses to `valid` (INV-1).
+  collapses to `valid` (REQ-pew-closure-soundness).
 
 The six guards:
 
@@ -388,7 +388,7 @@ reach in-tree source, also fails closed.
 
 **Tier 1 over the whole non-std build is the maximal sound closure** — and the single fallback every
 blind spot escalates to (§7.3). Tier 2 + the resolution rules are pure precision: they shrink the
-set only where shrinking is provably safe. INV-1 therefore holds *by construction* — the worst case
+set only where shrinking is provably safe. REQ-pew-closure-soundness therefore holds *by construction* — the worst case
 is always the maximal source set, never less.
 Pew records this maximal closure by default. Declaration refinement is admissible only as an explicit
 precision policy after it demonstrates bounded completion and useful false-stale recovery; a recording
@@ -443,7 +443,7 @@ they cannot suppress the Class-B marker. (Ambient nondeterminism — `time.Now`,
 benchmark-*quality* issue, out of scope per §3, not a Class-B trigger.)
 
 Class-B detection is **best-effort coverage**, not a hard guarantee — perfect external-dependence
-detection is impossible (§3 non-goal), so unlike INV-1's source-soundness it can miss exotic cases.
+detection is impossible (§3 non-goal), so unlike REQ-pew-closure-soundness's source-soundness it can miss exotic cases.
 The set above is deliberately **small and high-confidence**: under-flagging is the documented
 boundary, while *over*-flagging is the real cost (a benchmark reading a fixed fixture in setup would
 be marked `unverifiable` → forced rerun), recovered by `--assume-pure` (§7.5). The complement for
@@ -479,7 +479,7 @@ still reports `stale`.
   the §7.3-A′ escape rule (non-std type converted to an interface ⇒ all its methods reachable),
   trading stdlib-load cost for coarser-but-sound inclusion. **Decided: load stdlib bodies** —
   soundness then rides on mature go/ssa+RTA traversal of real edges, not on our own escape
-  enumeration being exhaustive (an incomplete escape set is a false-`valid`, the one failure INV-1
+  enumeration being exhaustive (an incomplete escape set is a false-`valid`, the one failure REQ-pew-closure-soundness
   forbids). The escape rule stays a documented optimization, used only if analysis time becomes a
   *measured* bottleneck and escape-completeness can be shown.
 
@@ -626,7 +626,7 @@ it rewrites the recording in place under the refreshed compartment hash and the 
 ledger — the proven extension is recorded, so later verdicts read plainly valid instead of
 re-proving the same delta. Read-only surfaces never touch the store. The measurement rows
 are untouched by the rewrite: the rule extends the recording's validity evidence, never its
-measured values (INV-5's spirit — recomputing derived evidence never changes a measurement).
+measured values (REQ-pew-derived-state's spirit — recomputing derived evidence never changes a measurement).
 
 ## 8. Machine fingerprint
 
@@ -1047,108 +1047,27 @@ Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred
 
 ## 13. Project invariants
 
-- **INV-1 — Closure soundness (`valid` requires proof).** pew reports `valid` only when all six
-  guards (§7) provably hold over a closure that is a *superset* of the source able to affect `B`'s
-  performance. Every blind spot is **resolved** to a precise edge, **widened** to the maximal non-std
-  closure, or **downgraded** to `unverifiable` — never silently dropped, never narrowing the covered
-  set. An unresolved blind spot yields `unverifiable` unless an applicable explicit purity assertion
-  accepts responsibility for that disposition; purity never waives the six guards. The six-guard
-  predicate is itself computed only under a provenance-sound engine (§7's toolchain-provenance
-  prerequisite): a verdict-computing invocation whose ambient toolchain skews from the binary's
-  compiled-in frontend refuses outright rather than judging over misread sources. *Violation (strongest):* a reachable
-  `const`/type/embed `B` depends on changes while `B`'s call graph is byte-identical, the closure
-  hash is unchanged, and `B` is reported `valid` → silent regression behind a stale baseline (the
-  core failure pew exists to prevent). *Kind:* entailed.
-- **INV-2 — Validity verdict.** `B` is `valid` for HEAD iff *all six* guards hold and either its
-  closure reaches no unhashable external dependence (Class B, §7.3) and its runtime-input manifest
-  has no unverifiable disposition, or an applicable purity assertion overrides those dispositions
-  (§7.5). Any guard failing ⇒ `stale`; absent a purity assertion, guards holding but either
-  unverifiability source present ⇒ `unverifiable`. *Violation:* e.g. toolchain changed but reported valid, a
-  benchmark reading an external file reported valid after the file changed, or a no-I/O benchmark
-  carrying explicit incomplete outcome evidence reported valid. *Kind:* clause-explicit (§7).
-- **INV-3 — Artifact format compatibility.** Every stored `.txt` is a well-formed Go
-  benchmark-format file parseable by `benchfmt` and plain `benchstat`. *Violation:* a written file
-  that `benchfmt` rejects → ecosystem lock-in, G5 broken. *Kind:* clause-explicit (§5, G5).
-- **INV-4 — Provenance completeness.** Every produced result carries the current format and the
-  provenance and manifests required to evaluate all six guards: `pew run` always writes the commit,
-  the runtime-input manifest (completed under the §7.8 conjunction, or the canonical incomplete
-  disposition with its reason — present for every run either way), the four environment
-  guard lines, and the run-conditions line (§9, explicit `unknown` fields when unobserved).
-  *Violation:* a result missing `commit` or a guard value → the guard is unevaluable → validity
-  undecidable → must conservatively re-run, defeating G1/G2. A missing or unknown format is rejected
-  without interpretation. A recorded `pew-runtime` digest without its manifest is corruption and stale;
-  a recording with no runtime manifest at all violates the producer contract — absence would assert
-  "no runtime inputs" and serve. *Kind:* entailed.
-- **INV-5 — Derived state is never authoritative.** Persisted closure hashes are a memoization keyed
-  *only* by immutable inputs `(commit, toolchain, buildconfig)`; they are never the source of truth
-  for provenance and recomputing/discarding them never changes a validity verdict. *Violation:* a
-  validity check trusts a cached hash that disagrees with recomputation from source → INV-1 bypassed
-  via a stale cache. *Kind:* entailed.
-- **INV-6 — Validity is commit-sha-independent.** The validity predicate (§7) depends only on
-  `closure ∧ runtime-inputs ∧ toolchain ∧ machine ∧ buildconfig ∧ runtimeconfig`; it never reads the raw commit sha. *Violation:*
-  two records identical in closure/toolchain/machine/buildconfig but differing in commit sha get
-  different validity verdicts → every commit invalidates every benchmark → G2 (avoid wasted runs)
-  defeated and the closure analysis rendered moot (the §5.1 trap). *Kind:* entailed. *Anchor test:*
-  two records differing only in commit sha ⇒ both valid.
-- **INV-7 — Closure includes non-call dependencies.** The closure covers not only call-reachable
-  functions but the `const`/type/package-var declarations they reference, the `init`/var-init of
-  contributing packages, and `go:embed`-ed files (§7.1). *Violation:* flipping a referenced
-  `const BufSize` (4096→8192), changing a referenced struct's field layout, or editing an embedded
-  data file leaves the hash unchanged → `B` reported `valid` while its behavior moved. *Kind:*
-  entailed. *Anchor tests:* const-flip, struct-field change, embed-file edit ⇒ each reports stale.
-- **INV-8 — Mutable-local deps are hashed by content.** Any reachable dependency whose resolved
-  source is *not* under `GOMODCACHE` (local `replace => ./path`, `go.work use`, `vendor/`) is hashed
-  by its source content, never pinned by `(module, version)` (§7.7). *Violation:* `B` reaches a
-  locally-replaced dep; the dep's reachable source changes; `go.mod`/`go.sum` untouched; version-
-  pinning → hash unchanged → `B` reported `valid` while its dependency moved → false-`valid`.
-  *Kind:* entailed. *Anchor test:* edit a locally-replaced dep's reachable code without touching
-  `go.mod` ⇒ `B` reports stale.
-- **INV-9 — Run conditions are provenance-only.** The `pew-runconditions` line (§9) never enters
-  the machine fingerprint (§8), any validity guard (§7), or the comparison grouping / required-equal
-  guard set (§10.1). *Violation:* the `performance` governor is set for a recording run; at check
-  time the box idles in `powersave`; a conditions-bearing fingerprint or guard marks every
-  recording stale → spurious re-run of a still-valid result — G2 defeated by the exact
-  transient-mismatch trap §8 excludes by construction. *Kind:* entailed (from §8's exclusion and
-  the §5.1 identity/validity keys). *Anchor tests:* two recordings differing only in
-  `pew-runconditions` ⇒ both valid; ⇒ compared (with a note), never fragmented or blocked.
-- **INV-10 — The regression gate is never vacuously green.** Under `--fail-on-regression`, exit
-  status `0` requires at least one gated-unit comparison to have been performed and found clean
-  (§10.1); an empty gated comparison set exits non-zero with a status distinct from the regression
-  exit and a cause-naming diagnostic. *Violation:* a repo with no recordings yet (or every recording
-  skipped) wires `pew stat --fail-on-regression` as a CI gate; the gate exits `0` — passing
-  precisely when it measured nothing — and a regression lands behind a green check: the silent-
-  staleness failure (§1) reproduced at the gate itself. *Kind:* clause-explicit (§10.1). *Anchor
-  tests:* empty store under the flag ⇒ exit `2` with diagnostic; all candidates skipped ⇒ exit `2`
-  with per-cause tally; partial skip with a clean compared subset ⇒ exit `0`.
-- **INV-11 — Recording sample completeness.** A recording produced by `pew run` carries exactly
-  the demanded `--count` samples for every result row; a benchmark whose stream output shows
-  corruption evidence (unparseable lines naming it, orphaned measurement fields, sample-count
-  deviation) is refused rather than recorded (§9 sample floor); corruption or repository-state
-  motion in one benchmark's arm never discards another benchmark's completed measurements —
-  single-subject execution (§9) makes every stream and state judgment arm-local, so neither
-  output corruption nor non-source residue refuses a whole package; only source-input or HEAD
-  drift (the premise every fingerprint shares) aborts a package write — and no corrupt line's
-  content is ever recorded, as measurement data or as salvage artifact.
-  *Violation:* a dependency's logger splices one line into one result row and either (a) the whole
-  package's completed run — ~30 minutes of untouched benchmarks — is discarded, or (b) the
-  affected benchmark records silently with fewer samples than demanded, and `pew stat` later
-  compares a degenerate sample set as statistics-grade while every guard holds. *Kind:* entailed
-  (§9 statistics-grade defaults + §5 provenance honesty). *Anchor tests:* a stream captured from a
-  real consensus-node-logging run ⇒ the affected benchmark refused with the spliced line reported
-  verbatim, the clean benchmark recorded with its full sample set; an orphaned-fields line with no
-  attributable benchmark ⇒ the producing arm's own benchmark refused, its sibling recorded.
-- **INV-12 — The recording key set is closed.** Every recording `pew run` stores carries
-  file-configuration keys drawn only from the closed set of §5: the toolchain's four stream keys,
-  pew's provenance/guard/manifest keys, `pew-closure`, and `pure`; every other stream-derived
-  configuration key is dropped before storage with a warning. The toolchain keys' values are
-  verified against out-of-band truth where one exists (`goos`/`goarch`/`pkg`) and against
-  in-stream consistency for `cpu`, refusing the recording on disagreement; read paths warn on
-  stored keys outside the closed set (§5's value arms). *Anchor tests for the value arms:*
-  `TestVerifyToolchainConfigRefusesSpoofedValues`,
-  `TestForeignConfigKeysDetectsHistoricalJunk`, `TestWarnNewVariantLineage`. *Violation:* a benchmark dependency logs one `key: value`-shaped line to
-  stdout; the key is recorded as durable configuration in this run but is absent from the baseline;
-  §10.1's config grouping fragments and the benchmark drops out of comparison one-sided — a
-  regression hides behind a log line while every other invariant holds. *Kind:* entailed (§5
-  self-describing artifacts + §10.1 grouping). *Anchor tests:* a stream carrying `raft: appending
-  entries` ⇒ the key is stripped from every result and reported once; the composed run-path config
-  serializes only closed-set keys.
+
+**REQ-pew-closure-soundness** (behavior): **Closure soundness (`valid` requires proof).** pew MUST report `valid` only when all six guards (§7) provably hold over a closure that is a *superset* of the source able to affect `B`'s performance. Every blind spot is **resolved** to a precise edge, **widened** to the maximal non-std closure, or **downgraded** to `unverifiable` — never silently dropped, never narrowing the covered set. An unresolved blind spot yields `unverifiable` unless an applicable explicit purity assertion accepts responsibility for that disposition; purity never waives the six guards. The six-guard predicate is itself computed only under a provenance-sound engine (§7's toolchain-provenance prerequisite): a verdict-computing invocation whose ambient toolchain skews from the binary's compiled-in frontend refuses outright rather than judging over misread sources. *Violation (strongest):* a reachable `const`/type/embed `B` depends on changes while `B`'s call graph is byte-identical, the closure hash is unchanged, and `B` is reported `valid` → silent regression behind a stale baseline (the core failure pew exists to prevent). *Kind:* entailed.
+
+**REQ-pew-validity-verdict** (behavior): **Validity verdict.** `B` MUST be `valid` for HEAD iff *all six* guards hold and either its closure reaches no unhashable external dependence (Class B, §7.3) and its runtime-input manifest has no unverifiable disposition, or an applicable purity assertion overrides those dispositions (§7.5). Any guard failing ⇒ `stale`; absent a purity assertion, guards holding but either unverifiability source present ⇒ `unverifiable`. *Violation:* e.g. toolchain changed but reported valid, a benchmark reading an external file reported valid after the file changed, or a no-I/O benchmark carrying explicit incomplete outcome evidence reported valid. *Kind:* clause-explicit (§7).
+
+**REQ-pew-artifact-format** (behavior): **Artifact format compatibility.** Every stored `.txt` MUST be a well-formed Go benchmark-format file parseable by `benchfmt` and plain `benchstat`; a recording without the current format discriminator is `stale (format)` and regenerated, never interpreted as an earlier shape. *Violation:* a written file that `benchfmt` rejects → ecosystem lock-in, G5 broken. *Kind:* clause-explicit (§5, G5).
+
+**REQ-pew-provenance-completeness** (behavior): **Provenance completeness.** Every produced result MUST carry the current format and the provenance and manifests required to evaluate all six guards: `pew run` always writes the commit, the runtime-input manifest (completed under the §7.8 conjunction, or the canonical incomplete disposition with its reason — present for every run either way), the four environment guard lines, and the run-conditions line (§9, explicit `unknown` fields when unobserved). *Violation:* a result missing `commit` or a guard value → the guard is unevaluable → validity undecidable → must conservatively re-run, defeating G1/G2. A missing or unknown format is rejected without interpretation. A recorded `pew-runtime` digest without its manifest is corruption and stale; a recording with no runtime manifest at all violates the producer contract — absence would assert "no runtime inputs" and serve. *Kind:* entailed.
+
+**REQ-pew-derived-state** (behavior): **Derived state is never authoritative.** Persisted closure hashes MUST be a memoization keyed *only* by immutable inputs `(commit, toolchain, buildconfig)`; they are never the source of truth for provenance and recomputing/discarding them never changes a validity verdict. *Violation:* a validity check trusts a cached hash that disagrees with recomputation from source → REQ-pew-closure-soundness bypassed via a stale cache. *Kind:* entailed.
+
+**REQ-pew-sha-independence** (behavior): **Validity is commit-sha-independent.** The validity predicate (§7) MUST depend only on `closure ∧ runtime-inputs ∧ toolchain ∧ machine ∧ buildconfig ∧ runtimeconfig`; it never reads the raw commit sha. *Violation:* two records identical in closure/toolchain/machine/buildconfig but differing in commit sha get different validity verdicts → every commit invalidates every benchmark → G2 (avoid wasted runs) defeated and the closure analysis rendered moot (the §5.1 trap). *Kind:* entailed. *Anchor test:* two records differing only in commit sha ⇒ both valid.
+
+**REQ-pew-closure-noncall** (behavior): **Closure includes non-call dependencies.** The closure MUST cover not only call-reachable functions but the `const`/type/package-var declarations they reference, the `init`/var-init of contributing packages, and `go:embed`-ed files (§7.1). *Violation:* flipping a referenced `const BufSize` (4096→8192), changing a referenced struct's field layout, or editing an embedded data file leaves the hash unchanged → `B` reported `valid` while its behavior moved. *Kind:* entailed. *Anchor tests:* const-flip, struct-field change, embed-file edit ⇒ each reports stale.
+
+**REQ-pew-mutable-local** (behavior): **Mutable-local deps are hashed by content.** Any reachable dependency whose resolved source is *not* under `GOMODCACHE` (local `replace => ./path`, `go.work use`, `vendor/`) MUST be hashed by its source content, never pinned by `(module, version)` (§7.7). *Violation:* `B` reaches a locally-replaced dep; the dep's reachable source changes; `go.mod`/`go.sum` untouched; version-pinning → hash unchanged → `B` reported `valid` while its dependency moved → false-`valid`. *Kind:* entailed. *Anchor test:* edit a locally-replaced dep's reachable code without touching `go.mod` ⇒ `B` reports stale.
+
+**REQ-pew-runconditions-provenance** (behavior): **Run conditions are provenance-only.** The `pew-runconditions` line (§9) MUST never enter the machine fingerprint (§8), any validity guard (§7), or the comparison grouping / required-equal guard set (§10.1). *Violation:* the `performance` governor is set for a recording run; at check time the box idles in `powersave`; a conditions-bearing fingerprint or guard marks every recording stale → spurious re-run of a still-valid result — G2 defeated by the exact transient-mismatch trap §8 excludes by construction. *Kind:* entailed (from §8's exclusion and the §5.1 identity/validity keys). *Anchor tests:* two recordings differing only in `pew-runconditions` ⇒ both valid; ⇒ compared (with a note), never fragmented or blocked.
+
+**REQ-pew-regression-gate** (behavior): **The regression gate is never vacuously green.** Under `--fail-on-regression`, exit status `0` MUST require at least one gated-unit comparison to have been performed and found clean (§10.1); an empty gated comparison set exits non-zero with a status distinct from the regression exit and a cause-naming diagnostic. *Violation:* a repo with no recordings yet (or every recording skipped) wires `pew stat --fail-on-regression` as a CI gate; the gate exits `0` — passing precisely when it measured nothing — and a regression lands behind a green check: the silent-staleness failure (§1) reproduced at the gate itself. *Kind:* clause-explicit (§10.1). *Anchor tests:* empty store under the flag ⇒ exit `2` with diagnostic; all candidates skipped ⇒ exit `2` with per-cause tally; partial skip with a clean compared subset ⇒ exit `0`.
+
+**REQ-pew-sample-completeness** (behavior): **Recording sample completeness.** A recording produced by `pew run` MUST carry exactly the demanded `--count` samples for every result row; a benchmark whose stream output shows corruption evidence (unparseable lines naming it, orphaned measurement fields, sample-count deviation) is refused rather than recorded (§9 sample floor); corruption or repository-state motion in one benchmark's arm never discards another benchmark's completed measurements — single-subject execution (§9) makes every stream and state judgment arm-local, so neither output corruption nor non-source residue refuses a whole package; only source-input or HEAD drift (the premise every fingerprint shares) aborts a package write — and no corrupt line's content is ever recorded, as measurement data or as salvage artifact. *Violation:* a dependency's logger splices one line into one result row and either (a) the whole package's completed run — ~30 minutes of untouched benchmarks — is discarded, or (b) the affected benchmark records silently with fewer samples than demanded, and `pew stat` later compares a degenerate sample set as statistics-grade while every guard holds. *Kind:* entailed (§9 statistics-grade defaults + §5 provenance honesty). *Anchor tests:* a stream captured from a real consensus-node-logging run ⇒ the affected benchmark refused with the spliced line reported verbatim, the clean benchmark recorded with its full sample set; an orphaned-fields line with no attributable benchmark ⇒ the producing arm's own benchmark refused, its sibling recorded.
+
+**REQ-pew-key-set** (behavior): **The recording key set is closed.** Every recording `pew run` stores MUST carry file-configuration keys drawn only from the closed set of §5: the toolchain's four stream keys, pew's provenance/guard/manifest keys, `pew-closure`, and `pure`; every other stream-derived configuration key is dropped before storage with a warning. The toolchain keys' values are verified against out-of-band truth where one exists (`goos`/`goarch`/`pkg`) and against in-stream consistency for `cpu`, refusing the recording on disagreement; read paths warn on stored keys outside the closed set (§5's value arms). *Violation:* a benchmark dependency logs one `key: value`-shaped line to stdout; the key is recorded as durable configuration in this run but is absent from the baseline; §10.1's config grouping fragments and the benchmark drops out of comparison one-sided — a regression hides behind a log line while every other invariant holds. *Kind:* entailed (§5 self-describing artifacts + §10.1 grouping). *Anchor tests:* a stream carrying `raft: appending entries` ⇒ the key is stripped from every result and reported once; the composed run-path config serializes only closed-set keys.

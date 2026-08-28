@@ -429,7 +429,7 @@ var RecordingConfigKeys = []string{
 // ProvenanceConfig returns the in-band provenance lines in spec §5 order: the
 // measured commit and dirty flag from pew's git layer, the gofresh guard
 // values, and the observed run conditions (§9 — provenance only, never a guard,
-// INV-9). File:true so benchfmt.Writer emits them as `key: value` lines (it omits
+// REQ-pew-runconditions-provenance). File:true so benchfmt.Writer emits them as `key: value` lines (it omits
 // File==false config as internal).
 func ProvenanceConfig(commit string, dirty bool, g guard.Guards, conditions Conditions) []benchfmt.Config {
 	return []benchfmt.Config{
@@ -658,7 +658,7 @@ func DecodeLedger(encoded string) (Ledger, error) {
 // with it is a spoofed or corrupt stream - a dependency's logger can
 // emit the same lowercase-colon shape the toolchain does, and benchfmt's
 // same-key overwrite would make the spoofed value the recorded one
-// (spec §5, INV-12's value-trust arm).
+// (spec §5, REQ-pew-key-set's value-trust arm).
 type ToolchainTruth struct {
 	GOOS, GOARCH string
 	ImportPath   string

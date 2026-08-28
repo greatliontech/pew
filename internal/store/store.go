@@ -5,7 +5,7 @@
 // It is provenance-agnostic: it faithfully round-trips whatever configuration
 // lines the results carry (commit/toolchain/machine/buildconfig/pew-closure/…),
 // which keeps every stored file a valid benchmark-format document readable by
-// plain benchstat (INV-3) and the provenance recoverable (INV-4).
+// plain benchstat (REQ-pew-artifact-format) and the provenance recoverable (REQ-pew-provenance-completeness).
 package store
 
 import (
@@ -653,7 +653,7 @@ func checkRegularFile(path string) error {
 // benchfmt position). It is used both for on-disk recordings (Read) and for blob
 // content materialized from git at a ref (pew stat baselines, §6.1, §10). It
 // rejects malformed input and unexpected record kinds rather than silently
-// dropping data (INV-3), and rejects an empty recording.
+// dropping data (REQ-pew-artifact-format), and rejects an empty recording.
 func Parse(r io.Reader, name string) ([]*benchfmt.Result, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -807,7 +807,7 @@ func recordingConfigKey(key string) bool {
 // provenance set - a recording written before the closed-set
 // enforcement, or hand-edited. Such keys fragment comparison grouping
 // silently; detection is the read-time trust residual, regeneration the
-// remediation (spec §5, INV-12's read arm).
+// remediation (spec §5, REQ-pew-key-set's read arm).
 func ForeignConfigKeys(recs []*benchfmt.Result) []string {
 	seen := map[string]bool{}
 	var out []string

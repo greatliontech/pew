@@ -671,7 +671,7 @@ func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStat
 	}
 	// The stream's own toolchain keys are verified against out-of-band
 	// truth: a value benchfmt would happily record can still be a
-	// dependency's spoof (spec §5, INV-12's value-trust arm).
+	// dependency's spoof (spec §5, REQ-pew-key-set's value-trust arm).
 	if err := run.VerifyToolchainConfig(results, truth); err != nil {
 		return armMeasurement{}, nil, err
 	}

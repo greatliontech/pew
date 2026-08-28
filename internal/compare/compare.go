@@ -174,7 +174,7 @@ type group struct {
 	baseGuards      map[string]guardValue
 	newGuards       map[string]guardValue
 	// baseConds/newConds track the recorded `pew-runconditions` provenance per
-	// side. Unlike the guards it never blocks a comparison (spec §10.1, INV-9):
+	// side. Unlike the guards it never blocks a comparison (spec §10.1, REQ-pew-runconditions-provenance):
 	// a difference is surfaced as a note and the comparison proceeds.
 	baseConds, newConds guardValue
 	// baseAudit/newAudit track the recorded gofresh provenance per side
@@ -428,7 +428,7 @@ func (g *group) guardNote() (string, bool) {
 // sides (spec §10.1): distinct values mixed within a side, the line missing on
 // one side only, or the sides differing in an observed categorical field. The
 // caller never blocks the comparison on it — run conditions are provenance, not
-// a guard (INV-9). Both sides lacking the line entirely is silent: there is
+// a guard (REQ-pew-runconditions-provenance). Both sides lacking the line entirely is silent: there is
 // nothing recorded to disagree about.
 func (g *group) conditionsNote() (string, bool) {
 	base, newer := g.baseConds, g.newConds

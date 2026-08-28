@@ -11,7 +11,7 @@ import (
 // `pew-runconditions` provenance line. A nil pointer field (or empty Governor)
 // means the signal was not observable; it renders as the explicit field value
 // "unknown" — an unobserved condition is stated, never implied. Conditions are
-// provenance only, never identity or validity (spec §5.1, INV-9).
+// provenance only, never identity or validity (spec §5.1, REQ-pew-runconditions-provenance).
 //
 // One observation feeds both the warnings and the recorded line, so the
 // recording states exactly the conditions the warn/--strict gate evaluated —

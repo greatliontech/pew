@@ -1,0 +1,6 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-pew-mutable-local"
+reason: "the closure guards are enforced in the shared gofresh engine's own corpus (closure.md, purity.md); pew-side integration anchors over the engine seam are pending"
+lands { covered: "REQ-pew-mutable-local" }

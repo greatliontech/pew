@@ -311,7 +311,7 @@ func TestEffectiveGoflags(t *testing.T) {
 }
 
 // TestParseDropsForeignStreamConfig pins spec §5's closed recording key set
-// (INV-12): a dependency logging a lowercase colon-terminated first word
+// (REQ-pew-key-set): a dependency logging a lowercase colon-terminated first word
 // (`raft: appending entries`) is read by benchfmt as a file configuration
 // line, and without the strip every later result — and the stored recording —
 // would carry transient log text as durable configuration, fragmenting `stat`
@@ -359,7 +359,7 @@ ok  	example/p	1.234s
 	}
 }
 
-// TestRecordingConfigKeySetIsClosed is INV-12's anchor: composing a parsed
+// TestRecordingConfigKeySetIsClosed is REQ-pew-key-set's anchor: composing a parsed
 // stream (foreign keys stripped) with everything the run path appends yields
 // serializable (File:true) config drawn only from the closed set — the
 // toolchain's four keys, pew's provenance and guard keys, and `pure`. The
@@ -697,7 +697,7 @@ func TestLedgerCodecRefusals(t *testing.T) {
 // The stream's toolchain keys are verified against out-of-band truth: a
 // dependency's logger can emit the same shape the toolchain does, and
 // benchfmt's same-key overwrite would record the spoof (spec §5,
-// INV-12's value-trust arm). cpu has no out-of-band truth; consistency
+// REQ-pew-key-set's value-trust arm). cpu has no out-of-band truth; consistency
 // across one stream is its enforceable bound.
 func TestVerifyToolchainConfigRefusesSpoofedValues(t *testing.T) {
 	parse := func(src string) []*benchfmt.Result {

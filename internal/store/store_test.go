@@ -108,7 +108,7 @@ func TestRawFormatRejectsDuplicateRecordingKeys(t *testing.T) {
 }
 
 // TestIsRecordingShapeRequiresRunConditions: the run-conditions line is a
-// mandatory provenance field (spec §5, §9, INV-4) — a recording without it is
+// mandatory provenance field (spec §5, §9, REQ-pew-provenance-completeness) — a recording without it is
 // stale (format), like any other missing mandatory field.
 func TestIsRecordingShapeRequiresRunConditions(t *testing.T) {
 	recs := parse(t, sample)
@@ -225,7 +225,7 @@ func TestWriteBatchCommitFailureRestoresPriorRecordings(t *testing.T) {
 }
 
 // TestRoundTrip: write parsed results, read them back, and confirm the recording
-// is parseable (INV-3) and stable across a second round-trip.
+// is parseable (REQ-pew-artifact-format) and stable across a second round-trip.
 func TestRoundTrip(t *testing.T) {
 	s := New(t.TempDir())
 	want := parse(t, sample)
@@ -233,7 +233,7 @@ func TestRoundTrip(t *testing.T) {
 	if err := s.Write("internal/foo", "BenchmarkRun", "", want); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	got, err := s.Read("internal/foo", "BenchmarkRun", "") // succeeds ⇒ benchfmt-parseable (INV-3)
+	got, err := s.Read("internal/foo", "BenchmarkRun", "") // succeeds ⇒ benchfmt-parseable (REQ-pew-artifact-format)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestRoundTrip(t *testing.T) {
 	sameResults(t, got, got2)
 }
 
-// TestProvenanceRoundTrip enforces INV-4: every provenance key written is
+// TestProvenanceRoundTrip enforces REQ-pew-provenance-completeness: every provenance key written is
 // recoverable on read, byte-for-byte.
 func TestProvenanceRoundTrip(t *testing.T) {
 	s := New(t.TempDir())
@@ -663,7 +663,7 @@ func TestParseLiftsOversizedConfigLine(t *testing.T) {
 // Read-time foreign-key detection: a recording written before the
 // closed-set enforcement (or hand-edited) carries keys that fragment
 // comparison grouping silently; detection is the read-time trust
-// residual (spec §5, INV-12's read arm).
+// residual (spec §5, REQ-pew-key-set's read arm).
 func TestForeignConfigKeysDetectsHistoricalJunk(t *testing.T) {
 	recs := parse(t, "goos: linux\npkg: example.com/p\ninjected: junk\npew-format: 2\nBenchmarkA-8 1 10 ns/op\n")
 	got := ForeignConfigKeys(recs)

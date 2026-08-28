@@ -1,0 +1,18 @@
+# proto-file: proto/stipulator/v1/policy.proto
+# proto-message: stipulator.v1.TestPolicy
+
+invocations {
+  name: "plain"
+  timeout {
+    seconds: 3600
+  }
+  go {
+    packages: "./..."
+    args: "-test.timeout=30m"
+    # Reviewed race-free admission: the standing testing rule keeps the
+    # race detector off without explicit authorization, and this
+    # invocation's plain evidence is deliberately accepted as witness
+    # evidence in its place.
+    plain_witness: true
+  }
+}

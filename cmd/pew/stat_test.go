@@ -1047,7 +1047,7 @@ func TestNonValidUsesLabel(t *testing.T) {
 	}
 }
 
-// TestRunConditionsDoNotAffectValidity is INV-9's validity anchor: two
+// TestRunConditionsDoNotAffectValidity is REQ-pew-runconditions-provenance's validity anchor: two
 // recordings identical except for their recorded run conditions get the same
 // verdict — run conditions are provenance, never a staleness guard (§8, §9).
 func TestRunConditionsDoNotAffectValidity(t *testing.T) {
