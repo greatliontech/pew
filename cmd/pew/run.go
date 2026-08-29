@@ -55,7 +55,8 @@ func newRunCmd() *cobra.Command {
 	var assumePure, impure []string
 	cmd := &cobra.Command{
 		Use:   "run [packages]",
-		Short: "Run benchmarks with hygiene and store results",
+		Short: guidanceShort("run"),
+		Long:  guidanceHelp("run"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rc.pure, rc.impure = toSet(assumePure), toSet(impure)
 			for b := range rc.pure {

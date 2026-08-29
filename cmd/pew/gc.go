@@ -22,15 +22,8 @@ func newGCCmd() *cobra.Command {
 	var benchDir string
 	cmd := &cobra.Command{
 		Use:   "gc",
-		Short: "Remove stored results for benchmarks no longer in the code",
-		Long: `Remove stored benchmark results whose benchmark no longer exists.
-
-pew gc scans ./... in the current module, enumerates top-level benchmark
-declarations in package test files, and deletes matching pew recording files for
-packages or benchmarks that disappeared. Build-tagged benchmark declarations are
-counted as present so gc does not remove recordings for a variant just because
-the current build config hides it. Files under bench-dir that do not match pew's
-recording layout are ignored.`,
+		Short: guidanceShort("gc"),
+		Long:  guidanceHelp("gc"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runGC(cmd.OutOrStdout(), benchDir)
 		},

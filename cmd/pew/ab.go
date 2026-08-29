@@ -112,16 +112,9 @@ func newABCmd() *cobra.Command {
 	ac := abConfig{}
 	cmd := &cobra.Command{
 		Use:   "ab [packages]",
-		Short: "A/B-compare the working tree against a ref without touching either",
-		Long: "Benchmarks the uncommitted working tree (side A) against a ref (side B,\n" +
-			"default HEAD) materialized in a temporary git worktree: both sides build\n" +
-			"first, runs interleave A/B per iteration so machine drift cancels instead\n" +
-			"of folding into the delta, and the repository stays writable throughout —\n" +
-			"no stash cycle, no tree mutation, crash-safe by construction. The verdict\n" +
-			"uses the same significance machinery as stat. Output is a derivation\n" +
-			"artifact, never a stat baseline: nothing is written to the recording\n" +
-			"store (spec §12).",
-		Args: cobra.ArbitraryArgs,
+		Short: guidanceShort("ab"),
+		Long:  guidanceHelp("ab"),
+		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAB(cmd.OutOrStdout(), cmd.ErrOrStderr(), ac, args)
 		},

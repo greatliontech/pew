@@ -37,18 +37,9 @@ func newStatCmd() *cobra.Command {
 	var gate string
 	cmd := &cobra.Command{
 		Use:   "stat [ref | refA refB]",
-		Short: "Compare recorded benchmarks across git refs and flag regressions",
-		Long: `Compare recorded benchmarks and flag regressions (spec §10).
-
-The baseline mode follows the number of refs:
-  pew stat              auto:   working-tree recording vs the HEAD-committed one
-  pew stat <ref>        pinned: working-tree recording vs <ref>'s
-  pew stat <refA> <refB> A/B:    <refA>'s recording vs <refB>'s
-
-pew stat does not run benchmarks; it compares already-stored results (run them
-with 'pew run' first). It inventories stored recording paths from the selected
-refs and working-tree store.`,
-		Args: cobra.MaximumNArgs(2),
+		Short: guidanceShort("stat"),
+		Long:  guidanceHelp("stat"),
+		Args:  cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := resolveVouches(); err != nil {
 				return err

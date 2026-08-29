@@ -41,7 +41,8 @@ func newStatusCmd() *cobra.Command {
 	var jsonOut bool
 	cmd := &cobra.Command{
 		Use:   "status [packages]",
-		Short: "Report each benchmark as valid / stale / unverifiable / unrecorded",
+		Short: guidanceShort("status"),
+		Long:  guidanceHelp("status"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := resolveVouches(); err != nil {
 				return err

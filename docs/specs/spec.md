@@ -948,78 +948,44 @@ go-git keeps pew self-contained (`go install` works with no external binary beyo
 
 ## 12. CLI surface
 
-Five commands; names follow the `go test` / benchstat idiom.
+Five commands — `ab`, `run`, `status`, `stat`, `gc` — plus
+`guidance`; names follow the `go test` / benchstat idiom. Verb-level
+served prose (what a verb does, what a knob controls, when to use
+which) lives in the guidance document (`docs/guidance.md`, the fleet
+format gofresh's guidance spec defines) and is served from the tool
+itself per REQ-pew-guidance (§13); this section states the surface's
+wire and exit contracts, which the guidance document narrates but
+never overrides.
 
-- **`pew ab [packages] [flags]`** — A/B-compare the uncommitted working tree (side A) against a
-  git rev (side B, `--ref`, default `HEAD`) without touching either: side B materializes in a
-  disposable detached worktree created beside the repository on the same filesystem — a
-  benchmark keeping its media package-dir-relative measures that filesystem's storage, and an
-  OS-temp worktree on a tmpfs host would hand side B RAM-backed durability while side A pays
-  the disk — both sides build before either measures, and executions
-  interleave A/B per iteration (`--count`, default 6) so slow machine drift cancels instead of
-  folding into the measured delta (A leads each pair, so only the first sample of one side
-  carries the cold-start boundary) — statistically stronger than any block-ordered stash cycle,
-  and crash-safe by construction (a killed run leaves a removable worktree, never a stashed
-  tree; the repository stays writable throughout). Each side runs from its own tree so
-  cwd-sensitive benchmarks resolve correctly. Machine hygiene is §9's (`--pin`, `--strict`,
-  the throttle bracket). The verdict uses §10's significance machinery with side B as base;
-  §10.1's comparison guards apply, so ab captures each side's guard values in that side's own
-  tree at build time, before measurement — the repository stays writable throughout, and the
-  stamps must describe the binaries actually built, not a later edit — (per-side toolchain and
-  build-config identity — a ref pinning a different toolchain or shipping different PGO bytes
-  refuses with the mismatch named; machine and runtime-config are shared process facts) and
-  stamps them onto the parsed rows — raw `go test` streams carry no guard provenance of their
-  own.
-  Nothing is written to the recording store: the output is a derivation artifact, and `--out`
-  stores both raw streams in one file marked `pew-ab`/`dirty` — by shape never a stat baseline.
-  `--bench`, `--benchtime`, `--benchmem` select and shape the measurement per side.
-
-- **`pew run [packages] [flags]`** — run with hygiene (§9), store (overwrite, in-band provenance §5).
-  - selection: `[packages]` (default `./...`), `--bench <pat>` (default `.`)
-  - **`--stale`** — (re)run only benchmarks currently `stale` / `unverifiable` / `unrecorded`; skip
-    `valid` ones (the reuse-don't-rerun win; shares the `status` closure-analysis path). This filter
-    intersects the independent `--bench` selection and never adds or records an excluded benchmark.
-  - hygiene: `--count` (10), `--benchtime` (1s), `--pin`, `--strict` (§9)
-  - **`--vouch IMPORT-PATH:VARIABLE`** (repeatable, also on `status`/`stat`): a version-pinned
-    dependency variable accepted as stable after initialization (gofresh's vouch contract; the
-    colon pair makes a bare package unrepresentable); discharges exactly that variable's
-    shared-dynamic-state downgrade, the load-bearing set recorded as `pew-vouches`
-  - storage: `--bench-dir <dir>` (default `<module>/benchmarks`), `--label <name>` (§6); a run
-    minting a new GOMAXPROCS variant lineage for a benchmark already on record (result names
-    embed the suffix, e.g. a `--pin` narrower than the recorded runs') warns at record time —
-    §10.1's grouping never bridges the suffix, and the operator must not learn that from a
-    later `stat` after the measurement time is spent. A warning, never a refusal;
-    purity overrides: `--assume-pure <bench>` (§7.5), `--impure <bench>` (§7.3). Both assertions
-    also have durable in-code forms honored by the shared engine: `//gofresh:pure` and
-    `//gofresh:external` (§7.3, §7.5).
-- **`pew status [packages]`** — per-benchmark verdict: `valid` / `stale ⟨reason⟩` /
-  `unverifiable ⟨reason⟩` / `unrecorded`. `--stale` filters to non-valid (scriptable; feeds
-  `run --stale`). **`--explain`** details each non-valid verdict: every guard's recorded vs
-  current value, the closure hash, the runtime-input digest, and the manifest's watched
-  identities — environment inputs disclosed as names with digest equality only, never values
-  (§7.8); a digest mismatch additionally names the moved watched inputs themselves,
-  best-effort over the manifest's per-input digests — environment entries as names, values
-  never. Supports
-  `--bench-dir <dir>` and `--label <name>` (§6).
-- **`pew stat [ref | refA refB] [flags]`** — compare; the three baselines (§10) fall out of arg
-  count (none → auto, one → pinned, two → A/B). `--fail-on-regression`, `--threshold` (3%),
-  `--alpha` (0.05), metric selection (§10.1). **`--explain`** lays out the values behind a
-  one-word skip or warning: a comparison key whose two sides disagree on a guard prints both
-  sides' recorded guard values side by side naming the moving guard, and a working-tree recording
-  warned non-valid prints the recorded-vs-current explanation below. Supports `--bench-dir <dir>`
-  and `--label <name>`.
-- **`pew gc`** — remove stored results for benchmarks no longer present in the code. Supports
-  `--bench-dir <dir>`. A pew recording that fails the current format (§5) is never silently
-  skipped: when its benchmark is also gone from the source it is removed like any other orphan (an
-  old-shape recording can never be reused — regeneration is the only path, and there is nothing
-  left to regenerate); when its benchmark still exists it is kept and reported as stale (format),
-  pointing at `pew run`. What counts as a pew recording here is the pew marker: any pew-owned
-  (`pew-`-prefixed) configuration key, which benchmark output can never define (§5) — a
-  layout-matching file without one is foreign and ignored, whatever its shape. A recording file
-  that cannot be read or parsed at all is kept and reported with its error — removal never acts
-  on unread content. A package whose benchmark-source scan fails keeps all its recordings behind
-  the reported scan error: the error line is those recordings' report, and per-recording
-  dispositions resume once the scan succeeds.
+Behavioral contracts the commands hold: `ab` materializes side B in
+a disposable detached worktree beside the repository on the same
+filesystem, builds both sides before either measures, interleaves
+executions A/B per iteration with A leading each pair, captures each
+side's comparison-guard values in that side's own tree at build
+time and stamps them onto the parsed rows — raw `go test` streams
+carry no guard provenance of their own, so the stamps are the only
+path ab rows carry the provenance §10.1's comparison guards judge —
+refuses a ref pinning a different toolchain or PGO bytes with the
+mismatch named, runs under §9's machine-hygiene regime per side (the
+pin and strict knobs and the throttle bracket, exactly as on `run`),
+and writes nothing to the recording store — its `--out` file is
+marked `pew-ab`/`dirty`, by shape never a stat baseline. `run` stores with overwrite and in-band provenance (§5),
+records the one pre-run observation that drove the quiesce gate as
+the run-conditions line (§9), warns (never refuses) at record time
+when a run mints a new GOMAXPROCS variant lineage for a benchmark
+already on record, and honors the durable in-code purity forms
+(`//gofresh:pure`, `//gofresh:external`; §7.3, §7.5) beside the
+per-run overrides. `status` and `stat` share the closure-analysis
+path with `run --stale`'s filter; `--explain` discloses environment
+inputs as names with digest equality only, never values (§7.8), and
+is mutually exclusive with `--json`. `gc` acts only on read and
+parsed pew-marked recordings — the marker is any pew-owned
+(`pew-`-prefixed) configuration key, which benchmark output can
+never define (§5) — gone-from-source format-failing
+recordings are removed, still-present ones are kept and reported
+stale (format), unreadable files are kept behind their error, and a
+failed benchmark-source scan holds the package's recordings behind
+the reported scan error.
 
 **Machine-readable output.** `status --json` and `stat --json` emit one JSON object per line; the
 field names are public surface and stable. `status` rows carry `package`, `benchmark`, `label`
@@ -1046,6 +1012,21 @@ Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred
 `docs/issues/`.
 
 ## 13. Project invariants
+
+**REQ-pew-guidance** (behavior): Tool-level served prose MUST be the
+embedded guidance document's projections (`docs/guidance.md`, in the
+fleet format gofresh's guidance spec defines): every command Short
+and Long is the document's rendering for the cli surface (the Long
+the knobless help rendering — cobra renders its own flag list), and
+a `guidance` command (its verb positional) serves a verb's full
+section or, verbless, the decision map — refusing an unknown verb
+with the decision map named as the way to enumerate. The cli binds
+the per-surface coverage judgment: every visible leaf command and
+local flag documented exactly, both directions — cobra's help and
+completion plumbing is surface plumbing outside the judgment. The
+document's knob prose is the authoritative superset; flag usage
+strings stay terse wire detail, and a usage string contradicting
+the document is a defect of whichever is wrong.
 
 
 **REQ-pew-closure-soundness** (behavior): **Closure soundness (`valid` requires proof).** pew MUST report `valid` only when all six guards (§7) provably hold over a closure that is a *superset* of the source able to affect `B`'s performance. Every blind spot is **resolved** to a precise edge, **widened** to the maximal non-std closure, or **downgraded** to `unverifiable` — never silently dropped, never narrowing the covered set. An unresolved blind spot yields `unverifiable` unless an applicable explicit purity assertion accepts responsibility for that disposition; purity never waives the six guards. The six-guard predicate is itself computed only under a provenance-sound engine (§7's toolchain-provenance prerequisite): a verdict-computing invocation whose ambient toolchain skews from the binary's compiled-in frontend refuses outright rather than judging over misread sources. *Violation (strongest):* a reachable `const`/type/embed `B` depends on changes while `B`'s call graph is byte-identical, the closure hash is unchanged, and `B` is reported `valid` → silent regression behind a stale baseline (the core failure pew exists to prevent). *Kind:* entailed.
