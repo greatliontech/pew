@@ -35,6 +35,15 @@ jobs:
           go-version: stable
       - run: go build ./...
       - run: go vet ./...
+      # The fast tier first: the tool's code without a benchmark or a
+      # fixture-package load. Every test that runs go test, loads a
+      # fixture through the toolchain, or measured heavy is -short-gated,
+      # so this step fails on a code defect before the minutes-class
+      # tier below spends its budget. Measured 2026-09-03 on the 24-core
+      # dev host, warm: 2.1s wall (cmd/pew 0.55s). On a cold runner the
+      # step is build-bound (9 test binaries, fixtures included) — that
+      # build is reused by the full step, so it is moved, not added.
+      - run: go test -short ./... -count=1 -timeout=5m
       # Suite budget measured 2026-08-27 on the 24-core dev host under
       # UPSTREAM stock go1.27.0 (fork-vs-stock measured at n=1 per arm:
       # -2.1..-4.4% on the three long suites, +19% on pew's 83s arm —
@@ -97,5 +106,7 @@ jobs:
         run: go version && go build ./...
       - if: steps.rc.outputs.version != ''
         run: go vet ./...
+      - if: steps.rc.outputs.version != ''
+        run: go test -short ./... -count=1 -timeout=5m
       - if: steps.rc.outputs.version != ''
         run: go test ./... -count=1 -timeout=15m

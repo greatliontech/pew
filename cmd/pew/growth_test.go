@@ -27,6 +27,9 @@ import (
 // with the compartment (a forged toolchain) cannot hide behind the
 // compartment verdict.
 func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
+	}
 	tmp := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod": "module example.com/grow\n\ngo 1.24\n",

@@ -107,6 +107,9 @@ func TestTestArgs(t *testing.T) {
 }
 
 func TestExecuteDerivesCommandEnvironment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs a toolchain child (go run)")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/commandenv\n\ngo 1.26.4\n"), 0o644); err != nil {
 		t.Fatal(err)

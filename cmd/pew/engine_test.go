@@ -12,6 +12,9 @@ import (
 // build their engine here): a directive-pure benchmark whose closure reaches file
 // I/O checks valid, where an engine without the directive scan reports unverifiable.
 func TestNewEngineHonorsDirectives(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
+	}
 	const pkg = "github.com/greatliontech/pew/internal/fixtures/purebench"
 	const bench = "BenchmarkPureRead"
 	e, _, err := newEngineAt(".", ".", false, os.Environ())

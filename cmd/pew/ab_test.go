@@ -53,6 +53,9 @@ func abFixtureRepo(t *testing.T) string {
 // per iteration (block ordering folds machine drift into the delta),
 // each side runs from its own tree, and the report names the sides.
 func TestABInterleavesAfterBothSidesBuild(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture through the toolchain (go list, go env) with the build and execute seams stubbed")
+	}
 	dir := abFixtureRepo(t)
 	prior, err := os.Getwd()
 	if err != nil {

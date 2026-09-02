@@ -6,10 +6,15 @@ tasks:
     cmds:
       - go build -o bin/pew ./cmd/pew
 
-  test:
-    desc: Run all tests
+  test:short:
+    desc: "The fast tier: the tool's code without a benchmark or a fixture-package load (seconds; the inner-loop gate)"
     cmds:
-      - go test ./...
+      - go test -short -count=1 ./...
+
+  test:
+    desc: "The full tier: fixture-driven runs and the analysis canaries (minutes; the merge gate, budget in .github/workflows/ci.yaml)"
+    cmds:
+      - go test -count=1 -timeout=15m ./...
 
   test:race:
     desc: Run tests with the race detector
@@ -27,8 +32,8 @@ tasks:
       - go mod tidy
 
   check:
-    desc: Vet + test
-    deps: [vet, test]
+    desc: Vet + the fast tier
+    deps: [vet, test:short]
 
   install:
     cmds:

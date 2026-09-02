@@ -327,6 +327,9 @@ func TestStatABDoesNotDiscoverSiblingModuleOutsideCurrentScope(t *testing.T) {
 }
 
 func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
+	}
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statdirective\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "lib.go"), "package statdirective\n\nfunc fixturePath() string { return \"fixture.txt\" }\n")
@@ -416,6 +419,9 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 // strategy)"), never compared as a baseline, because its verdicts were
 // not this engine's (spec §5's pew-dynamic-state comparison clause).
 func TestStatRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
+	}
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statstrategy\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "bench_test.go"), "package statstrategy\n\nimport \"testing\"\n\nfunc BenchmarkNop(b *testing.B) { for range b.N {} }\n")
@@ -987,6 +993,9 @@ func TestIsDirty(t *testing.T) {
 }
 
 func TestNonValidUsesLabel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
+	}
 	e, err := gofresh.New()
 	if err != nil {
 		t.Fatalf("New engine: %v", err)
@@ -1051,6 +1060,9 @@ func TestNonValidUsesLabel(t *testing.T) {
 // recordings identical except for their recorded run conditions get the same
 // verdict — run conditions are provenance, never a staleness guard (§8, §9).
 func TestRunConditionsDoNotAffectValidity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
+	}
 	e, err := gofresh.New()
 	if err != nil {
 		t.Fatalf("New engine: %v", err)
@@ -1142,6 +1154,9 @@ func TestStatABNotesDifferingRunConditions(t *testing.T) {
 // the current machine is stale, which only a Measurement-kind check catches (a
 // code-result check ignores the machine guard).
 func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
+	}
 	e, err := gofresh.New()
 	if err != nil {
 		t.Fatalf("New engine: %v", err)
@@ -1408,6 +1423,9 @@ func TestStatExplainShowsSideBySideGuards(t *testing.T) {
 // working-tree recording warned non-valid prints the recorded-vs-current
 // explanation below the warning.
 func TestStatExplainWorkingTreeStaleness(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
+	}
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statwtexplain\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg_test.go"), "package pkg\n\nimport \"testing\"\n\nfunc BenchmarkWT(b *testing.B) {}\n")

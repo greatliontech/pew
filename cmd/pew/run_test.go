@@ -140,6 +140,9 @@ func TestGitStateCacheExcludesRecordingStoresAcrossModules(t *testing.T) {
 }
 
 func TestRunRunKeepsSharedRepositoryModulesClean(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	// The test writes its own go.work; the ambient GOWORK must not
 	// redirect module resolution (and a workspace-off oracle — gomutant's
 	// ephemeral runs with GOWORK=off — must see the same tree).
@@ -196,6 +199,9 @@ func TestRunRunKeepsSharedRepositoryModulesClean(t *testing.T) {
 }
 
 func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod":                "module example.com/incompleterun\n\ngo 1.26.4\n",
@@ -312,6 +318,9 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 // governor equality check in TestRunRecordsIncompleteRuntimeEvidence adds the
 // live-host layer where a governor signal exists).
 func TestRunPackageRecordsProvidedConditions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod":        "module example.com/condwire\n\ngo 1.26.4\n",
@@ -380,6 +389,9 @@ func TestRunPackageRecordsProvidedConditions(t *testing.T) {
 // throttled=true and warns after the measurement; under --strict the suspect
 // measurement is refused with nothing recorded.
 func TestRunPackageRecordsThrottleDelta(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod":        "module example.com/throttlewire\n\ngo 1.26.4\n",
@@ -553,6 +565,9 @@ func assertRunConditionsLine(t *testing.T, bench, value string) {
 // covers the content the compile consumed, not the flag text. An unreadable
 // named profile fails engine construction closed.
 func TestRunPackagePGOContentMovesBuildconfig(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	var probeEnv []string
 	for _, entry := range os.Environ() {
 		if !strings.HasPrefix(entry, "GOFLAGS=") {
@@ -671,6 +686,9 @@ func generateCPUProfile(t *testing.T) []byte {
 // so its content digest must ride the recorded buildconfig — regenerating the
 // profile moves the guard with no flag change anywhere.
 func TestRunPackageDefaultPGOMovesBuildconfig(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod":        "module example.com/pgomain\n\ngo 1.26.4\n",
@@ -762,6 +780,9 @@ func TestRunPackageDefaultPGOMovesBuildconfig(t *testing.T) {
 // recorded digest describe bytes the compile never consumed, so the package
 // is refused and nothing is recorded.
 func TestRunPackageRefusesPGOProfileDrift(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod":        "module example.com/pgodrift\n\ngo 1.26.4\n",
@@ -834,6 +855,9 @@ func TestRunPackageRefusesPGOProfileDrift(t *testing.T) {
 // the offending lines surfaced, while the package's clean benchmark records
 // normally — and its recording carries no salvage artifacts.
 func TestRunPackageSalvagesCorruptStream(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod": "module example.com/corruptstream\n\ngo 1.26.4\n",
@@ -942,6 +966,9 @@ func TestRunPackageSalvagesCorruptStream(t *testing.T) {
 // nothing else refuses it. The run must record the benchmark without the
 // foreign key and name the dropped key on stderr.
 func TestRunPackageDropsForeignStreamConfig(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod": "module example.com/foreignconfig\n\ngo 1.26.4\n",
@@ -1017,6 +1044,9 @@ func TestRunPackageDropsForeignStreamConfig(t *testing.T) {
 // benchmark records nothing while its sibling — a separate process with a
 // clean stream — records normally.
 func TestRunPackageRefusesUnattributableOrphan(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod": "module example.com/orphantail\n\ngo 1.26.4\n",
@@ -1082,6 +1112,9 @@ func TestRunPackageRefusesUnattributableOrphan(t *testing.T) {
 }
 
 func TestRunStaleIntersectsBenchmarkPattern(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod":        "module example.com/stalefilter\n\ngo 1.26.4\n",
@@ -1127,6 +1160,9 @@ func TestRunStaleIntersectsBenchmarkPattern(t *testing.T) {
 }
 
 func TestSourceInputsDirtyIncludesIgnoredAndMetadataStableSource(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		".gitignore":     "generated.go\n",
@@ -1250,6 +1286,9 @@ func TestRunRunReturnsErrorOnPackageFailure(t *testing.T) {
 // regressed to the fallback (whose manifest carries no path); the
 // alias assertion independently kills the revert.
 func TestRunObservesThroughSymlinkedModule(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	real := filepath.Join(t.TempDir(), "real")
 	if err := os.MkdirAll(filepath.Join(real, "getwd"), 0o755); err != nil {
 		t.Fatal(err)
@@ -1332,6 +1371,9 @@ func TestRunObservesThroughSymlinkedModule(t *testing.T) {
 // created-and-removed scratch leaves no manifest identities, while the
 // identical bench without the declaration records them (spec §7.8).
 func TestRunScratchDirectiveKeepsManifestClean(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	benchBody := `package p
 
@@ -1489,6 +1531,9 @@ func TestRejectStoreCoveredSources(t *testing.T) {
 // shared-process model serves one union manifest to every sibling, so this
 // fails there by construction.
 func TestRunPerArmRuntimeManifestAttribution(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod": "module example.com/armattrib\n\ngo 1.26.4\n",
@@ -1560,6 +1605,9 @@ func TestRunPerArmRuntimeManifestAttribution(t *testing.T) {
 // leak into the observed metric; in per-benchmark processes the counter is
 // untouched at observation time, so the recorded metric is exactly zero.
 func TestRunSingleSubjectProcessIsolation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod": "module example.com/procisolation\n\ngo 1.26.4\n",
@@ -1621,6 +1669,9 @@ func TestRunSingleSubjectProcessIsolation(t *testing.T) {
 // records nothing, the sibling arm's process records a complete well-formed
 // recording, and the command still reports the failure and exits non-zero.
 func TestRunFailingArmDiscardsOnlyItsRecording(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod": "module example.com/armfail\n\ngo 1.26.4\n",
@@ -1688,6 +1739,9 @@ func TestRunFailingArmDiscardsOnlyItsRecording(t *testing.T) {
 // throttled benchmark, and the invocation order is one build followed by a
 // snapshot/measure/snapshot bracket per arm.
 func TestRunPackagePerArmThrottleAttribution(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture through the toolchain (go list, the engine) with the execute seam stubbed")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod": "module example.com/armthrottle\n\ngo 1.26.4\n",
@@ -1796,6 +1850,9 @@ func TestRunPackagePerArmThrottleAttribution(t *testing.T) {
 // records, and the package error names BOTH facts about the broken arm: the
 // process failure and the moved state bracket, neither masking the other.
 func TestRunFailingArmResidueRefusesOnlyItsArm(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod": "module example.com/armresidue\n\ngo 1.26.4\n",
@@ -1865,6 +1922,9 @@ func TestRunFailingArmResidueRefusesOnlyItsArm(t *testing.T) {
 // as a parseable foreign row and refuses the arm — never a stderr warning
 // that lets the arm record.
 func TestRunPackageRefusesForeignCorruptEvidence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture through the toolchain (go list, the engine) with the execute seam stubbed")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod": "module example.com/foreigncorrupt\n\ngo 1.26.4\n",
@@ -1951,6 +2011,9 @@ func TestRunPackageRefusesForeignCorruptEvidence(t *testing.T) {
 // arm's brackets form, so the sibling's recording and manifest are
 // independent of sibling order.
 func TestRunPerArmScratchSweepIsolation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod": "module example.com/armsweep\n\ngo 1.26.4\n",

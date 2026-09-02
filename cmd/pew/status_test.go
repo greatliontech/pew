@@ -21,6 +21,9 @@ import (
 // the verdict is checked against the labeled recording, so a benchmark recorded
 // only under a label is unrecorded without --label and visible with it.
 func TestStatusPackageUsesLabel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
+	}
 	e, err := gofresh.New()
 	if err != nil {
 		t.Fatalf("New engine: %v", err)
@@ -86,6 +89,9 @@ func TestStatusPackageUsesLabel(t *testing.T) {
 // unverifiable (external directive) against a recording whose every hashable
 // guard holds, and a recorded pure: true assertion never upgrades it.
 func TestStatusHonorsExternalDirective(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod": "module example.com/extstatus\n\ngo 1.26.4\n",
@@ -171,6 +177,9 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 // table naming the moving guard, and the runtime manifest's watched
 // identities are disclosed as identities only.
 func TestStatusExplainNamesTheMovingGuard(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
+	}
 	e, _, err := newEngineAt(".", ".", false, os.Environ())
 	if err != nil {
 		t.Fatal(err)
@@ -241,6 +250,9 @@ func TestStatusExplainNamesTheMovingGuard(t *testing.T) {
 // moved, over the manifest's per-input digests - environment entries as
 // names only, the observed value never disclosed (§7.8).
 func TestStatusExplainNamesMovedInputs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
+	}
 	e, _, err := newEngineAt(".", ".", false, os.Environ())
 	if err != nil {
 		t.Fatal(err)
@@ -384,6 +396,9 @@ func TestStatusJSONLabelAndErrorRows(t *testing.T) {
 // (spec §5's read arm) - detection at every verdict read, regeneration
 // the remediation.
 func TestStatusWarnsOnForeignConfigKeys(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
+	}
 	e, err := gofresh.New()
 	if err != nil {
 		t.Fatalf("New engine: %v", err)
@@ -439,6 +454,9 @@ func TestStatusWarnsOnForeignConfigKeys(t *testing.T) {
 // stays a recognized recording (never alien), it is simply re-measured,
 // no back-fill (spec §5's pew-dynamic-state row).
 func TestStatusRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
+	}
 	e, err := gofresh.New()
 	if err != nil {
 		t.Fatalf("New engine: %v", err)

@@ -16,6 +16,9 @@ import (
 // every test, so a new Go release's shape breakage fails HERE as a
 // named canary instead of a stale-store field session.
 func TestLanguageShapeCanaries(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a temp module per shape-corpus entry (the full tier and the rc leg run it)")
+	}
 	for _, entry := range shapecorpus.Entries() {
 		t.Run(entry.Name, func(t *testing.T) {
 			dir := t.TempDir()
