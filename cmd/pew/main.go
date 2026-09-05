@@ -11,7 +11,13 @@ import (
 )
 
 func main() {
-	if err := newRootCmd().Execute(); err != nil {
+	// Every verb reports the stretch in flight on the one cadence (spec
+	// REQ-pew-progress); the reporter stops before the error prints,
+	// on every path — cobra runs no post-run hook for a failing verb.
+	stop := startReporter(os.Stderr, progressCadence)
+	err := newRootCmd().Execute()
+	stop()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "pew:", err)
 		os.Exit(exitCode(err))
 	}
@@ -25,6 +31,10 @@ func exitCode(err error) int {
 	var empty *nothingComparedError
 	if errors.As(err, &empty) {
 		return 2
+	}
+	var stopped *interruptedError
+	if errors.As(err, &stopped) {
+		return 130
 	}
 	return 1
 }

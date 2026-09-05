@@ -86,26 +86,21 @@ func (ac abConfig) snapshotThrottle() run.ThrottleSnapshot {
 	return run.SnapshotThrottle()
 }
 
-func (ac abConfig) executeBinary(dir, pin string, env []string, bin string, args []string) ([]byte, error) {
+func (ac abConfig) executeBinary(ctx context.Context, dir, pin string, env []string, bin string, args []string) ([]byte, error) {
 	if ac.execute != nil {
 		return ac.execute(dir, pin, env, bin, args)
 	}
-	return run.ExecuteBinary(dir, pin, env, bin, args)
+	return run.ExecuteBinaryContext(ctx, dir, pin, env, bin, args)
 }
 
-func (ac abConfig) buildBinary(dir string, env []string, args []string) error {
+func (ac abConfig) buildBinary(ctx context.Context, dir string, env []string, args []string) error {
 	if ac.build != nil {
 		return ac.build(dir, env, args)
 	}
-	cmd := exec.Command("go", args...)
-	resolved := gotool.CommandDir(dir)
-	cmd.Dir = resolved
-	cmd.Env = gotool.CommandEnvironment(env, resolved)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("ab: go %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	// The same process-group runner the measurements use: a cancelled
+	// build takes its compile and link children with it and reports the
+	// cancellation, not a build failure.
+	return run.BuildContext(ctx, dir, env, args)
 }
 
 func newABCmd() *cobra.Command {
@@ -124,7 +119,9 @@ func newABCmd() *cobra.Command {
 			if err := validateBenchmarkPattern(ac.bench); err != nil {
 				return err
 			}
-			return runAB(cmd.OutOrStdout(), cmd.ErrOrStderr(), ac, args)
+			ctx, stop := commandContext(cmd)
+			defer stop()
+			return runAB(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), ac, args)
 		},
 	}
 	f := cmd.Flags()
@@ -139,10 +136,11 @@ func newABCmd() *cobra.Command {
 	return cmd
 }
 
-func runAB(w, errw io.Writer, ac abConfig, patterns []string) error {
+func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []string) error {
 	if ac.count < 1 {
 		return fmt.Errorf("ab: count must be at least 1")
 	}
+	reportPhase("listing")
 	pkgs, err := resolvePackages(patterns)
 	if err != nil {
 		return err
@@ -187,8 +185,12 @@ func runAB(w, errw io.Writer, ac abConfig, patterns []string) error {
 	// 2 × count iterations, and a guard mismatch never reaches a first
 	// iteration.
 	var preps []*abPreparation
-	for _, p := range pkgs {
-		prep, err := prepareABPackage(ac, p, repoRoot, worktree, env)
+	for i, p := range pkgs {
+		if err := ctx.Err(); err != nil {
+			return interrupted("ab: interrupted while preparing %s (package %d/%d); nothing compared", p.ImportPath, i+1, len(pkgs))
+		}
+		reportPhase(fmt.Sprintf("preparing %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
+		prep, err := prepareABPackage(ctx, ac, p, repoRoot, worktree, env)
 		if prep != nil && prep.tmp != "" {
 			defer os.RemoveAll(prep.tmp)
 		}
@@ -197,8 +199,11 @@ func runAB(w, errw io.Writer, ac abConfig, patterns []string) error {
 		}
 		preps = append(preps, prep)
 	}
-	for _, prep := range preps {
-		if err := abPackage(w, errw, ac, prep, env); err != nil {
+	for i, prep := range preps {
+		if err := ctx.Err(); err != nil {
+			return interrupted("ab: interrupted before %s (%d of %d packages compared)", prep.pkg.ImportPath, i, len(preps))
+		}
+		if err := abPackage(ctx, w, errw, ac, prep, i+1, len(preps), env); err != nil {
 			return err
 		}
 	}
@@ -218,7 +223,7 @@ type abPreparation struct {
 // prepareABPackage builds a package's A/B preparation record, firing
 // every refusal the two trees decide before any iteration; a returned
 // record with a temp dir owns it even when the error is non-nil.
-func prepareABPackage(ac abConfig, p pkgMeta, repoRoot, worktree string, env []string) (*abPreparation, error) {
+func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, worktree string, env []string) (*abPreparation, error) {
 	// Each package's own module maps into the worktree - a go.work
 	// pattern can resolve packages from several modules, and a
 	// module outside this repository has no B side to compare.
@@ -264,10 +269,10 @@ func prepareABPackage(ac abConfig, p pkgMeta, repoRoot, worktree string, env []s
 	if pkgRelToModule != "." {
 		relTarget = "./" + filepath.ToSlash(pkgRelToModule)
 	}
-	if err := ac.buildBinary(p.Module.Dir, env, []string{"test", "-c", "-o", prep.binA, relTarget}); err != nil {
+	if err := ac.buildBinary(ctx, p.Module.Dir, env, []string{"test", "-c", "-o", prep.binA, relTarget}); err != nil {
 		return prep, fmt.Errorf("ab: building side A (working tree): %w", err)
 	}
-	if err := ac.buildBinary(sideBModule, env, []string{"test", "-c", "-o", prep.binB, relTarget}); err != nil {
+	if err := ac.buildBinary(ctx, sideBModule, env, []string{"test", "-c", "-o", prep.binB, relTarget}); err != nil {
 		return prep, fmt.Errorf("ab: building side B (%s): %w", ac.ref, err)
 	}
 	// Guards are captured at build time, not after measurement: the stamp
@@ -351,7 +356,7 @@ func abGuardsAgree(importPath, ref string, a, b guard.Guards) error {
 	return nil
 }
 
-func abPackage(w, errw io.Writer, ac abConfig, prep *abPreparation, env []string) error {
+func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPreparation, index, total int, env []string) error {
 	p, sideBPkgDir, binA, binB, guardsA, guardsB := prep.pkg, prep.sideBPkgDir, prep.binA, prep.binB, prep.guardsA, prep.guardsB
 	args := []string{"-test.run=^$", "-test.bench=" + ac.bench, "-test.count=1"}
 	if ac.benchtime != "" {
@@ -367,16 +372,30 @@ func abPackage(w, errw io.Writer, ac abConfig, prep *abPreparation, env []string
 	var outA, outB []byte
 	throttleBase := ac.snapshotThrottle()
 	for i := 0; i < ac.count; i++ {
-		a, err := ac.executeBinary(p.Dir, ac.pin, env, binA, args)
+		// Interruption stops before the next pair; the artifact written
+		// so far stands (spec REQ-pew-interruption).
+		if ctx.Err() != nil {
+			return interrupted("ab: %s: interrupted after %d of %d iterations (the artifact holds them)", p.ImportPath, i, ac.count)
+		}
+		reportPhase(fmt.Sprintf("comparing %s (%d/%d) iteration %d/%d", p.ImportPath, index, total, i+1, ac.count))
+		a, err := ac.executeBinary(ctx, p.Dir, ac.pin, env, binA, args)
 		if err != nil {
 			return fmt.Errorf("ab: side A iteration %d: %w", i+1, err)
 		}
 		outA = append(outA, a...)
-		b, err := ac.executeBinary(sideBPkgDir, ac.pin, env, binB, args)
+		b, err := ac.executeBinary(ctx, sideBPkgDir, ac.pin, env, binB, args)
 		if err != nil {
 			return fmt.Errorf("ab: side B iteration %d: %w", i+1, err)
 		}
 		outB = append(outB, b...)
+		// The artifact is written incrementally, one rewrite per
+		// completed pair, so an interrupted comparison keeps every
+		// iteration it finished (spec REQ-pew-unit-persistence).
+		if ac.out != "" {
+			if err := writeABArtifact(ac.out, p.ImportPath, ac.ref, outA, outB); err != nil {
+				return err
+			}
+		}
 	}
 	throttled := throttleBase.Delta(ac.snapshotThrottle())
 	if throttled != nil && *throttled {
@@ -420,9 +439,6 @@ func abPackage(w, errw io.Writer, ac abConfig, prep *abPreparation, env []string
 		return err
 	}
 	if ac.out != "" {
-		if err := writeABArtifact(ac.out, p.ImportPath, ac.ref, outA, outB); err != nil {
-			return err
-		}
 		fmt.Fprintf(errw, "pew: ab artifact written to %s (derivation artifact - never a stat baseline)\n", ac.out)
 	}
 	return nil
@@ -441,7 +457,28 @@ func writeABArtifact(path, importPath, ref string, outA, outB []byte) error {
 	b.Write(outA)
 	b.WriteString("\npew-ab-side: B\n")
 	b.Write(outB)
-	return os.WriteFile(path, []byte(b.String()), 0o644)
+	// Rewritten per completed iteration: the replacement is atomic so a
+	// reader never sees a torn artifact.
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".pew-ab-out-*")
+	if err != nil {
+		return err
+	}
+	if _, err := tmp.WriteString(b.String()); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	// The artifact keeps the mode a plain write would give it, not the
+	// temp file's private one.
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 func gitTopLevel(dir string) (string, error) {

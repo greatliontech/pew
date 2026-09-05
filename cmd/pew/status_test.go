@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -377,7 +378,7 @@ func TestStatusJSONLabelAndErrorRows(t *testing.T) {
 	}
 	withWorkingDir(t, dir)
 	out.Reset()
-	if err := runStatus(&out, "", "", false, false, true, []string{"."}); err != nil {
+	if err := runStatus(context.Background(), &out, "", "", false, false, true, []string{"."}); err != nil {
 		t.Fatalf("runStatus: %v", err)
 	}
 	var row struct {
@@ -512,5 +513,5 @@ func statusPackageOf(w, errw io.Writer, e *gofresh.Engine, benchDir, label strin
 	if err != nil || len(benches) == 0 {
 		return err
 	}
-	return statusPackage(w, errw, e, benchDir, label, staleOnly, explain, jsonOut, p, benches)
+	return statusPackage(context.Background(), w, errw, e, benchDir, label, staleOnly, explain, jsonOut, p, benches)
 }

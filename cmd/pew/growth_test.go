@@ -118,7 +118,7 @@ func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
 	// reports nothing to run and the next verdict is plainly valid. The
 	// rewrite lands under the recording store, which the repository-state
 	// bracket excludes wholesale (spec §5) — no per-write registration.
-	need, err := nonValid(io.Discard, st, e, pkg, "", tmp, "", []string{bench}, nil)
+	need, err := nonValid(context.Background(), io.Discard, st, e, pkg, "", tmp, "", []string{bench}, nil)
 	if err != nil || len(need) != 0 {
 		t.Fatalf("nonValid after inert growth = %v, %v; want none", need, err)
 	}

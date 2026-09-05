@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,7 +59,9 @@ func newStatCmd() *cobra.Command {
 			if err := store.ValidateLabel(sc.label); err != nil {
 				return err
 			}
-			return runStat(cmd.OutOrStdout(), cmd.ErrOrStderr(), sc, args)
+			ctx, stop := commandContext(cmd)
+			defer stop()
+			return runStat(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), sc, args)
 		},
 	}
 	f := cmd.Flags()
@@ -236,7 +239,8 @@ func (b baseline) historicalRefs() []string {
 	return refs
 }
 
-func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
+func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []string) error {
+	reportPhase("listing")
 	bl, err := baselineFor(refs)
 	if err != nil {
 		return err
@@ -258,7 +262,8 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 	if err != nil {
 		return err
 	}
-	modules, err = addHistoricalModules(modules, repo, bl.historicalRefs(), sc, scanRoots)
+	reportPhase("scanning history")
+	modules, err = addHistoricalModules(ctx, modules, repo, bl.historicalRefs(), sc, scanRoots)
 	if err != nil {
 		return err
 	}
@@ -278,7 +283,11 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 	goflagsByModule := map[string]string{}
 	var tally statTally
 
-	for _, m := range modules {
+	for mi, m := range modules {
+		if err := ctx.Err(); err != nil {
+			return interrupted("stat: interrupted before module %s (%d/%d); nothing compared", m.modulePath, mi+1, len(modules))
+		}
+		reportPhase(fmt.Sprintf("reading recordings of %s (%d/%d)", m.modulePath, mi+1, len(modules)))
 		if err := addStatInventory(m, bl, sc.label); err != nil {
 			return err
 		}
@@ -290,7 +299,12 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 		// get neither).
 		newSideIsWorkingTree := bl.newRef == ""
 
-		for _, key := range sortedStatKeys(m.keys) {
+		keys := sortedStatKeys(m.keys)
+		for ki, key := range keys {
+			if err := ctx.Err(); err != nil {
+				return interrupted("stat: interrupted at %s.%s (%d/%d in %s); nothing compared — the comparison is one shot over the whole corpus", key.pkgRel, key.bench, ki+1, len(keys), m.modulePath)
+			}
+			reportPhase(fmt.Sprintf("judging %s.%s (%d/%d in %s)", key.pkgRel, key.bench, ki+1, len(keys), m.modulePath))
 			baseRecs, baseOK, err := m.readSide(bl.baseRef, key.pkgRel, key.bench, key.label)
 			if err != nil {
 				return err
@@ -403,7 +417,7 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 					// stays read-only, so the returned ledger is dropped and
 					// no recording is rewritten here.
 					warnForeignKeys(errw, cur.importPath, key.bench, store.ForeignConfigKeys(newRecs))
-					if v, reason, fp, _, e := verdictForRecs(engine, cur.importPath, cur.moduleDir, key.bench, newRecs); e != nil {
+					if v, reason, fp, _, e := verdictForRecs(ctx, engine, cur.importPath, cur.moduleDir, key.bench, newRecs); e != nil {
 						fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, e)
 					} else if v != verdictValid {
 						msg := string(v)
@@ -555,13 +569,17 @@ func historicalScanRoots(mods []*statModule) ([]string, error) {
 	return roots, nil
 }
 
-func addHistoricalModules(mods []*statModule, repo *gitblob.Repo, refs []string, sc statConfig, scanRoots []string) ([]*statModule, error) {
+func addHistoricalModules(ctx context.Context, mods []*statModule, repo *gitblob.Repo, refs []string, sc statConfig, scanRoots []string) ([]*statModule, error) {
 	byDir := map[string]*statModule{}
 	for _, m := range mods {
 		byDir[m.moduleDir] = m
 	}
 	for _, ref := range refs {
 		for _, root := range scanRoots {
+			if err := ctx.Err(); err != nil {
+				return nil, interrupted("stat: interrupted scanning %s at %s; nothing compared", root, ref)
+			}
+			reportPhase(fmt.Sprintf("scanning %s at %s", root, ref))
 			paths, err := repo.ListAt(ref, root)
 			if err != nil {
 				return nil, err

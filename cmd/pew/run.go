@@ -33,6 +33,10 @@ type runConfig struct {
 	// execute runs one go-test invocation; nil means run.Execute. A seam so
 	// tests can observe invocation order against the throttle bracket.
 	execute func(moduleDir, pin string, env, args []string) ([]byte, error)
+	// beforePersist runs after an arm measured and before its write gate
+	// — the window between the arm's state bracket and its persist. A
+	// seam so tests can move the tree there and pin the gate.
+	beforePersist func(bench string)
 }
 
 func (rc runConfig) snapshotThrottle() run.ThrottleSnapshot {
@@ -42,11 +46,11 @@ func (rc runConfig) snapshotThrottle() run.ThrottleSnapshot {
 	return run.SnapshotThrottle()
 }
 
-func (rc runConfig) executeGo(moduleDir, pin string, env, args []string) ([]byte, error) {
+func (rc runConfig) executeGo(ctx context.Context, moduleDir, pin string, env, args []string) ([]byte, error) {
 	if rc.execute != nil {
 		return rc.execute(moduleDir, pin, env, args)
 	}
-	return run.Execute(moduleDir, pin, env, args)
+	return run.ExecuteContext(ctx, moduleDir, pin, env, args)
 }
 
 func newRunCmd() *cobra.Command {
@@ -80,7 +84,9 @@ func newRunCmd() *cobra.Command {
 			if len(patterns) == 0 {
 				patterns = []string{"./..."}
 			}
-			return runRun(cmd.OutOrStdout(), cmd.ErrOrStderr(), rc, patterns)
+			ctx, stop := commandContext(cmd)
+			defer stop()
+			return runRun(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), rc, patterns)
 		},
 	}
 	f := cmd.Flags()
@@ -109,7 +115,8 @@ func toSet(xs []string) map[string]bool {
 	return m
 }
 
-func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
+func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []string) error {
+	reportPhase("listing")
 	pkgs, err := resolvePackages(patterns)
 	if err != nil {
 		return err
@@ -154,10 +161,14 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 	// toolchain provenance failure aborts the invocation.
 	var failures []string
 	var prepared []*packagePreparation
-	for _, p := range pkgs {
+	for i, p := range pkgs {
 		if p.Module.Dir == "" {
 			continue
 		}
+		if err := ctx.Err(); err != nil {
+			return interrupted("interrupted while preparing %s (package %d/%d); nothing measured", p.ImportPath, i+1, len(pkgs))
+		}
+		reportPhase(fmt.Sprintf("preparing %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
 		prep, err := preparePackage(rc, p, env)
 		if err != nil {
 			var pe *toolchainProvenanceError
@@ -191,11 +202,22 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 	for _, prep := range prepared {
 		_, _ = gc.state(prep.pkg.Module.Dir)
 	}
-	for _, prep := range prepared {
+	for i, prep := range prepared {
 		if len(prep.runBenches) == 0 {
 			continue
 		}
-		if runErr := runPreparedPackage(w, errw, gc, rc, prep, env, conditions); runErr != nil {
+		if err := ctx.Err(); err != nil {
+			return interrupted("interrupted before %s (package %d/%d)%s", prep.pkg.ImportPath, i+1, len(prepared), failedSoFar(failures))
+		}
+		if runErr := runPreparedPackage(ctx, w, errw, gc, rc, prep, env, conditions); runErr != nil {
+			var stopped *interruptedError
+			if errors.As(runErr, &stopped) {
+				// The run ends here with the interruption's own report:
+				// every arm persisted so far is kept, nothing after it
+				// starts, and the packages that failed before it are
+				// still named.
+				return interrupted("%s%s", runErr.Error(), failedSoFar(failures))
+			}
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", prep.pkg.ImportPath, runErr)
 			failures = append(failures, prep.pkg.ImportPath)
 		}
@@ -307,6 +329,15 @@ func (c *gitStateCache) snapshot(moduleDir string) (gitblob.RepositoryState, err
 	return gitblob.Snapshot(moduleDir, c.exclude...)
 }
 
+// failedSoFar names the packages that failed before an interruption,
+// for the interruption's own report.
+func failedSoFar(failures []string) string {
+	if len(failures) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("; %d package(s) failed before it: %s", len(failures), strings.Join(failures, ", "))
+}
+
 // packagePreparation is one package's preparation record (spec
 // REQ-pew-preparation): everything the listing and the flags decide,
 // computed after `go list` and before any engine build or measurement
@@ -383,8 +414,8 @@ func preparePackageWith(rc runConfig, p pkgMeta, newEngine func() (*gofresh.Engi
 	return prep, nil
 }
 
-func runPreparedPackage(w, errw io.Writer, gc *gitStateCache, rc runConfig, prep *packagePreparation, env []string, conditions run.Conditions) error {
-	p, e, st, pkgRel, scratch, runBenches, pgoInput := prep.pkg, prep.engine, prep.st, prep.pkgRel, prep.scratch, prep.runBenches, prep.pgoInput
+func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCache, rc runConfig, prep *packagePreparation, env []string, conditions run.Conditions) error {
+	p, e, st, pkgRel, scratch, runBenches := prep.pkg, prep.engine, prep.st, prep.pkgRel, prep.scratch, prep.runBenches
 	baseline, err := gc.state(p.Module.Dir)
 	if err != nil {
 		return err
@@ -396,7 +427,7 @@ func runPreparedPackage(w, errw io.Writer, gc *gitStateCache, rc runConfig, prep
 	// freshness judgment reads it and the capture reads it — a second
 	// load over the same subjects would only re-derive the first
 	// (REQ-pew-serve-proven).
-	ctx := context.Background()
+	reportPhase("loading " + p.ImportPath)
 	subjects := make([]gofresh.Subject, 0, len(runBenches))
 	for _, name := range runBenches {
 		subjects = append(subjects, gofresh.Subject{Package: p.ImportPath, Symbol: name})
@@ -423,7 +454,7 @@ func runPreparedPackage(w, errw io.Writer, gc *gitStateCache, rc runConfig, prep
 	if !rc.all {
 		// Serve what is proven, measure the rest: a benchmark whose
 		// recording is valid against this view is not re-measured.
-		need, err := nonValid(errw, st, e, p.ImportPath, pkgRel, p.Module.Dir, rc.label, runBenches, view)
+		need, err := nonValid(ctx, errw, st, e, p.ImportPath, pkgRel, p.Module.Dir, rc.label, runBenches, view)
 		if err != nil {
 			return err
 		}
@@ -483,7 +514,8 @@ func runPreparedPackage(w, errw io.Writer, gc *gitStateCache, rc runConfig, prep
 	warmupPath := warmup.Name()
 	_ = warmup.Close()
 	defer os.Remove(warmupPath)
-	if _, err := rc.executeGo(p.Module.Dir, "", env, run.BuildArgs(p.ImportPath, warmupPath)); err != nil {
+	reportPhase("building " + p.ImportPath)
+	if _, err := rc.executeGo(ctx, p.Module.Dir, "", env, run.BuildArgs(p.ImportPath, warmupPath)); err != nil {
 		return err
 	}
 	// Environment truths are per package, not per process: the classification
@@ -508,112 +540,59 @@ func runPreparedPackage(w, errw io.Writer, gc *gitStateCache, rc runConfig, prep
 	// the failures are reported below, and the command exits non-zero. An
 	// arm can both fail and be refused (a crashing bench that also moved
 	// the tree): both facts surface, neither masks the other.
-	measured := make(map[string]armMeasurement, len(runBenches))
 	armFailed := map[string]error{}
 	armRefused := map[string][]string{}
-	for _, name := range runBenches {
+	written := []string{}
+	stoppedAt := -1
+	for i, name := range runBenches {
+		// Interruption stops before the next arm: every arm persisted so
+		// far is kept, and the report below says what was kept and what
+		// was cut short (spec REQ-pew-interruption). The check precedes
+		// the arm's own preparation (its scratch sweep, state snapshot,
+		// observation frame), which an arm that will not run must not
+		// pay; a cancellation that lands inside an arm is that arm's own
+		// error, and one inside the persist window fails its gate, so
+		// this check bites only in the instant between two iterations.
+		if ctx.Err() != nil {
+			stoppedAt = i
+			break
+		}
+		reportPhase(fmt.Sprintf("measuring %s arm %d/%d", p.ImportPath, i+1, len(runBenches)))
 		m, refused, err := measureBench(ctx, errw, rc, gc, p, env, opts, pkgRel, name, envRoots, truth, scratch, conditions)
 		if err != nil {
+			if ctx.Err() != nil {
+				stoppedAt = i
+				break
+			}
 			armFailed[name] = err
 		}
 		if len(refused) > 0 {
 			armRefused[name] = refused
 		}
-		if err == nil && len(refused) == 0 {
-			measured[name] = m
+		if err != nil || len(refused) > 0 {
+			continue
 		}
+		// Persist the arm the moment it measured (spec
+		// REQ-pew-unit-persistence): the write gate — the view still
+		// valid, the source inputs' dirtiness, the PGO input unchanged,
+		// HEAD unmoved — is re-derived for this arm's own span, so a
+		// later arm's failure or an interruption never costs it.
+		fp, ok := fingerprints[name]
+		if !ok {
+			return fmt.Errorf("benchmark %s was not captured in the producer view", name)
+		}
+		if rc.beforePersist != nil {
+			rc.beforePersist(name)
+		}
+		if err := persistArm(ctx, w, errw, rc, gc, p, prep, view, commit, initialDirty, encodedLedger, name, fp, m, env); err != nil {
+			return fmt.Errorf("%s: %w (%d recorded)", name, err, len(written))
+		}
+		written = append(written, name)
 	}
-
-	written := []string{}
-	if len(measured) > 0 {
-		if err := view.Validate(ctx); err != nil {
-			return err
-		}
-		dirty := initialDirty
-		if !dirty {
-			dirty, err = sourceInputsDirty(p.Module.Dir, commit, view.SourceFiles())
-			if err != nil {
-				return err
-			}
-		}
-		var writes []store.WriteRequest
-		for _, name := range runBenches {
-			m, ok := measured[name]
-			if !ok {
-				continue
-			}
-			fp, ok := fingerprints[name]
-			if !ok {
-				return fmt.Errorf("benchmark %s was not captured in the producer view", name)
-			}
-			recs := m.recs
-			// The run conditions carry this arm's own throttle-bracket
-			// delta (spec §9), and the runtime-input evidence is this arm's
-			// own digest and manifest (spec §7.8) — each recording
-			// describes exactly its own invocation.
-			for _, cfg := range run.ProvenanceConfig(commit, dirty, fp.Guards, m.conditions) {
-				recs = withConfig(recs, cfg)
-			}
-			for _, cfg := range fingerprintConfigs(fp, encodedLedger, m.digest, m.manifest) {
-				recs = withConfig(recs, cfg)
-			}
-			// Purity flags are per-benchmark (spec §7.5): apply only to the named ones.
-			if rc.pure[name] {
-				recs = withConfig(recs, run.PureConfig("true"))
-			} else if rc.impure[name] {
-				recs = withConfig(recs, run.PureConfig("false"))
-			}
-			// A new GOMAXPROCS variant lineage records loudly, not silently:
-			// result names embed the suffix (BenchmarkX-24), so a --pin run
-			// on a wider host mints rows nothing on record can bridge, and
-			// the operator must not learn that from a later stat - after the
-			// measurement time is spent (spec §10.1's grouping never bridges
-			// suffixes). Warning, never refusal: first recordings and
-			// deliberate profile changes are legitimate.
-			warnNewVariantLineage(errw, st, pkgRel, name, rc.label, recs)
-			writes = append(writes, store.WriteRequest{PkgRel: pkgRel, Bench: name, Label: rc.label, Results: recs})
-			written = append(written, name)
-		}
-		sort.Slice(writes, func(i, j int) bool { return writes[i].Bench < writes[j].Bench })
-		if err := view.Validate(ctx); err != nil {
-			return err
-		}
-		// The PGO profile is a build input outside the git-tracked source
-		// snapshots, so it gets its own pre-write revalidation: the recorded
-		// buildconfig must describe the exact bytes the measured compile consumed.
-		goflagsAtWrite, err := run.EffectiveGoflags(p.Module.Dir, env)
-		if err != nil {
-			return err
-		}
-		pgoAtWrite, err := run.PGOInput(p.Module.Dir, p.Dir, p.Name == "main", goflagsAtWrite)
-		if err != nil {
-			return err
-		}
-		if pgoAtWrite != pgoInput {
-			return fmt.Errorf("effective PGO input changed during the benchmark run")
-		}
-		// The write gate verifies exactly what the recordings' validity
-		// rests on (spec §9): the fingerprints hash source inputs, so the
-		// view re-validation above proves the source closures unchanged
-		// across the whole measurement span, and the recorded commit must
-		// still name HEAD. Non-source worktree residue (a failed arm's
-		// crash leftovers) is arm-scoped evidence — the arm that wrote it
-		// refused on its own moved state bracket — and never discards
-		// completed sibling measurements.
-		stateAtWrite, err := gc.snapshot(p.Module.Dir)
-		if err != nil {
-			return err
-		}
-		if stateAtWrite.Commit != commit {
-			return fmt.Errorf("repository HEAD moved during the benchmark run")
-		}
-		if err := st.WriteBatch(writes); err != nil {
-			return err
-		}
-		sort.Strings(written)
-		for _, name := range written {
-			fmt.Fprintf(w, "recorded     %s.%s\n", p.ImportPath, name)
-		}
+	if stoppedAt >= 0 {
+		// The arms from the stopped one on were not measured: the one in
+		// flight is lost, the rest never started.
+		return interrupted("interrupted: %d recorded, %d not measured in %s", len(written), len(runBenches)-stoppedAt, p.ImportPath)
 	}
 
 	var problems []string
@@ -646,6 +625,84 @@ func runPreparedPackage(w, errw io.Writer, gc *gitStateCache, rc runConfig, prep
 	if len(problems) > 0 {
 		return fmt.Errorf("%s (%d recorded)", strings.Join(problems, "; "), len(written))
 	}
+	return nil
+}
+
+// persistArm installs one measured arm's recording behind the write
+// gate re-derived for this arm: the view still validates (the source
+// closures unchanged across the arm's span), the source inputs'
+// dirtiness against the recorded commit, the PGO input the compile
+// consumed still the effective one, and HEAD still the recorded
+// commit. Each recording describes exactly its own invocation: the run
+// conditions carry this arm's throttle-bracket delta and the runtime
+// evidence is this arm's own digest and manifest.
+func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, prep *packagePreparation, view *gofresh.View, commit string, initialDirty bool, encodedLedger, name string, fp gofresh.Fingerprint, m armMeasurement, env []string) error {
+	st, pkgRel, pgoInput := prep.st, prep.pkgRel, prep.pgoInput
+	if err := view.Validate(ctx); err != nil {
+		return err
+	}
+	dirty := initialDirty
+	if !dirty {
+		var err error
+		dirty, err = sourceInputsDirty(p.Module.Dir, commit, view.SourceFiles())
+		if err != nil {
+			return err
+		}
+	}
+	recs := m.recs
+	for _, cfg := range run.ProvenanceConfig(commit, dirty, fp.Guards, m.conditions) {
+		recs = withConfig(recs, cfg)
+	}
+	for _, cfg := range fingerprintConfigs(fp, encodedLedger, m.digest, m.manifest) {
+		recs = withConfig(recs, cfg)
+	}
+	// Purity flags are per-benchmark (spec §7.5): apply only to the named ones.
+	if rc.pure[name] {
+		recs = withConfig(recs, run.PureConfig("true"))
+	} else if rc.impure[name] {
+		recs = withConfig(recs, run.PureConfig("false"))
+	}
+	// A new GOMAXPROCS variant lineage records loudly, not silently:
+	// result names embed the suffix (BenchmarkX-24), so a --pin run on a
+	// wider host mints rows nothing on record can bridge, and the
+	// operator must not learn that from a later stat - after the
+	// measurement time is spent (spec §10.1's grouping never bridges
+	// suffixes). Warning, never refusal: first recordings and deliberate
+	// profile changes are legitimate.
+	warnNewVariantLineage(errw, st, pkgRel, name, rc.label, recs)
+	// The PGO profile is a build input outside the git-tracked source
+	// snapshots, so it gets its own pre-write revalidation: the recorded
+	// buildconfig must describe the exact bytes the measured compile
+	// consumed.
+	goflagsAtWrite, err := run.EffectiveGoflags(p.Module.Dir, env)
+	if err != nil {
+		return err
+	}
+	pgoAtWrite, err := run.PGOInput(p.Module.Dir, p.Dir, p.Name == "main", goflagsAtWrite)
+	if err != nil {
+		return err
+	}
+	if pgoAtWrite != pgoInput {
+		return fmt.Errorf("effective PGO input changed during the benchmark run")
+	}
+	// The write gate verifies exactly what the recording's validity rests
+	// on (spec §9): the fingerprint hashes source inputs, so the view
+	// re-validation above proves the source closure unchanged across the
+	// arm's span, and the recorded commit must still name HEAD. Non-source
+	// worktree residue (a failed arm's crash leftovers) is arm-scoped
+	// evidence — the arm that wrote it refused on its own moved state
+	// bracket — and never discards a completed sibling measurement.
+	stateAtWrite, err := gc.snapshot(p.Module.Dir)
+	if err != nil {
+		return err
+	}
+	if stateAtWrite.Commit != commit {
+		return fmt.Errorf("repository HEAD moved during the benchmark run")
+	}
+	if err := st.WriteBatch([]store.WriteRequest{{PkgRel: pkgRel, Bench: name, Label: rc.label, Results: recs}}); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "recorded     %s.%s\n", p.ImportPath, name)
 	return nil
 }
 
@@ -715,7 +772,7 @@ func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStat
 	// resolved package directory the ingest pins — byte-faithful even
 	// through a symlinked checkout, with no per-site bridging.
 	throttleBase := rc.snapshotThrottle()
-	out, execErr := rc.executeGo(p.Module.Dir, rc.pin, env, append(run.TestArgs(p.ImportPath, armOpts), "-args", "-test.testlogfile="+testlogPath))
+	out, execErr := rc.executeGo(ctx, p.Module.Dir, rc.pin, env, append(run.TestArgs(p.ImportPath, armOpts), "-args", "-test.testlogfile="+testlogPath))
 	// Throttling is run-scoped evidence (spec §9): the recorded value is the
 	// counter delta across exactly this benchmark's measurement, warned
 	// here — the only moment the evidence exists — and fatal under
@@ -1000,9 +1057,9 @@ func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {
 	return recs
 }
 
-func nonValid(errw io.Writer, st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, label string, benches []string, view *gofresh.View) ([]string, error) {
+func nonValid(ctx context.Context, errw io.Writer, st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, label string, benches []string, view *gofresh.View) ([]string, error) {
 	var need []string
-	rows, err := checkPackage(st, e, pkgPath, pkgRel, moduleDir, benches, label, view)
+	rows, err := checkPackage(ctx, st, e, pkgPath, pkgRel, moduleDir, benches, label, view)
 	if err != nil {
 		return nil, err
 	}

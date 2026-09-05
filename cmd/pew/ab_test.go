@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -84,7 +85,7 @@ func TestABInterleavesAfterBothSidesBuild(t *testing.T) {
 		},
 	}
 	var out, errOut bytes.Buffer
-	if err := runAB(&out, &errOut, ac, []string{"."}); err != nil {
+	if err := runAB(context.Background(), &out, &errOut, ac, []string{"."}); err != nil {
 		t.Fatalf("runAB: %v\nstderr: %s", err, errOut.String())
 	}
 	var builds, runs []string
@@ -191,7 +192,7 @@ func TestABStampsGuardProvenance(t *testing.T) {
 		return []byte(fmt.Sprintf("BenchmarkWork-8 1000 %d ns/op\n", ns)), nil
 	}
 	var out, errOut bytes.Buffer
-	if err := runAB(&out, &errOut, shared, []string{"."}); err != nil {
+	if err := runAB(context.Background(), &out, &errOut, shared, []string{"."}); err != nil {
 		t.Fatalf("runAB: %v\nstderr: %s", err, errOut.String())
 	}
 	if strings.Contains(out.String(), "not compared") {
@@ -259,7 +260,7 @@ func TestABStampsGuardProvenance(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	err = runAB(&out, &errOut, split, []string{"."})
+	err = runAB(context.Background(), &out, &errOut, split, []string{"."})
 	if err == nil || !strings.Contains(err.Error(), "toolchain mismatch (A=go1 B=go2") {
 		t.Fatalf("differing toolchain guards did not refuse with the mismatch named: %v\n%s", err, out.String())
 	}
@@ -281,7 +282,7 @@ func TestABStampsGuardProvenance(t *testing.T) {
 	}
 	iterations = 0
 	out.Reset()
-	err = runAB(&out, &errOut, pgo, []string{"."})
+	err = runAB(context.Background(), &out, &errOut, pgo, []string{"."})
 	if err == nil || !strings.Contains(err.Error(), "buildconfig mismatch (A=b1 B=b2") || iterations != 0 {
 		t.Fatalf("differing PGO guards = %v after %d iterations; want the refusal before any", err, iterations)
 	}
@@ -294,7 +295,7 @@ func TestABStampsGuardProvenance(t *testing.T) {
 		return g, nil
 	}
 	iterations = 0
-	err = runAB(&out, &errOut, shadow, []string{"."})
+	err = runAB(context.Background(), &out, &errOut, shadow, []string{"."})
 	if err == nil || !strings.Contains(err.Error(), "buildconfig mismatch (A=b1 B=b2") || iterations != 0 {
 		t.Fatalf("an empty toolchain guard shadowed the PGO difference: %v after %d iterations", err, iterations)
 	}
@@ -360,7 +361,7 @@ func TestABSideBPackageKindFromRef(t *testing.T) {
 		},
 	}
 	var out, errOut bytes.Buffer
-	if err := runAB(&out, &errOut, ac, []string{"."}); err != nil {
+	if err := runAB(context.Background(), &out, &errOut, ac, []string{"."}); err != nil {
 		t.Fatalf("runAB: %v\nstderr: %s", err, errOut.String())
 	}
 	// Side A is the fixture module (the working tree, a library); the

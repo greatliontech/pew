@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -93,7 +94,7 @@ func TestGCStoreRemovesOnlyMissingBenchmarks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	removed, kept, err := gcStore(st, map[string]map[string]bool{
+	removed, kept, err := gcStore(io.Discard, st, map[string]map[string]bool{
 		"internal/foo": {"BenchmarkLive": true, "BenchmarkTagged": true},
 	}, map[string]bool{"internal/broken": true})
 	if err != nil {
@@ -166,7 +167,7 @@ func TestGCStoreSurfacesShapeFailingRecordings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	removed, kept, err := gcStore(st, map[string]map[string]bool{
+	removed, kept, err := gcStore(io.Discard, st, map[string]map[string]bool{
 		"internal/p": {"BenchmarkLiveOld": true},
 	}, nil)
 	if err != nil {
@@ -212,7 +213,7 @@ func TestRunGCRemovesOldShapeOrphanInStoreOnlyPackage(t *testing.T) {
 	t.Chdir(dir)
 
 	var out bytes.Buffer
-	if err := runGC(&out, st.Root); err != nil {
+	if err := runGC(context.Background(), &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathMissing(t, orphan)
@@ -256,7 +257,7 @@ func TestRunGCKeepsOldShapeRecordingInStoreOnlyPackage(t *testing.T) {
 	t.Chdir(dir)
 
 	var out bytes.Buffer
-	if err := runGC(&out, st.Root); err != nil {
+	if err := runGC(context.Background(), &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathExists(t, kept)
@@ -292,7 +293,7 @@ func TestRunGCReportsScanErrorForStoreOnlyPackage(t *testing.T) {
 	t.Chdir(dir)
 
 	var out bytes.Buffer
-	if err := runGC(&out, st.Root); err != nil {
+	if err := runGC(context.Background(), &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathExists(t, kept)
@@ -400,7 +401,7 @@ func TestRunGCRetainsSelectorAliasBenchmark(t *testing.T) {
 	t.Chdir(dir)
 
 	var out bytes.Buffer
-	if err := runGC(&out, st.Root); err != nil {
+	if err := runGC(context.Background(), &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathExists(t, kept)
@@ -428,7 +429,7 @@ func TestRunGCRetainsTestingBAliasBenchmark(t *testing.T) {
 	t.Chdir(dir)
 
 	var out bytes.Buffer
-	if err := runGC(&out, st.Root); err != nil {
+	if err := runGC(context.Background(), &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathExists(t, kept)
@@ -460,7 +461,7 @@ func TestRunGCRetainsBuildTaggedBenchmarkAndRemovesDeletedLabel(t *testing.T) {
 	t.Chdir(dir)
 
 	var out bytes.Buffer
-	if err := runGC(&out, st.Root); err != nil {
+	if err := runGC(context.Background(), &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathExists(t, kept)
@@ -491,7 +492,7 @@ func TestRunGCRemovesInvalidBenchmarkSignature(t *testing.T) {
 	t.Chdir(dir)
 
 	var out bytes.Buffer
-	if err := runGC(&out, st.Root); err != nil {
+	if err := runGC(context.Background(), &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathMissing(t, removed)
@@ -523,7 +524,7 @@ func TestRunGCProtectsStoreOnlyPackage(t *testing.T) {
 	t.Chdir(dir)
 
 	var out bytes.Buffer
-	if err := runGC(&out, st.Root); err != nil {
+	if err := runGC(context.Background(), &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathExists(t, kept)
@@ -543,7 +544,7 @@ func TestRunGCWithNoListedPackagesRemovesRecordings(t *testing.T) {
 	t.Chdir(dir)
 
 	var out bytes.Buffer
-	if err := runGC(&out, st.Root); err != nil {
+	if err := runGC(context.Background(), &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathMissing(t, removed)
@@ -574,7 +575,7 @@ func TestStoreOnlySourceBenchmarksProtectLiveTaggedPackage(t *testing.T) {
 	if protected["internal/tagged"] || !live["internal/tagged"]["BenchmarkTagged"] {
 		t.Fatalf("live=%v protected=%v, want tagged benchmark live", live, protected)
 	}
-	if _, _, err := gcStore(st, live, protected); err != nil {
+	if _, _, err := gcStore(io.Discard, st, live, protected); err != nil {
 		t.Fatalf("gcStore: %v", err)
 	}
 	assertPathExists(t, kept)
@@ -586,7 +587,7 @@ func TestGCStoreKeepsRootPackageRecording(t *testing.T) {
 	live := writeRecording(t, st, "", "BenchmarkRoot", "")
 	dead := writeRecording(t, st, "", "BenchmarkOldRoot", "")
 
-	removed, kept, err := gcStore(st, map[string]map[string]bool{"": {"BenchmarkRoot": true}}, nil)
+	removed, kept, err := gcStore(io.Discard, st, map[string]map[string]bool{"": {"BenchmarkRoot": true}}, nil)
 	if err != nil {
 		t.Fatalf("gcStore: %v", err)
 	}

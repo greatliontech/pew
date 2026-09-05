@@ -351,3 +351,93 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "fb6c4fc2f5f4f8bf61846db6a1d249c4bc7712540788d53008ea7028a5c71f65"
 }
+
+bindings {
+  requirement_id: "REQ-pew-progress"
+  content_hash: "85521a23d73aeac90a8167852c7398a9295ac5c2b64bc0f82d7b95709fac52c2"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestReporterNamesThePhaseOnTheCadence"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9cb411acd24c9f84465a79f7aaae21e08251750bbe32bfd89f4b14218607eabd"
+}
+
+bindings {
+  requirement_id: "REQ-pew-unit-persistence"
+  content_hash: "a9714f963cc4a235ac7ae42d3b56e6b496ba833267c7a533c6e83728f1d54e85"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestRunPersistsEachArmAsItMeasures"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1a1078ab5f9b3a8eda336c685c8001a1bdb5d6e51069c1bf6ff4df919ccc942d"
+}
+
+bindings {
+  requirement_id: "REQ-pew-unit-persistence"
+  content_hash: "a9714f963cc4a235ac7ae42d3b56e6b496ba833267c7a533c6e83728f1d54e85"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestABArtifactHoldsEachCompletedIteration"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "45484b7ae8ba488d1ba6fa8e9c63f10096d03c3b96d873902f01f9dfddf0f9e9"
+}
+
+bindings {
+  requirement_id: "REQ-pew-unit-persistence"
+  content_hash: "a9714f963cc4a235ac7ae42d3b56e6b496ba833267c7a533c6e83728f1d54e85"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestGCReportsEachRemovalAsItLands"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "36d4accdee05061ec698db4995c36d00d5cabfc9718e1d3f30f30609a1c83c40"
+}
+
+bindings {
+  requirement_id: "REQ-pew-interruption"
+  content_hash: "39fdd99e8a9c257f51c7af5c20ecc3c896b527dc90bedf42d70fab8eb0021b69"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestRunInterruptedKeepsRecordedArms"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4cb6583c4e78f571da61ddf47131b9feaceb90a2f776e2c8884924453bb29452"
+}
+
+bindings {
+  requirement_id: "REQ-pew-interruption"
+  content_hash: "39fdd99e8a9c257f51c7af5c20ecc3c896b527dc90bedf42d70fab8eb0021b69"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestABArtifactHoldsEachCompletedIteration"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "45484b7ae8ba488d1ba6fa8e9c63f10096d03c3b96d873902f01f9dfddf0f9e9"
+}
+
+bindings {
+  requirement_id: "REQ-pew-unit-persistence"
+  content_hash: "a9714f963cc4a235ac7ae42d3b56e6b496ba833267c7a533c6e83728f1d54e85"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestRunPerArmGateRefusesTheArmAlone"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4f25359a37b0bb68ddbd6b3de14178556ef66f9a77e75e1d313928149e4f39db"
+}
+
+bindings {
+  requirement_id: "REQ-pew-interruption"
+  content_hash: "39fdd99e8a9c257f51c7af5c20ecc3c896b527dc90bedf42d70fab8eb0021b69"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestRunInterruptedArmsAreNeverEntered"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e98c266df025e84da18e259d07a7f5524815229e7b76964cca77d15a8207f1fd"
+}
+
+bindings {
+  requirement_id: "REQ-pew-interruption"
+  content_hash: "39fdd99e8a9c257f51c7af5c20ecc3c896b527dc90bedf42d70fab8eb0021b69"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestStatInterruptedEndsWithAReport"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3e5ae778d844f3ad68befddcb26e7e04e5fb6e9035207c0756dd9688aab75e6b"
+}
+
+bindings {
+  requirement_id: "REQ-pew-interruption"
+  content_hash: "39fdd99e8a9c257f51c7af5c20ecc3c896b527dc90bedf42d70fab8eb0021b69"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/internal/run.TestCancellationKillsTheProcessGroup"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7256ad810afae5aa9d8e83f4efd98e666ecd0a87ae21165357e8ce2f47268d93"
+}

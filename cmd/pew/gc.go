@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -25,7 +26,9 @@ func newGCCmd() *cobra.Command {
 		Short: guidanceShort("gc"),
 		Long:  guidanceHelp("gc"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runGC(cmd.OutOrStdout(), benchDir)
+			ctx, stop := commandContext(cmd)
+			defer stop()
+			return runGC(ctx, cmd.OutOrStdout(), benchDir)
 		},
 		Args: cobra.NoArgs,
 	}
@@ -33,7 +36,8 @@ func newGCCmd() *cobra.Command {
 	return cmd
 }
 
-func runGC(w io.Writer, benchDir string) error {
+func runGC(ctx context.Context, w io.Writer, benchDir string) error {
+	reportPhase("listing")
 	pkgs, err := resolvePackages([]string{"./..."})
 	if err != nil {
 		return err
@@ -76,34 +80,43 @@ func runGC(w io.Writer, benchDir string) error {
 			return err
 		}
 		if moduleDir != "" {
-			dir := benchDir
-			if dir == "" {
-				dir = filepath.Join(moduleDir, "benchmarks")
+			dir, err := moduleBenchDir(benchDir, moduleDir)
+			if err != nil {
+				return err
 			}
 			groups[dir] = &gcGroup{moduleDir: moduleDir, live: map[string]map[string]bool{}, protected: map[string]bool{}}
 		}
 	}
 
 	var removed, kept []string
-	for dir, g := range groups {
+	dirs := make([]string, 0, len(groups))
+	for dir := range groups {
+		dirs = append(dirs, dir)
+	}
+	sort.Strings(dirs)
+	for i, dir := range dirs {
+		g := groups[dir]
+		if err := ctx.Err(); err != nil {
+			return interrupted("gc: interrupted before store %s (%d/%d; %d removed so far, each reported as it went)", dir, i+1, len(dirs), len(removed))
+		}
+		reportPhase(fmt.Sprintf("scanning store %s (%d/%d)", dir, i+1, len(dirs)))
 		st := store.New(dir)
 		n, err := addStoreOnlySourceBenchmarks(w, st, g.moduleDir, g.live, g.protected)
 		if err != nil {
 			return err
 		}
 		reported += n
-		gone, held, err := gcStore(st, g.live, g.protected)
+		// Each removal is reported the moment it lands (spec
+		// REQ-pew-unit-persistence): an interrupted gc has reported
+		// everything it did.
+		gone, held, err := gcStore(w, st, g.live, g.protected)
 		if err != nil {
 			return err
 		}
 		removed = append(removed, gone...)
 		kept = append(kept, held...)
 	}
-	sort.Strings(removed)
 	sort.Strings(kept)
-	for _, name := range removed {
-		fmt.Fprintf(w, "removed      %s\n", name)
-	}
 	for _, line := range kept {
 		fmt.Fprintln(w, line)
 	}
@@ -115,7 +128,7 @@ func runGC(w io.Writer, benchDir string) error {
 	return nil
 }
 
-func gcStore(st *store.Store, live map[string]map[string]bool, protected map[string]bool) (removed, kept []string, err error) {
+func gcStore(w io.Writer, st *store.Store, live map[string]map[string]bool, protected map[string]bool) (removed, kept []string, err error) {
 	recs, err := st.ListCandidates()
 	if err != nil {
 		return nil, nil, err
@@ -148,6 +161,7 @@ func gcStore(st *store.Store, live map[string]map[string]bool, protected map[str
 			return nil, nil, err
 		}
 		removed = append(removed, recordingDisplay(r))
+		fmt.Fprintf(w, "removed      %s\n", recordingDisplay(r))
 	}
 	return removed, kept, nil
 }

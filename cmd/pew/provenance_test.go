@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -161,7 +162,7 @@ func TestRunAndStatusFailFastOnToolchainSkew(t *testing.T) {
 	withWorkingDir(t, dir)
 
 	var out strings.Builder
-	err := runStatus(&out, "", "", false, false, false, []string{"."})
+	err := runStatus(context.Background(), &out, "", "", false, false, false, []string{"."})
 	if err == nil || !strings.Contains(err.Error(), "cross-major") {
 		t.Fatalf("runStatus under skew = %v\noutput:\n%s\nwant the invocation-level refusal", err, out.String())
 	}
@@ -170,7 +171,7 @@ func TestRunAndStatusFailFastOnToolchainSkew(t *testing.T) {
 	}
 
 	var runOut, runErrOut bytes.Buffer
-	err = runRun(&runOut, &runErrOut, runConfig{opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}, []string{"."})
+	err = runRun(context.Background(), &runOut, &runErrOut, runConfig{opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}, []string{"."})
 	if err == nil || !strings.Contains(err.Error(), "cross-major") {
 		t.Fatalf("runRun under skew = %v\noutput:\n%s\nwant the invocation-level refusal", err, runOut.String())
 	}

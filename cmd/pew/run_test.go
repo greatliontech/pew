@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -182,7 +183,7 @@ func TestRunRunKeepsSharedRepositoryModulesClean(t *testing.T) {
 	t.Chdir(root)
 
 	var out, errOut bytes.Buffer
-	err = runRun(&out, &errOut, runConfig{
+	err = runRun(context.Background(), &out, &errOut, runConfig{
 		benchDir: "results",
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{".", "./nested"})
@@ -235,7 +236,7 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 	withWorkingDir(t, dir)
 
 	var out, errOut bytes.Buffer
-	err = runRun(&out, &errOut, runConfig{
+	err = runRun(context.Background(), &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{"./..."})
@@ -1142,7 +1143,7 @@ func TestRunDefaultFilterIntersectsBenchmarkPattern(t *testing.T) {
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	err = runRun(&out, &errOut, runConfig{
+	err = runRun(context.Background(), &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "^BenchmarkSelected$"},
 	}, []string{"."})
@@ -1267,7 +1268,7 @@ func TestRunRunReturnsErrorOnPackageFailure(t *testing.T) {
 	t.Chdir(dir)
 
 	var out, errOut bytes.Buffer
-	err := runRun(&out, &errOut, runConfig{opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}, []string{"./..."})
+	err := runRun(context.Background(), &out, &errOut, runConfig{opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}, []string{"./..."})
 	if err == nil {
 		t.Fatal("runRun succeeded despite a per-package failure")
 	}
@@ -1329,7 +1330,7 @@ func TestRunObservesThroughSymlinkedModule(t *testing.T) {
 	t.Setenv("PWD", link)
 
 	var out, errOut bytes.Buffer
-	err = runRun(&out, &errOut, runConfig{
+	err = runRun(context.Background(), &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{"./..."})
@@ -1443,7 +1444,7 @@ func BenchmarkScratch(b *testing.B) {
 	}
 
 	var out, errOut bytes.Buffer
-	if err := runRun(&out, &errOut, runConfig{
+	if err := runRun(context.Background(), &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{"./..."}); err != nil {
@@ -1565,7 +1566,7 @@ func TestRunPerArmRuntimeManifestAttribution(t *testing.T) {
 	withWorkingDir(t, dir)
 
 	var out, errOut bytes.Buffer
-	if err := runRun(&out, &errOut, runConfig{
+	if err := runRun(context.Background(), &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{"."}); err != nil {
@@ -1637,7 +1638,7 @@ func TestRunSingleSubjectProcessIsolation(t *testing.T) {
 	withWorkingDir(t, dir)
 
 	var out, errOut bytes.Buffer
-	if err := runRun(&out, &errOut, runConfig{
+	if err := runRun(context.Background(), &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{"."}); err != nil {
@@ -1701,7 +1702,7 @@ func TestRunFailingArmDiscardsOnlyItsRecording(t *testing.T) {
 	withWorkingDir(t, dir)
 
 	var out, errOut bytes.Buffer
-	err = runRun(&out, &errOut, runConfig{
+	err = runRun(context.Background(), &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{"."})
@@ -1882,7 +1883,7 @@ func TestRunFailingArmResidueRefusesOnlyItsArm(t *testing.T) {
 	withWorkingDir(t, dir)
 
 	var out, errOut bytes.Buffer
-	err = runRun(&out, &errOut, runConfig{
+	err = runRun(context.Background(), &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{"."})
@@ -2044,7 +2045,7 @@ func TestRunPerArmScratchSweepIsolation(t *testing.T) {
 	withWorkingDir(t, dir)
 
 	var out, errOut bytes.Buffer
-	err = runRun(&out, &errOut, runConfig{
+	err = runRun(context.Background(), &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{"."})
@@ -2095,5 +2096,5 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 	if prep == nil || len(prep.runBenches) == 0 {
 		return nil
 	}
-	return runPreparedPackage(w, errw, gc, rc, prep, env, conditions)
+	return runPreparedPackage(context.Background(), w, errw, gc, rc, prep, env, conditions)
 }

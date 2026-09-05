@@ -16,6 +16,7 @@ close-out convention.
 | [derived-state-recompute-invariance-witness](derived-state-recompute-invariance-witness.md) | `REQ-pew-derived-state`'s recompute/discard-invariance clause has no pew-side witness (engine-owned path; the bound tests pin only the strategy-break authority arm; a gap cannot express a per-clause shortfall) | when a pew-side integration anchor exercising the gofresh engine's derived-state discard/recompute path lands in the test surface |
 | [spec-wide-requirement-forming](spec-wide-requirement-forming.md) | only §13 is REQ-formed; a test witnessing a §§1–12 contract has no id to bind against — convert sections on demand, same structure-only discipline | when a binding needs to claim a §§1–12 contract that carries no REQ id |
 | [gofresh-corpus-pin-lag](gofresh-corpus-pin-lag.md) | shape-corpus pin at gofresh v0.91.0, latest v0.92.0; the bump rides the next change set (fleet sweep 2026-08-31) | cross-tool train chunk 115 |
+| [ab-out-multi-package](ab-out-multi-package.md) | `ab --out` over several packages keeps only the last package's artifact; a per-package path or a multi-section format is a contract change | user decision |
 
 ## In-spec upgrade paths (tracked inline, not here)
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -134,7 +135,7 @@ func TestStatABIncludesHistoricalOnlyRecording(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(oldWD) })
 
 	var out, errOut bytes.Buffer
-	err = runStat(&out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	err = runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -171,7 +172,7 @@ func TestStatBaseOnlyKeyIsOneSidedNotStrategyStale(t *testing.T) {
 
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	if err := runStat(&out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, nil); err != nil {
+	if err := runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, nil); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if strings.Contains(errOut.String(), "dynamic-state strategy") {
@@ -205,7 +206,7 @@ func TestStatABComparesAcrossStrategies(t *testing.T) {
 
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	err = runStat(&out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	err = runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -236,7 +237,7 @@ func TestStatABFallsBackToModuleWithoutCurrentPackages(t *testing.T) {
 
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	err = runStat(&out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	err = runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -259,7 +260,7 @@ func TestStatPinnedIncludesWorkingTreeOnlyRecordingWithoutCurrentBenchmark(t *te
 
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	err = runStat(&out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String()})
+	err = runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -291,7 +292,7 @@ func TestStatABDiscoversHistoricalModuleAbsentFromCurrentPackages(t *testing.T) 
 
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	err = runStat(&out, &errOut, statConfig{opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	err = runStat(context.Background(), &out, &errOut, statConfig{opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -317,7 +318,7 @@ func TestStatABDoesNotDiscoverSiblingModuleOutsideCurrentScope(t *testing.T) {
 
 	withWorkingDir(t, filepath.Join(dir, "modA"))
 	var out, errOut bytes.Buffer
-	err = runStat(&out, &errOut, statConfig{opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	err = runStat(context.Background(), &out, &errOut, statConfig{opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -367,7 +368,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 	commitAll(t, repo, "recording")
 
 	var out, errOut bytes.Buffer
-	if err := runStat(&out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
+	if err := runStat(context.Background(), &out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
 		t.Fatalf("runStat valid: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if strings.Contains(errOut.String(), "is unverifiable") || strings.Contains(errOut.String(), "is stale") {
@@ -390,7 +391,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if err := runStat(&out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
+	if err := runStat(context.Background(), &out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
 		t.Fatalf("runStat unversioned: %v", err)
 	}
 	if !strings.Contains(errOut.String(), "stale (format)") {
@@ -405,7 +406,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "lib.go"), "package statdirective\n\nfunc fixturePath() string { name := \"fixture.txt\"; return name }\n")
 	out.Reset()
 	errOut.Reset()
-	if err := runStat(&out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
+	if err := runStat(context.Background(), &out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
 		t.Fatalf("runStat stale: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if !strings.Contains(errOut.String(), "is stale (closure)") {
@@ -473,7 +474,7 @@ func TestStatRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
-	if err := runStat(&out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
+	if err := runStat(context.Background(), &out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
 		t.Fatalf("runStat predating: %v", err)
 	}
 	// The "; skipping" form is the per-side skip chain's own warning —
@@ -498,7 +499,7 @@ func TestStatRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if err := runStat(&out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
+	if err := runStat(context.Background(), &out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
 		t.Fatalf("runStat base-predating: %v", err)
 	}
 	if strings.Contains(errOut.String(), "dynamic-state strategy); skipping") {
@@ -534,7 +535,7 @@ func TestStatPinnedComparesStrategyStaleBaseline(t *testing.T) {
 
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	err = runStat(&out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String()})
+	err = runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -607,7 +608,7 @@ func TestStatABRejectsFormatValidNonPewOppositeSide(t *testing.T) {
 
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	err = runStat(&out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	err = runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -740,7 +741,7 @@ func TestStatSurfacesOldShapeRecordingsAutoMode(t *testing.T) {
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}
-	if err := runStat(&out, &errOut, sc, nil); err != nil {
+	if err := runStat(context.Background(), &out, &errOut, sc, nil); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if strings.Contains(out.String(), "no recordings on either side") {
@@ -779,7 +780,7 @@ func TestStatSurfacesOldShapeRecordingsABMode(t *testing.T) {
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}
-	if err := runStat(&out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
+	if err := runStat(context.Background(), &out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if strings.Contains(out.String(), "no recordings on either side") {
@@ -825,7 +826,7 @@ func TestStatCountsBothDirtySides(t *testing.T) {
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}
-	if err := runStat(&out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
+	if err := runStat(context.Background(), &out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if !strings.Contains(out.String(), "dirty recording: 2") {
@@ -860,7 +861,7 @@ func TestStatIgnoresForeignLayoutFiles(t *testing.T) {
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}
-	if err := runStat(&out, &errOut, sc, nil); err != nil {
+	if err := runStat(context.Background(), &out, &errOut, sc, nil); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if !strings.Contains(out.String(), "no recordings on either side") {
@@ -1040,14 +1041,14 @@ func TestNonValidUsesLabel(t *testing.T) {
 	write("", fp.MaximalClosure)
 	write("x", fp.MaximalClosure+"-stale")
 
-	need, err := nonValid(io.Discard, st, e, pkg, "", ".", "x", []string{bench}, nil)
+	need, err := nonValid(context.Background(), io.Discard, st, e, pkg, "", ".", "x", []string{bench}, nil)
 	if err != nil {
 		t.Fatalf("nonValid labeled: %v", err)
 	}
 	if len(need) != 1 || need[0] != bench {
 		t.Fatalf("labeled nonValid = %v, want [%s]", need, bench)
 	}
-	need, err = nonValid(io.Discard, st, e, pkg, "", ".", "", []string{bench}, nil)
+	need, err = nonValid(context.Background(), io.Discard, st, e, pkg, "", ".", "", []string{bench}, nil)
 	if err != nil {
 		t.Fatalf("nonValid unlabeled: %v", err)
 	}
@@ -1137,7 +1138,7 @@ func TestStatABNotesDifferingRunConditions(t *testing.T) {
 
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	err = runStat(&out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	err = runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -1248,7 +1249,7 @@ func TestStatFailOnRegressionEmptyStoreFailsClosed(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	sc := statConfig{opts: compare.DefaultOptions(), failOnRegression: true}
-	err = runStat(&out, &errOut, sc, nil)
+	err = runStat(context.Background(), &out, &errOut, sc, nil)
 	if err == nil {
 		t.Fatalf("empty comparison under --fail-on-regression exited clean\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
 	}
@@ -1265,7 +1266,7 @@ func TestStatFailOnRegressionEmptyStoreFailsClosed(t *testing.T) {
 	out.Reset()
 	errOut.Reset()
 	sc.failOnRegression = false
-	if err := runStat(&out, &errOut, sc, nil); err != nil {
+	if err := runStat(context.Background(), &out, &errOut, sc, nil); err != nil {
 		t.Fatalf("informational empty comparison errored: %v", err)
 	}
 	if !strings.Contains(out.String(), "no recorded benchmarks to compare: no recordings on either side") {
@@ -1299,7 +1300,7 @@ func TestStatFailOnRegressionAllSkippedFailsClosed(t *testing.T) {
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), failOnRegression: true}
-	err = runStat(&out, &errOut, sc, []string{base.String(), newer.String()})
+	err = runStat(context.Background(), &out, &errOut, sc, []string{base.String(), newer.String()})
 	var empty *nothingComparedError
 	if !errors.As(err, &empty) {
 		t.Fatalf("all-skipped comparison under --fail-on-regression: err = %v (%T), want *nothingComparedError\nstderr:\n%s", err, err, errOut.String())
@@ -1340,7 +1341,7 @@ func TestStatFailOnRegressionPartialSkipGovernedByComparedSubset(t *testing.T) {
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), failOnRegression: true}
 
 	var out, errOut bytes.Buffer
-	if err := runStat(&out, &errOut, sc, []string{base.String(), clean.String()}); err != nil {
+	if err := runStat(context.Background(), &out, &errOut, sc, []string{base.String(), clean.String()}); err != nil {
 		t.Fatalf("clean compared subset did not govern the exit: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if !strings.Contains(errOut.String(), "stale (format)") {
@@ -1349,7 +1350,7 @@ func TestStatFailOnRegressionPartialSkipGovernedByComparedSubset(t *testing.T) {
 
 	out.Reset()
 	errOut.Reset()
-	err = runStat(&out, &errOut, sc, []string{base.String(), regressed.String()})
+	err = runStat(context.Background(), &out, &errOut, sc, []string{base.String(), regressed.String()})
 	if err == nil || err.Error() != "regression detected" {
 		t.Fatalf("regressing compared subset: err = %v, want regression detected", err)
 	}
@@ -1407,7 +1408,7 @@ func TestStatExplainShowsSideBySideGuards(t *testing.T) {
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), explain: true}
-	if err := runStat(&out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
+	if err := runStat(context.Background(), &out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	got := errOut.String()
@@ -1443,7 +1444,7 @@ func TestStatExplainWorkingTreeStaleness(t *testing.T) {
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), explain: true}
-	if err := runStat(&out, &errOut, sc, nil); err != nil {
+	if err := runStat(context.Background(), &out, &errOut, sc, nil); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	got := errOut.String()
@@ -1489,7 +1490,7 @@ func TestStatJSONRowsAndEmpty(t *testing.T) {
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), jsonOut: true}
-	if err := runStat(&out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
+	if err := runStat(context.Background(), &out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	var rows, notes int
@@ -1549,7 +1550,7 @@ func TestStatJSONRowsAndEmpty(t *testing.T) {
 	withWorkingDir(t, empty)
 	out.Reset()
 	errOut.Reset()
-	if err := runStat(&out, &errOut, statConfig{opts: compare.DefaultOptions(), jsonOut: true}, nil); err != nil {
+	if err := runStat(context.Background(), &out, &errOut, statConfig{opts: compare.DefaultOptions(), jsonOut: true}, nil); err != nil {
 		t.Fatalf("runStat empty: %v", err)
 	}
 	var e struct {
@@ -1584,7 +1585,7 @@ func TestStatJSONNullBoundsOnDegenerateSamples(t *testing.T) {
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), jsonOut: true}
-	if err := runStat(&out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
+	if err := runStat(context.Background(), &out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	var sawNull bool

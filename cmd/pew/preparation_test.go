@@ -123,7 +123,7 @@ func TestRunPreparesEveryPackageBeforeAnyMeasurement(t *testing.T) {
 		},
 	}
 	var out bytes.Buffer
-	err = runRun(&out, &bytes.Buffer{}, rc, []string{"./..."})
+	err = runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"./..."})
 	if err == nil || !strings.Contains(err.Error(), "1 package(s) failed") {
 		t.Fatalf("runRun = %v\n%s", err, out.String())
 	}
@@ -183,7 +183,7 @@ func TestRunRefusesAStoreCoveredSourceBeforeTheWarmupBuild(t *testing.T) {
 		},
 	}
 	var out bytes.Buffer
-	err := runRun(&out, &bytes.Buffer{}, rc, []string{"./benchmarks/in"})
+	err := runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"./benchmarks/in"})
 	if err == nil || !strings.Contains(out.String(), "lies under the recording store") {
 		t.Fatalf("runRun = %v\n%s", err, out.String())
 	}
@@ -242,7 +242,7 @@ func TestABPreparesEveryPackageBeforeAnyIteration(t *testing.T) {
 			return guard.Guards{Toolchain: "go1", BuildConfig: "b", Machine: "m", RuntimeConfig: "r"}, nil
 		},
 	}
-	err := runAB(&bytes.Buffer{}, &bytes.Buffer{}, ac, []string{"./p", "./zlate"})
+	err := runAB(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, ac, []string{"./p", "./zlate"})
 	if err == nil || !strings.Contains(err.Error(), "zlate: pattern \"BenchmarkWork\" selects no benchmark on side A") {
 		t.Fatalf("ab with a later package the pattern misses = %v; want its refusal before the first package's iterations", err)
 	}
@@ -313,7 +313,7 @@ func TestRunRefusesAnOverlappingDestinationBeforeTheWarmupBuild(t *testing.T) {
 		},
 	}
 	var out bytes.Buffer
-	err := runRun(&out, &bytes.Buffer{}, rc, []string{"./sub"})
+	err := runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"./sub"})
 	if err == nil || !strings.Contains(out.String(), "overlaps source input") {
 		t.Fatalf("runRun = %v\n%s", err, out.String())
 	}
@@ -362,7 +362,7 @@ func TestRunServesValidRecordingsByDefault(t *testing.T) {
 		},
 	}
 	var out bytes.Buffer
-	if err := runRun(&out, &bytes.Buffer{}, rc, []string{"."}); err != nil {
+	if err := runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"."}); err != nil {
 		t.Fatalf("first run: %v\n%s", err, out.String())
 	}
 	if measurements != 1 {
@@ -378,7 +378,7 @@ func TestRunServesValidRecordingsByDefault(t *testing.T) {
 		return prior(e, ctx, subjects, moduleDir, kind)
 	}
 	defer func() { newViewFor = prior }()
-	if err := runRun(&out, &bytes.Buffer{}, rc, []string{"."}); err != nil {
+	if err := runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"."}); err != nil {
 		t.Fatalf("second run: %v\n%s", err, out.String())
 	}
 	if loads != 1 {
@@ -390,7 +390,7 @@ func TestRunServesValidRecordingsByDefault(t *testing.T) {
 	all := rc
 	all.all = true
 	out.Reset()
-	if err := runRun(&out, &bytes.Buffer{}, all, []string{"."}); err != nil {
+	if err := runRun(context.Background(), &out, &bytes.Buffer{}, all, []string{"."}); err != nil {
 		t.Fatalf("--all run: %v\n%s", err, out.String())
 	}
 	if measurements != 2 {
@@ -426,7 +426,7 @@ func TestStatusBuildsNoEngineForABenchmarklessPackage(t *testing.T) {
 	// An unreadable PGO profile fails every engine this environment builds.
 	t.Setenv("GOFLAGS", "-pgo="+filepath.Join(dir, "missing.pgo"))
 	var out bytes.Buffer
-	if err := runStatus(&out, filepath.Join(dir, "benchmarks"), "", false, false, false, []string{"./..."}); err != nil {
+	if err := runStatus(context.Background(), &out, filepath.Join(dir, "benchmarks"), "", false, false, false, []string{"./..."}); err != nil {
 		t.Fatal(err)
 	}
 	errors := strings.Count(out.String(), "error ")

@@ -4,6 +4,7 @@ package run
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -15,6 +16,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
@@ -47,17 +50,65 @@ func TestArgs(pkg string, o Options) []string {
 // Execute runs the benchmark command (optionally pinned via `taskset -c <pin>`)
 // in dir and returns stdout (the benchmark-format output).
 func Execute(dir, pin string, env, args []string) ([]byte, error) {
+	return ExecuteContext(context.Background(), dir, pin, env, args)
+}
+
+// ExecuteContext is Execute under a context: cancellation kills the
+// whole process group — the `go` tool and the test binary it spawned —
+// so an interrupted verb never leaves a benchmark running.
+func ExecuteContext(ctx context.Context, dir, pin string, env, args []string) ([]byte, error) {
 	name, full := "go", args
 	if pin != "" {
 		name, full = "taskset", append([]string{"-c", pin, "go"}, args...)
 	}
-	cmd := exec.Command(name, full...)
+	return runCommand(ctx, dir, env, name, full)
+}
+
+// BuildContext runs one `go` build (or any go tool invocation whose
+// output is not a benchmark stream) in dir under ctx, in its own
+// process group: a cancelled build takes its compile and link children
+// with it; a failure's error carries the command's stderr.
+func BuildContext(ctx context.Context, dir string, env, args []string) error {
+	_, err := runCommand(ctx, dir, env, "go", args)
+	return err
+}
+
+// killGrace bounds how long a cancelled command's output pipes are
+// waited on after its process group is killed.
+const killGrace = 2 * time.Second
+
+// runCommand runs one command in its own process group under ctx and
+// returns its stdout. A plain CommandContext kills only the direct
+// child; the test binary `go test` spawns is a grandchild that would
+// outlive the interrupt holding the stdout pipe, so cancellation
+// signals the group and the wait is bounded (spec REQ-pew-interruption).
+func runCommand(ctx context.Context, dir string, env []string, name string, full []string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, full...)
 	resolved := gotool.CommandDir(dir)
 	cmd.Dir = resolved
 	cmd.Env = gotool.CommandEnvironment(env, resolved)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		// The context may fire after the leader already exited (Wait
+		// reaps before it notices the cancellation): an empty group
+		// answers ESRCH, which is the process-done case — never an
+		// injected cancellation error over a finished command, and
+		// never a signal at a reused group id.
+		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+			if errors.Is(err, syscall.ESRCH) {
+				return os.ErrProcessDone
+			}
+			return err
+		}
+		return nil
+	}
+	cmd.WaitDelay = killGrace
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, fmt.Errorf("run: %s %s: %w: %s",
 			name, strings.Join(full, " "), err, strings.TrimSpace(stderr.String()))
 	}
@@ -721,19 +772,16 @@ func ReadTargetPlatform(moduleDir string, env []string) (goos, goarch string, er
 // path executes standing binaries so both sides build before either
 // side measures and the tree is never mutated (spec §12, pew ab).
 func ExecuteBinary(dir, pin string, env []string, bin string, args []string) ([]byte, error) {
+	return ExecuteBinaryContext(context.Background(), dir, pin, env, bin, args)
+}
+
+// ExecuteBinaryContext is ExecuteBinary under a context: cancellation
+// kills the binary's whole process group, so an interrupted comparison
+// leaves no side running.
+func ExecuteBinaryContext(ctx context.Context, dir, pin string, env []string, bin string, args []string) ([]byte, error) {
 	name, full := bin, args
 	if pin != "" {
 		name, full = "taskset", append([]string{"-c", pin, bin}, args...)
 	}
-	cmd := exec.Command(name, full...)
-	resolved := gotool.CommandDir(dir)
-	cmd.Dir = resolved
-	cmd.Env = gotool.CommandEnvironment(env, resolved)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("run: %s %s: %w: %s",
-			name, strings.Join(full, " "), err, strings.TrimSpace(stderr.String()))
-	}
-	return stdout.Bytes(), nil
+	return runCommand(ctx, dir, env, name, full)
 }

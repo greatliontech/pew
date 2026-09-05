@@ -56,7 +56,9 @@ func newStatusCmd() *cobra.Command {
 			if len(patterns) == 0 {
 				patterns = []string{"./..."}
 			}
-			return runStatus(cmd.OutOrStdout(), benchDir, label, staleOnly, explain, jsonOut, patterns)
+			ctx, stop := commandContext(cmd)
+			defer stop()
+			return runStatus(ctx, cmd.OutOrStdout(), benchDir, label, staleOnly, explain, jsonOut, patterns)
 		},
 	}
 	cmd.Flags().StringVar(&benchDir, "bench-dir", "", "stored-recordings directory (default <module>/benchmarks); an explicit value applies to every package")
@@ -174,13 +176,18 @@ var engineDiagnostics io.Writer = os.Stderr
 
 // emitEngineDiagnostic writes a payload-bearing gofresh event
 // (per-subject analysis-unavailable provenance, the unlisted-toolchain
-// notice) to the operator's log; detail-free keep-alives stay silent.
-// Without a consumer, an unlisted release surfaces only as scattered
-// stale/unverifiable verdicts with nothing naming the walk needed.
+// notice) to the operator's log, and hands every detail-free
+// keep-alive to the reporter as the stretch in flight — a typed load's
+// phases are the longest silent stretches a verb has (spec
+// REQ-pew-progress). Without the payload consumer, an unlisted release
+// surfaces only as scattered stale/unverifiable verdicts with nothing
+// naming the walk needed.
 func emitEngineDiagnostic(p gofresh.Progress) {
 	if p.Detail != "" {
 		fmt.Fprintf(engineDiagnostics, "gofresh: %s %s — %s\n", p.Phase, p.Package, p.Detail)
+		return
 	}
+	reportPhase(fmt.Sprintf("analysis %s %s", p.Phase, p.Package))
 }
 
 func buildEngine(moduleDir string, env []string, pgo string) (*gofresh.Engine, error) {
@@ -204,15 +211,20 @@ func buildEngine(moduleDir string, env []string, pgo string) (*gofresh.Engine, e
 	return gofresh.New(opts...)
 }
 
-func runStatus(w io.Writer, benchDir, label string, staleOnly, explain, jsonOut bool, patterns []string) error {
+func runStatus(ctx context.Context, w io.Writer, benchDir, label string, staleOnly, explain, jsonOut bool, patterns []string) error {
+	reportPhase("listing")
 	pkgs, err := resolvePackages(patterns)
 	if err != nil {
 		return err
 	}
-	for _, p := range pkgs {
+	for i, p := range pkgs {
 		if p.Module.Dir == "" {
 			continue // not in a module (e.g. a stdlib pattern) — nothing to record
 		}
+		if err := ctx.Err(); err != nil {
+			return interrupted("status: interrupted before %s (package %d/%d)", p.ImportPath, i+1, len(pkgs))
+		}
+		reportPhase(fmt.Sprintf("judging %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
 		// A per-package failure (an unreadable PGO profile, a sibling that
 		// does not compile) is reported as a row and does not abort status of
 		// the rest of the tree.
@@ -243,7 +255,7 @@ func runStatus(w io.Writer, benchDir, label string, staleOnly, explain, jsonOut 
 			reportErr(err)
 			continue
 		}
-		if err := statusPackage(w, os.Stderr, e, benchDir, label, staleOnly, explain, jsonOut, p, benches); err != nil {
+		if err := statusPackage(ctx, w, os.Stderr, e, benchDir, label, staleOnly, explain, jsonOut, p, benches); err != nil {
 			reportErr(err)
 		}
 	}
@@ -266,14 +278,14 @@ func declaredBenchmarks(p pkgMeta) ([]string, error) {
 	return selectedBenchmarks(p)
 }
 
-func statusPackage(w, errw io.Writer, e *gofresh.Engine, benchDir, label string, staleOnly bool, explain, jsonOut bool, p pkgMeta, benches []string) error {
+func statusPackage(ctx context.Context, w, errw io.Writer, e *gofresh.Engine, benchDir, label string, staleOnly bool, explain, jsonOut bool, p pkgMeta, benches []string) error {
 	dir, err := moduleBenchDir(benchDir, p.Module.Dir)
 	if err != nil {
 		return err
 	}
 	st := store.New(dir)
 	pkgRel := packageRel(p)
-	rows, err := checkPackage(st, e, p.ImportPath, pkgRel, p.Module.Dir, benches, label, nil)
+	rows, err := checkPackage(ctx, st, e, p.ImportPath, pkgRel, p.Module.Dir, benches, label, nil)
 	if err != nil {
 		return err
 	}
@@ -330,7 +342,9 @@ func checkOne(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, be
 	case err != nil:
 		return "", "", gofresh.Fingerprint{}, "", err
 	}
-	return verdictForRecs(e, pkgPath, moduleDir, bench, recs)
+	// The per-record form is test-facing; the verbs judge in batches
+	// under their own context.
+	return verdictForRecs(context.Background(), e, pkgPath, moduleDir, bench, recs)
 }
 
 // newViewFor builds a package's typed view; a variable so a test can
@@ -362,7 +376,7 @@ type benchVerdict struct {
 // come from the module, environment, and kind alone, so the verdicts
 // are identical under any subject grouping. The
 // per-benchmark purity fold and every per-recording gate are unchanged.
-func checkPackage(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir string, benches []string, label string, view *gofresh.View) (map[string]*benchVerdict, error) {
+func checkPackage(ctx context.Context, st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir string, benches []string, label string, view *gofresh.View) (map[string]*benchVerdict, error) {
 	out := map[string]*benchVerdict{}
 	type pending struct {
 		bench  string
@@ -396,7 +410,6 @@ func checkPackage(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir
 	if len(checks) == 0 {
 		return out, nil
 	}
-	ctx := context.Background()
 	subjects := make([]gofresh.Subject, 0, len(checks))
 	recorded := map[gofresh.Subject]gofresh.Fingerprint{}
 	for _, c := range checks {
@@ -429,7 +442,7 @@ func checkPackage(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir
 		pendingLedger := ""
 		var refreshedFP gofresh.Fingerprint
 		if v.Status == gofresh.Stale && v.Reason == "test variants" {
-			if refreshed, encoded, rv, ok := inertGrownRecheckOn(view, subject, c.ledger, c.fp); ok {
+			if refreshed, encoded, rv, ok := inertGrownRecheckOn(ctx, view, subject, c.ledger, c.fp); ok {
 				v, refreshedFP, pendingLedger = rv, refreshed, encoded
 			}
 		}
@@ -447,7 +460,7 @@ func checkPackage(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir
 // every verdict surface — status and run (its default filter) through checkOne, stat's
 // working-tree staleness warning directly — shares it, the inert-growth
 // rule included (spec §7.9).
-func verdictForRecs(e *gofresh.Engine, pkgPath, moduleDir, bench string, recs []*benchfmt.Result) (verdict, string, gofresh.Fingerprint, string, error) {
+func verdictForRecs(ctx context.Context, e *gofresh.Engine, pkgPath, moduleDir, bench string, recs []*benchfmt.Result) (verdict, string, gofresh.Fingerprint, string, error) {
 	if !store.IsRecordingShape(recs) {
 		return verdictStale, "format", gofresh.Fingerprint{}, "", nil
 	}
@@ -455,14 +468,14 @@ func verdictForRecs(e *gofresh.Engine, pkgPath, moduleDir, bench string, recs []
 	if !ok {
 		return verdictStale, "format", gofresh.Fingerprint{}, "", nil
 	}
-	v, err := e.Check(context.Background(), fp, gofresh.Subject{Package: pkgPath, Symbol: bench}, moduleDir)
+	v, err := e.Check(ctx, fp, gofresh.Subject{Package: pkgPath, Symbol: bench}, moduleDir)
 	if err != nil {
 		return "", "", gofresh.Fingerprint{}, "", err
 	}
 	pendingLedger := ""
 	var refreshedFP gofresh.Fingerprint
 	if v.Status == gofresh.Stale && v.Reason == "test variants" {
-		if refreshed, encoded, rv, ok := inertGrownRecheck(e, moduleDir, pkgPath, bench, recordedLedger, fp); ok {
+		if refreshed, encoded, rv, ok := inertGrownRecheck(ctx, e, moduleDir, pkgPath, bench, recordedLedger, fp); ok {
 			// The refreshed verdict takes the ordinary verdict's place and
 			// rides the same purity fold below: a record that would read
 			// valid but for the proven-inert compartment movement serves,
@@ -500,19 +513,19 @@ func verdictForRecs(e *gofresh.Engine, pkgPath, moduleDir, bench string, recs []
 // its verdict replacing the ordinary one — every remaining pin enforced
 // exactly as an ordinary verdict, the purity fold included downstream. Any
 // fault refuses and the original verdict stands.
-func inertGrownRecheck(e *gofresh.Engine, moduleDir, pkgPath, bench, recordedLedger string, fp gofresh.Fingerprint) (gofresh.Fingerprint, string, gofresh.Verdict, bool) {
+func inertGrownRecheck(ctx context.Context, e *gofresh.Engine, moduleDir, pkgPath, bench, recordedLedger string, fp gofresh.Fingerprint) (gofresh.Fingerprint, string, gofresh.Verdict, bool) {
 	subject := gofresh.Subject{Package: pkgPath, Symbol: bench}
-	view, err := e.NewViewFor(context.Background(), []gofresh.Subject{subject}, moduleDir, gofresh.Measurement)
+	view, err := e.NewViewFor(ctx, []gofresh.Subject{subject}, moduleDir, gofresh.Measurement)
 	if err != nil {
 		return fp, "", gofresh.Verdict{}, false
 	}
-	return inertGrownRecheckOn(view, subject, recordedLedger, fp)
+	return inertGrownRecheckOn(ctx, view, subject, recordedLedger, fp)
 }
 
 // inertGrownRecheckOn is the rule against a caller-supplied view - the
 // package-batch path shares one view across every rider; the
 // single-benchmark path (stat's working-tree warning) wraps it above.
-func inertGrownRecheckOn(view *gofresh.View, subject gofresh.Subject, recordedLedger string, fp gofresh.Fingerprint) (gofresh.Fingerprint, string, gofresh.Verdict, bool) {
+func inertGrownRecheckOn(ctx context.Context, view *gofresh.View, subject gofresh.Subject, recordedLedger string, fp gofresh.Fingerprint) (gofresh.Fingerprint, string, gofresh.Verdict, bool) {
 	if recordedLedger == "" {
 		return fp, "", gofresh.Verdict{}, false
 	}
@@ -520,7 +533,6 @@ func inertGrownRecheckOn(view *gofresh.View, subject gofresh.Subject, recordedLe
 	if err != nil {
 		return fp, "", gofresh.Verdict{}, false
 	}
-	ctx := context.Background()
 	current, err := view.TestVariantLedger(subject)
 	if err != nil {
 		return fp, "", gofresh.Verdict{}, false
