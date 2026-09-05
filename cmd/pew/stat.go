@@ -399,7 +399,7 @@ func runStat(w, errw io.Writer, sc statConfig, refs []string) error {
 						engines[ek] = engine
 					}
 					// The shared verdict core applies the inert-growth rule
-					// exactly as status and run --stale do (spec §7.9); stat
+					// exactly as status and run (its default filter) do (spec §7.9); stat
 					// stays read-only, so the returned ledger is dropped and
 					// no recording is rewritten here.
 					warnForeignKeys(errw, cur.importPath, key.bench, store.ForeignConfigKeys(newRecs))

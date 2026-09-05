@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
@@ -317,5 +319,118 @@ func TestRunRefusesAnOverlappingDestinationBeforeTheWarmupBuild(t *testing.T) {
 	}
 	if executions != 0 {
 		t.Fatalf("an overlapping destination still launched %d process(es) before its refusal", executions)
+	}
+}
+
+// run serves what is proven and measures the rest: a second run over
+// an unchanged tree measures nothing and says so; --all measures the
+// valid benchmark again (REQ-pew-serve-proven).
+func TestRunServesValidRecordingsByDefault(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain with the execute seam stubbed")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":        "module example.com/proven\n\ngo 1.26.4\n",
+		"bench_test.go": "package proven\n\nimport \"testing\"\n\nfunc BenchmarkHot(b *testing.B) {}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commitFixture(t, dir)
+	withWorkingDir(t, dir)
+	measurements := 0
+	rc := runConfig{
+		benchDir: filepath.Join(dir, "benchmarks"),
+		opts:     run.Options{Count: 1, Benchtime: "1x", Bench: "."},
+		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
+		// The real executor, counted: a valid recording needs the test
+		// binary's own log and observation, which a stub cannot forge.
+		execute: func(moduleDir, pin string, env, args []string) ([]byte, error) {
+			build := false
+			for _, a := range args {
+				if a == "-c" {
+					build = true
+				}
+			}
+			if !build {
+				measurements++
+			}
+			return run.Execute(moduleDir, pin, env, args)
+		},
+	}
+	var out bytes.Buffer
+	if err := runRun(&out, &bytes.Buffer{}, rc, []string{"."}); err != nil {
+		t.Fatalf("first run: %v\n%s", err, out.String())
+	}
+	if measurements != 1 {
+		t.Fatalf("first run measured %d times; want the unrecorded benchmark once", measurements)
+	}
+	out.Reset()
+	// One typed view per package serves the freshness judgment and the
+	// capture: the second run loads exactly once.
+	loads := 0
+	prior := newViewFor
+	newViewFor = func(e *gofresh.Engine, ctx context.Context, subjects []gofresh.Subject, moduleDir string, kind gofresh.Kind) (*gofresh.View, error) {
+		loads++
+		return prior(e, ctx, subjects, moduleDir, kind)
+	}
+	defer func() { newViewFor = prior }()
+	if err := runRun(&out, &bytes.Buffer{}, rc, []string{"."}); err != nil {
+		t.Fatalf("second run: %v\n%s", err, out.String())
+	}
+	if loads != 1 {
+		t.Fatalf("the second run built %d typed views; want the one its judgment and capture share", loads)
+	}
+	if measurements != 1 || !strings.Contains(out.String(), "all benchmarks valid, nothing to run") {
+		t.Fatalf("second run over an unchanged tree measured (%d total) or said nothing:\n%s", measurements, out.String())
+	}
+	all := rc
+	all.all = true
+	out.Reset()
+	if err := runRun(&out, &bytes.Buffer{}, all, []string{"."}); err != nil {
+		t.Fatalf("--all run: %v\n%s", err, out.String())
+	}
+	if measurements != 2 {
+		t.Fatalf("--all measured %d times in total; want the valid benchmark measured again", measurements)
+	}
+}
+
+// status parses a package's declarations before building its engine: a
+// package with no benchmark pays no engine and reports no engine
+// failure, while a package with one still does (REQ-pew-serve-proven's
+// serve path is status's; the cost order is the preparation's).
+func TestStatusBuildsNoEngineForABenchmarklessPackage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads two fixture packages through the toolchain")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":              "module example.com/nobench\n\ngo 1.26.4\n",
+		"nobench/n.go":        "package nobench\n",
+		"withbench/w_test.go": "package withbench\n\nimport \"testing\"\n\nfunc BenchmarkW(b *testing.B) {}\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commitFixture(t, dir)
+	withWorkingDir(t, dir)
+	// An unreadable PGO profile fails every engine this environment builds.
+	t.Setenv("GOFLAGS", "-pgo="+filepath.Join(dir, "missing.pgo"))
+	var out bytes.Buffer
+	if err := runStatus(&out, filepath.Join(dir, "benchmarks"), "", false, false, false, []string{"./..."}); err != nil {
+		t.Fatal(err)
+	}
+	errors := strings.Count(out.String(), "error ")
+	if errors != 1 || !strings.Contains(out.String(), "example.com/nobench/withbench") || strings.Contains(out.String(), "example.com/nobench/nobench") {
+		t.Fatalf("status built an engine for a benchmarkless package, or none for the one with a benchmark:\n%s", out.String())
 	}
 }

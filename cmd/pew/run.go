@@ -23,7 +23,7 @@ import (
 type runConfig struct {
 	benchDir, pin, label string
 	opts                 run.Options
-	strict, staleOnly    bool
+	strict, all          bool
 	pure, impure         map[string]bool // benchmark names flagged --assume-pure / --impure
 	// throttle snapshots the thermal-throttle counters bracketing each
 	// benchmark's measurement invocation (spec §9); nil means
@@ -93,7 +93,7 @@ func newRunCmd() *cobra.Command {
 	f.StringVar(&rc.label, "label", "", "variant label for the recording filename")
 	f.StringArrayVar(&assumePure, "assume-pure", nil, "mark a benchmark perf-pure, suppressing Class-B detection (repeatable)")
 	f.StringArrayVar(&impure, "impure", nil, "mark a benchmark external / always-rerun (repeatable)")
-	f.BoolVar(&rc.staleOnly, "stale", false, "run only benchmarks that are currently non-valid")
+	f.BoolVar(&rc.all, "all", false, "measure every selected benchmark, a valid recording included (the default serves what is proven and measures the rest)")
 	f.StringArrayVar(&rawVouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, the load-bearing set recorded as pew-vouches (spec §12)")
 	return cmd
 }
@@ -392,8 +392,38 @@ func runPreparedPackage(w, errw io.Writer, gc *gitStateCache, rc runConfig, prep
 	commit, initialDirty := baseline.Commit, baseline.Dirty
 
 	opts := rc.opts
-	if rc.staleOnly {
-		need, err := nonValid(errw, st, e, p.ImportPath, pkgRel, p.Module.Dir, rc.label, runBenches)
+	// The package's one typed view, over every selected benchmark: the
+	// freshness judgment reads it and the capture reads it — a second
+	// load over the same subjects would only re-derive the first
+	// (REQ-pew-serve-proven).
+	ctx := context.Background()
+	subjects := make([]gofresh.Subject, 0, len(runBenches))
+	for _, name := range runBenches {
+		subjects = append(subjects, gofresh.Subject{Package: p.ImportPath, Symbol: name})
+	}
+	view, err := newViewFor(e, ctx, subjects, p.Module.Dir, gofresh.Measurement)
+	if err != nil {
+		return err
+	}
+	// The two refusals the view decides fire the moment it exists —
+	// before the freshness read (which may rewrite an inert-growth
+	// recording), the warm-up build, and the first arm (spec
+	// REQ-pew-preparation): a measured source under the recording
+	// store, or a recording destination overlapping a source input.
+	if err := rejectStoreCoveredSources(view.SourceFiles(), gc.exclude...); err != nil {
+		return err
+	}
+	recordingPaths := make([]string, 0, len(prep.destinations))
+	for _, d := range prep.destinations {
+		recordingPaths = append(recordingPaths, d.Path)
+	}
+	if err := rejectRecordingDestinations(view.SourceFiles(), recordingPaths); err != nil {
+		return err
+	}
+	if !rc.all {
+		// Serve what is proven, measure the rest: a benchmark whose
+		// recording is valid against this view is not re-measured.
+		need, err := nonValid(errw, st, e, p.ImportPath, pkgRel, p.Module.Dir, rc.label, runBenches, view)
 		if err != nil {
 			return err
 		}
@@ -407,6 +437,12 @@ func runPreparedPackage(w, errw io.Writer, gc *gitStateCache, rc runConfig, prep
 			return err
 		}
 		runBenches = need
+		// Capture only what measures: a served benchmark's fingerprint
+		// is never read (cost, not correctness).
+		subjects = subjects[:0]
+		for _, name := range runBenches {
+			subjects = append(subjects, gofresh.Subject{Package: p.ImportPath, Symbol: name})
+		}
 	}
 	startState, err := gc.snapshot(p.Module.Dir)
 	if err != nil {
@@ -414,16 +450,6 @@ func runPreparedPackage(w, errw io.Writer, gc *gitStateCache, rc runConfig, prep
 	}
 	if !baseline.Equal(startState) {
 		return fmt.Errorf("repository state moved before benchmark run")
-	}
-
-	subjects := make([]gofresh.Subject, 0, len(runBenches))
-	for _, name := range runBenches {
-		subjects = append(subjects, gofresh.Subject{Package: p.ImportPath, Symbol: name})
-	}
-	ctx := context.Background()
-	view, err := e.NewViewFor(ctx, subjects, p.Module.Dir, gofresh.Measurement)
-	if err != nil {
-		return err
 	}
 	fingerprints := make(map[string]gofresh.Fingerprint, len(subjects))
 	for _, subject := range subjects {
@@ -442,20 +468,6 @@ func runPreparedPackage(w, errw io.Writer, gc *gitStateCache, rc runConfig, prep
 	}
 	encodedLedger, err := run.EncodeLedger(run.LedgerFromGofresh(packageLedger))
 	if err != nil {
-		return err
-	}
-	// The two refusals the view decides fire the moment it exists,
-	// before the warm-up build and the first arm (spec
-	// REQ-pew-preparation): a measured source under the recording store,
-	// or a recording destination overlapping a source input.
-	if err := rejectStoreCoveredSources(view.SourceFiles(), gc.exclude...); err != nil {
-		return err
-	}
-	recordingPaths := make([]string, 0, len(prep.destinations))
-	for _, d := range prep.destinations {
-		recordingPaths = append(recordingPaths, d.Path)
-	}
-	if err := rejectRecordingDestinations(view.SourceFiles(), recordingPaths); err != nil {
 		return err
 	}
 
@@ -988,9 +1000,9 @@ func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {
 	return recs
 }
 
-func nonValid(errw io.Writer, st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, label string, benches []string) ([]string, error) {
+func nonValid(errw io.Writer, st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, label string, benches []string, view *gofresh.View) ([]string, error) {
 	var need []string
-	rows, err := checkPackage(st, e, pkgPath, pkgRel, moduleDir, benches, label)
+	rows, err := checkPackage(st, e, pkgPath, pkgRel, moduleDir, benches, label, view)
 	if err != nil {
 		return nil, err
 	}

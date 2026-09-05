@@ -17,10 +17,10 @@
    pew status --stale ./...
    ```
 
-3. Re-run only recordings that are not currently valid:
+3. Measure what is not proven (a valid recording serves; `--all` re-measures everything):
 
    ```sh
-   pew run --stale ./...
+   pew run ./...
    ```
 
 4. Compare recorded results:

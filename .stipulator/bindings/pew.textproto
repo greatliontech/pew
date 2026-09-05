@@ -324,3 +324,30 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "5a5f08f97274cca2db4444553f54a835f061e5286bfef744c4ff467a46126e11"
 }
+
+bindings {
+  requirement_id: "REQ-pew-serve-proven"
+  content_hash: "7aacef5ef1acb2c3163bb523b5d6ef49d06f0fb46469fdb9b85a103baca1aa40"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestRunServesValidRecordingsByDefault"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "96d4db4e93dba2cb8af75429d3aed9e07aedc48d0c44e6a8269a1fa6a60da24b"
+}
+
+bindings {
+  requirement_id: "REQ-pew-serve-proven"
+  content_hash: "7aacef5ef1acb2c3163bb523b5d6ef49d06f0fb46469fdb9b85a103baca1aa40"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestStatusBuildsNoEngineForABenchmarklessPackage"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "10b32427abe39669000afd747cc57ee199fc6b7649cab5cfa0e5db2771a21843"
+}
+
+bindings {
+  requirement_id: "REQ-pew-serve-proven"
+  content_hash: "7aacef5ef1acb2c3163bb523b5d6ef49d06f0fb46469fdb9b85a103baca1aa40"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestRunDefaultFilterIntersectsBenchmarkPattern"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fb6c4fc2f5f4f8bf61846db6a1d249c4bc7712540788d53008ea7028a5c71f65"
+}

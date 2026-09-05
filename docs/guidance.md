@@ -46,15 +46,16 @@ HEAD while tuning a hot path.
 - `label` — variant label for the recording filename.
 - `assume-pure` — mark a benchmark perf-pure, suppressing Class-B detection (repeatable); the durable in-code form is a gofresh pure directive.
 - `impure` — mark a benchmark external, always-rerun (repeatable); the durable in-code form is a gofresh external directive. Mutually exclusive with the purity assertion per benchmark.
-- `stale` — run only benchmarks that are currently non-valid (the reuse-don't-rerun win; shares status's closure-analysis path, intersects the independent benchmark selection, and never adds or records an excluded benchmark).
+- `all` — measure every selected benchmark, a valid recording included; the default serves what is proven and measures the rest (status's closure-analysis path, over the run's own typed view, intersecting the independent benchmark selection and never adding or recording an excluded benchmark).
 - `vouch` — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, the load-bearing set recorded on the recording.
 **when:** use run to measure and store — one pre-run observation
 both drives the quiesce gate and is recorded as the run-conditions
 provenance line, so the recording states exactly the conditions the
-gate evaluated; storage overwrites with in-band provenance. Prefer
-the stale filter after edits: only non-valid benchmarks re-measure.
-**example:** a stale-filtered run over ./... on a prepped machine
-after landing a change.
+gate evaluated; storage overwrites with in-band provenance. After
+edits only non-valid benchmarks re-measure; `all` re-measures every
+selected one.
+**example:** a run over ./... on a prepped machine after landing a
+change — the unchanged benchmarks serve, the changed ones measure.
 
 ### status
 **surfaces:** cli
@@ -62,13 +63,13 @@ after landing a change.
 **knobs:**
 - `bench-dir` — stored-recordings directory (default <module>/benchmarks); an explicit value applies to every package.
 - `label` — variant label to check; empty means the unlabeled recording.
-- `stale` — show only benchmarks that need re-running (non-valid); scriptable, feeds run's stale filter.
+- `stale` — show only benchmarks that need re-running (non-valid); scriptable, the set run measures by default.
 - `explain` — explain each non-valid verdict: every guard's recorded vs current value, the closure hash, the runtime-input digest, and the manifest's watched identities — environment inputs disclosed as names with digest equality only, never values; a digest mismatch additionally names the moved watched inputs. Mutually exclusive with the JSON view (the explanation is a human view).
 - `json` — one JSON object per row; the field names are public surface and stable (package, benchmark, label, verdict, reason; a per-package failure emits package and error).
 - `vouch` — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), the same acceptance set run records.
 **when:** use status as the inventory-plus-verdict view before
-measuring or comparing — the stale filter is the scriptable feed
-into run, and the explanation view answers why a verdict is
+measuring or comparing — the stale filter names what run will
+measure, and the explanation view answers why a verdict is
 non-valid without re-deriving anything by hand.
 **example:** a stale-filtered status over ./... before deciding what
 to re-measure.
@@ -92,8 +93,8 @@ comparing already-stored results, and the baseline mode follows the
 argument count: no ref is auto (working-tree recording vs the
 HEAD-committed one), one ref is pinned, two refs is A/B across
 them. Run first; the text renderer is the default.
-**example:** an auto comparison after a stale-filtered run, gated on
-sec/op, in CI with the regression exit armed.
+**example:** an auto comparison after a run, gated on sec/op, in CI
+with the regression exit armed.
 
 ### gc
 **surfaces:** cli

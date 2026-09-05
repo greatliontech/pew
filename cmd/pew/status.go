@@ -223,6 +223,17 @@ func runStatus(w io.Writer, benchDir, label string, staleOnly, explain, jsonOut 
 			}
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
 		}
+		// The declarations first: a package with no benchmark builds no
+		// engine (two `go env` processes and the PGO digest it would
+		// otherwise pay for nothing).
+		benches, err := declaredBenchmarks(p)
+		if err != nil {
+			reportErr(err)
+			continue
+		}
+		if len(benches) == 0 {
+			continue
+		}
 		e, _, err := newEngineForPkg(p, os.Environ())
 		if err != nil {
 			var pe *toolchainProvenanceError
@@ -232,7 +243,7 @@ func runStatus(w io.Writer, benchDir, label string, staleOnly, explain, jsonOut 
 			reportErr(err)
 			continue
 		}
-		if err := statusPackage(w, os.Stderr, e, benchDir, label, staleOnly, explain, jsonOut, p); err != nil {
+		if err := statusPackage(w, os.Stderr, e, benchDir, label, staleOnly, explain, jsonOut, p, benches); err != nil {
 			reportErr(err)
 		}
 	}
@@ -248,21 +259,21 @@ func warnForeignKeys(errw io.Writer, pkgPath, bench string, keys []string) {
 	}
 }
 
-func statusPackage(w, errw io.Writer, e *gofresh.Engine, benchDir, label string, staleOnly bool, explain, jsonOut bool, p pkgMeta) error {
-	benches, err := selectedBenchmarks(p)
-	if err != nil {
-		return err
-	}
-	if len(benches) == 0 {
-		return nil
-	}
+// declaredBenchmarks parses a package's benchmark declarations — the
+// one rule deciding which packages status builds an engine for: none
+// declared, no engine.
+func declaredBenchmarks(p pkgMeta) ([]string, error) {
+	return selectedBenchmarks(p)
+}
+
+func statusPackage(w, errw io.Writer, e *gofresh.Engine, benchDir, label string, staleOnly bool, explain, jsonOut bool, p pkgMeta, benches []string) error {
 	dir, err := moduleBenchDir(benchDir, p.Module.Dir)
 	if err != nil {
 		return err
 	}
 	st := store.New(dir)
 	pkgRel := packageRel(p)
-	rows, err := checkPackage(st, e, p.ImportPath, pkgRel, p.Module.Dir, benches, label)
+	rows, err := checkPackage(st, e, p.ImportPath, pkgRel, p.Module.Dir, benches, label, nil)
 	if err != nil {
 		return err
 	}
@@ -301,7 +312,7 @@ func statusPackage(w, errw io.Writer, e *gofresh.Engine, benchDir, label string,
 	return nil
 }
 
-// checkOne is the per-benchmark validity verdict for status and run --stale
+// checkOne is the per-benchmark validity verdict for status and run (its default filter)
 // (stat's working-tree staleness warning shares verdictForRecs below over its
 // already-loaded rows). The engine recomputes the current
 // closure and guards (the SSA load is the dominant cost; an unrecorded benchmark
@@ -322,6 +333,13 @@ func checkOne(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, be
 	return verdictForRecs(e, pkgPath, moduleDir, bench, recs)
 }
 
+// newViewFor builds a package's typed view; a variable so a test can
+// count the loads a verb pays (the run's one view serves both its
+// freshness judgment and its capture).
+var newViewFor = func(e *gofresh.Engine, ctx context.Context, subjects []gofresh.Subject, moduleDir string, kind gofresh.Kind) (*gofresh.View, error) {
+	return e.NewViewFor(ctx, subjects, moduleDir, kind)
+}
+
 // benchVerdict is one recorded benchmark's package-batch verdict row:
 // the verdict and its reason, the fingerprint the verdict was decided
 // over, the encoded current ledger when the inert-growth rule granted
@@ -339,10 +357,12 @@ type benchVerdict struct {
 // view serves every recorded benchmark's verdict (CheckBatch) and every
 // inert-growth rider's ledger read, capture, and re-check. A package
 // with N recorded benchmarks previously paid one view per benchmark
-// plus one more per rider - cost, not soundness: the engine holds no
-// cross-view cache, so the verdicts are identical either way. The
+// plus one more per rider - cost, not soundness: every fingerprint
+// component is per subject or per package except the guards, which
+// come from the module, environment, and kind alone, so the verdicts
+// are identical under any subject grouping. The
 // per-benchmark purity fold and every per-recording gate are unchanged.
-func checkPackage(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir string, benches []string, label string) (map[string]*benchVerdict, error) {
+func checkPackage(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir string, benches []string, label string, view *gofresh.View) (map[string]*benchVerdict, error) {
 	out := map[string]*benchVerdict{}
 	type pending struct {
 		bench  string
@@ -384,9 +404,18 @@ func checkPackage(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir
 		subjects = append(subjects, s)
 		recorded[s] = c.fp
 	}
-	view, err := e.NewViewFor(ctx, subjects, moduleDir, gofresh.Measurement)
-	if err != nil {
-		return nil, err
+	// The caller's view when it has one (the run's, over every selected
+	// benchmark — the recorded ones are a subset). A view's subject set
+	// changes no verdict: every fingerprint component is per subject or
+	// per package except the guards, which are captured from the module,
+	// environment, and kind alone, so a superset view judges exactly as
+	// one built here over the recorded subjects would.
+	if view == nil {
+		built, err := newViewFor(e, ctx, subjects, moduleDir, gofresh.Measurement)
+		if err != nil {
+			return nil, err
+		}
+		view = built
 	}
 	verdicts, err := view.CheckBatch(ctx, recorded)
 	if err != nil {
@@ -415,7 +444,7 @@ func checkPackage(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir
 }
 
 // verdictForRecs is the verdict core over already-loaded recording rows:
-// every verdict surface — status and run --stale through checkOne, stat's
+// every verdict surface — status and run (its default filter) through checkOne, stat's
 // working-tree staleness warning directly — shares it, the inert-growth
 // rule included (spec §7.9).
 func verdictForRecs(e *gofresh.Engine, pkgPath, moduleDir, bench string, recs []*benchfmt.Result) (verdict, string, gofresh.Fingerprint, string, error) {

@@ -68,7 +68,7 @@ func TestStatusPackageUsesLabel(t *testing.T) {
 	p.Module.Dir = "."
 
 	var out strings.Builder
-	if err := statusPackage(&out, io.Discard, e, st.Root, "x", false, false, false, p); err != nil {
+	if err := statusPackageOf(&out, io.Discard, e, st.Root, "x", false, false, false, p); err != nil {
 		t.Fatalf("statusPackage labeled: %v", err)
 	}
 	if got := out.String(); !strings.Contains(got, "valid") || !strings.Contains(got, bench) {
@@ -76,7 +76,7 @@ func TestStatusPackageUsesLabel(t *testing.T) {
 	}
 
 	out.Reset()
-	if err := statusPackage(&out, io.Discard, e, st.Root, "", false, false, false, p); err != nil {
+	if err := statusPackageOf(&out, io.Discard, e, st.Root, "", false, false, false, p); err != nil {
 		t.Fatalf("statusPackage unlabeled: %v", err)
 	}
 	if got := out.String(); !strings.Contains(got, "unrecorded") {
@@ -153,7 +153,7 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 
 	write("")
 	var out strings.Builder
-	if err := statusPackage(&out, io.Discard, e, st.Root, "", false, false, false, p); err != nil {
+	if err := statusPackageOf(&out, io.Discard, e, st.Root, "", false, false, false, p); err != nil {
 		t.Fatalf("statusPackage: %v", err)
 	}
 	if got := out.String(); !strings.Contains(got, "unverifiable") || !strings.Contains(got, "external directive") {
@@ -164,7 +164,7 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 	// author's in-code external declaration.
 	write("true")
 	out.Reset()
-	if err := statusPackage(&out, io.Discard, e, st.Root, "", false, false, false, p); err != nil {
+	if err := statusPackageOf(&out, io.Discard, e, st.Root, "", false, false, false, p); err != nil {
 		t.Fatalf("statusPackage assume-pure: %v", err)
 	}
 	if got := out.String(); !strings.Contains(got, "unverifiable") || !strings.Contains(got, "external directive") {
@@ -222,7 +222,7 @@ func TestStatusExplainNamesTheMovingGuard(t *testing.T) {
 	p.Module.Dir = "."
 
 	var out strings.Builder
-	if err := statusPackage(&out, io.Discard, e, st.Root, "", false, true, false, p); err != nil {
+	if err := statusPackageOf(&out, io.Discard, e, st.Root, "", false, true, false, p); err != nil {
 		t.Fatalf("statusPackage explain: %v", err)
 	}
 	got := out.String()
@@ -306,7 +306,7 @@ func TestStatusJSONRows(t *testing.T) {
 	p.Module.Dir = "."
 
 	var out strings.Builder
-	if err := statusPackage(&out, io.Discard, e, st.Root, "", false, false, true, p); err != nil {
+	if err := statusPackageOf(&out, io.Discard, e, st.Root, "", false, false, true, p); err != nil {
 		t.Fatalf("statusPackage json: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
@@ -351,14 +351,14 @@ func TestStatusJSONLabelAndErrorRows(t *testing.T) {
 	p.Module.Dir = "."
 
 	var out strings.Builder
-	if err := statusPackage(&out, io.Discard, e, st.Root, "x", false, false, true, p); err != nil {
+	if err := statusPackageOf(&out, io.Discard, e, st.Root, "x", false, false, true, p); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), `"label":"x"`) {
 		t.Fatalf("labeled rows omit the label:\n%s", out.String())
 	}
 	out.Reset()
-	if err := statusPackage(&out, io.Discard, e, st.Root, "", false, false, true, p); err != nil {
+	if err := statusPackageOf(&out, io.Discard, e, st.Root, "", false, false, true, p); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(out.String(), `"label"`) {
@@ -440,7 +440,7 @@ func TestStatusWarnsOnForeignConfigKeys(t *testing.T) {
 	p.Module.Path = "github.com/greatliontech/pew"
 	p.Module.Dir = "."
 	var out, errw strings.Builder
-	if err := statusPackage(&out, &errw, e, st.Root, "", false, false, false, p); err != nil {
+	if err := statusPackageOf(&out, &errw, e, st.Root, "", false, false, false, p); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(errw.String(), "foreign configuration key \"injected\"") {
@@ -497,10 +497,20 @@ func TestStatusRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 	p.Module.Path = "github.com/greatliontech/pew"
 	p.Module.Dir = "."
 	var out strings.Builder
-	if err := statusPackage(&out, io.Discard, e, st.Root, "", false, false, false, p); err != nil {
+	if err := statusPackageOf(&out, io.Discard, e, st.Root, "", false, false, false, p); err != nil {
 		t.Fatalf("statusPackage: %v", err)
 	}
 	if got := out.String(); !strings.Contains(got, "stale") || !strings.Contains(got, "dynamic-state strategy") {
 		t.Errorf("predating recording status = %q, want stale (dynamic-state strategy)", got)
 	}
+}
+
+// statusPackageOf runs statusPackage over a package's own declarations,
+// the shape runStatus drives it in.
+func statusPackageOf(w, errw io.Writer, e *gofresh.Engine, benchDir, label string, staleOnly, explain, jsonOut bool, p pkgMeta) error {
+	benches, err := declaredBenchmarks(p)
+	if err != nil || len(benches) == 0 {
+		return err
+	}
+	return statusPackage(w, errw, e, benchDir, label, staleOnly, explain, jsonOut, p, benches)
 }

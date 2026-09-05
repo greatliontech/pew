@@ -1111,7 +1111,7 @@ func TestRunPackageRefusesUnattributableOrphan(t *testing.T) {
 	}
 }
 
-func TestRunStaleIntersectsBenchmarkPattern(t *testing.T) {
+func TestRunDefaultFilterIntersectsBenchmarkPattern(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
@@ -1143,9 +1143,8 @@ func TestRunStaleIntersectsBenchmarkPattern(t *testing.T) {
 	withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	err = runRun(&out, &errOut, runConfig{
-		benchDir:  benchDir,
-		staleOnly: true,
-		opts:      runpkg.Options{Count: 1, Benchtime: "1x", Bench: "^BenchmarkSelected$"},
+		benchDir: benchDir,
+		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "^BenchmarkSelected$"},
 	}, []string{"."})
 	if err != nil {
 		t.Fatalf("runRun: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
