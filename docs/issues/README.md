@@ -19,6 +19,9 @@ close-out convention.
 | [ab-out-multi-package](ab-out-multi-package.md) | `ab --out` over several packages keeps only the last package's artifact; a per-package path or a multi-section format is a contract change | user decision |
 | [repo-level-vouch-source](repo-level-vouch-source.md) | vouch sets live only as flags, hand-mirrored (tugboat CLAUDE.md + the fleet sweep); the unsafe drift direction is silent | rides cross-tool train chunk 115 |
 | [statistical-knob-derivation](statistical-knob-derivation.md) | `--count`/`--benchtime`/`--threshold` stay fixed statistics-grade defaults; deriving them from the measurement changes REQ-pew-sample-completeness and §10.1's comparability | user decision |
+| [mcp-surface](mcp-surface.md) | pew serves the CLI only; whether an LLM reader is owed an MCP surface (or `run`/`ab`/`gc` a `--json`) is a product-scope call | user decision |
+| [serve-proven-blocked-by-benchmark-loop](serve-proven-blocked-by-benchmark-loop.md) | every benchmark reaching `b.N`/`b.Loop` is unverifiable under the engine's benchmark-loop scan, so the serve-proven default serves nothing real yet | cross-tool train chunk 118 |
+| [guidance-knobs-and-verb-table](guidance-knobs-and-verb-table.md) | §12's verb defaults table and the guidance knob blocks enumerate one contract twice; generating one from the other changes the fleet guidance format | user decision |
 
 ## In-spec upgrade paths (tracked inline, not here)
 

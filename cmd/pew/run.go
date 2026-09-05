@@ -454,9 +454,16 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 		if err != nil {
 			return err
 		}
+		// The served count is part of the default output: a run over
+		// ten benchmarks that prints two `recorded` lines would
+		// otherwise read as eight missing (spec §12).
+		served := len(runBenches) - len(need)
 		if len(need) == 0 {
-			fmt.Fprintf(w, "%s: all benchmarks valid, nothing to run\n", p.ImportPath)
+			fmt.Fprintf(w, "%-12s %s: %d valid, nothing to run\n", "served", p.ImportPath, served)
 			return nil
+		}
+		if served > 0 {
+			fmt.Fprintf(w, "%-12s %s: %d valid, measuring %d\n", "served", p.ImportPath, served, len(need))
 		}
 		opts.Bench, err = restrictBenchmarkPattern(opts.Bench, need)
 		if err != nil {
@@ -691,7 +698,7 @@ func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitSta
 	if err := st.WriteBatch([]store.WriteRequest{{PkgRel: pkgRel, Bench: name, Label: rc.label, Results: recs}}); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "recorded     %s.%s\n", p.ImportPath, name)
+	fmt.Fprintf(w, "%-12s %s.%s\n", "recorded", p.ImportPath, name)
 	return nil
 }
 

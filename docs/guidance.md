@@ -6,7 +6,7 @@
 **surfaces:** cli
 **does:** A/B-compare the working tree against a ref without touching either.
 **knobs:**
-- `bench` — benchmark pattern (go test -bench syntax).
+- `bench` — benchmark pattern (go test -bench syntax) (default .).
 - `count` — interleaved iterations per side (default 6).
 - `benchtime` — per-benchmark time or iteration budget (go test -benchtime).
 - `ref` — B side: any git rev the repository resolves (default HEAD).
@@ -49,8 +49,9 @@ HEAD while tuning a hot path.
 both drives the quiesce gate and is recorded as the run-conditions
 provenance line, so the recording states exactly the conditions the
 gate evaluated; storage overwrites with in-band provenance. After
-edits only non-valid benchmarks re-measure; `all` re-measures every
-selected one.
+edits only non-valid benchmarks re-measure, and each package's
+served line counts the valid recordings the run did not re-measure;
+`all` re-measures every selected one.
 **example:** a run over ./... on a prepped machine after landing a
 change — the unchanged benchmarks serve, the changed ones measure.
 
@@ -79,11 +80,11 @@ to re-measure.
 - `label` — variant label to compare; empty means the unlabeled recording.
 - `alpha` — significance level for the Mann-Whitney U test (default 0.05); outside (0,1) refuses.
 - `threshold` — regression magnitude floor, in percent (default 3); negative refuses, zero means any significant worse change regresses — legitimate, noisier.
-- `confidence` — confidence level for summary intervals; outside (0,1) refuses.
+- `confidence` — confidence level for summary intervals (default 0.95); outside (0,1) refuses.
 - `fail-on-regression` — exit non-zero if a gated metric regresses; an empty comparison then exits 2, so a CI consumer can tell measured-and-regressed from measured-nothing.
 - `explain` — lay out the values behind a one-word skip or warning: a comparison key whose two sides disagree on a guard prints both sides' recorded values naming the moving guard, and a working-tree recording warned non-valid prints its recorded-vs-current explanation. Mutually exclusive with the JSON view.
 - `json` — one JSON object per comparison row, note, or empty-comparison marker; the field names are public surface and stable, and internal values (guard digests, closure hashes) are deliberately excluded — they belong to the explanation view.
-- `gate` — comma-separated units whose regression fails the build (sec/op, B/op, allocs/op; default sec/op).
+- `gate` — comma-separated units whose regression fails the build: sec/op, B/op, allocs/op (default sec/op).
 - `vouch` — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), the same acceptance set run records.
 **when:** use stat as the comparison of record — it runs nothing,
 comparing already-stored results, and the baseline mode follows the

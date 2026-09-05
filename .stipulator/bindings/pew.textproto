@@ -513,3 +513,21 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "c3f7e54770261b1a90145464a24901abd0d189ade24c76b167b3cbcd6c4d74a4"
 }
+
+bindings {
+  requirement_id: "REQ-pew-verb-defaults"
+  content_hash: "bcb35644e57b02e13a647cf5066377567465a740f2e2683403b3f954e1fd8b5d"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestSurfaceTableTracksTheCommands"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1d7fcdc3cde29c46c1715bf50a1fa8baaa5aa37a7d30fc1cdfc47cbdff94f816"
+}
+
+bindings {
+  requirement_id: "REQ-pew-verb-defaults"
+  content_hash: "bcb35644e57b02e13a647cf5066377567465a740f2e2683403b3f954e1fd8b5d"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestRunReportsServedBenchmarks"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e41eb42f5d3cc8a691232b75446e7006eb5b77f782c5240686fb349672fd6405"
+}

@@ -384,7 +384,7 @@ func TestRunServesValidRecordingsByDefault(t *testing.T) {
 	if loads != 1 {
 		t.Fatalf("the second run built %d typed views; want the one its judgment and capture share", loads)
 	}
-	if measurements != 1 || !strings.Contains(out.String(), "all benchmarks valid, nothing to run") {
+	if measurements != 1 || !strings.Contains(out.String(), "valid, nothing to run") {
 		t.Fatalf("second run over an unchanged tree measured (%d total) or said nothing:\n%s", measurements, out.String())
 	}
 	all := rc
