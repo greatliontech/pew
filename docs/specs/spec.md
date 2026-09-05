@@ -554,9 +554,10 @@ defines: each benchmark's measurement invocation — one `go test` process per b
 single-subject execution) — carries its own `-test.testlogfile` capture
 (passed through `go test`'s argument passthrough), an observation **bracket** is fingerprinted over
 the package directory immediately before each invocation (VCS bookkeeping excluded), and each
-capture is ingested with the completed-process and bracket options plus the toolchain, module-cache,
-build-cache, and ephemeral-temp classifications, and — where the package declares them — its
-run-scratch namespaces. A **`//pew:scratch <pattern>`** directive in any of the package's
+capture is ingested with the completed-process and bracket options under the measured process's
+own environment — the toolchain, module-cache, build-cache, and ephemeral-temp classification
+roots are facts of that environment the engine resolves, never pew's declarations — and, where the
+package declares them, its run-scratch namespaces. A **`//pew:scratch <pattern>`** directive in any of the package's
 build-selected test files (a durable in-source line-comment assertion, the same channel as
 `//gofresh:pure`; one single-component pattern per directive, malformed shapes refused loudly before
 the measurement runs) names one `os.MkdirTemp`-shaped scratch pattern under the package directory;

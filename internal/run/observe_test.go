@@ -16,7 +16,6 @@ import (
 func TestIngestObservationFallsBackIncomplete(t *testing.T) {
 	dir := t.TempDir()
 	env := os.Environ()
-	roots := GoEnvRoots{}
 
 	frameless := CaptureObservationFrame(context.Background(), dir, "../elsewhere")
 	if frameless.Reason() == "" {
@@ -29,7 +28,7 @@ func TestIngestObservationFallsBackIncomplete(t *testing.T) {
 	if err := os.WriteFile(present, []byte("# test log\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	state, err := IngestObservation(context.Background(), frameless, present, "package-test-binary:probe", env, roots)
+	state, err := IngestObservation(context.Background(), frameless, present, "package-test-binary:probe", env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +40,7 @@ func TestIngestObservationFallsBackIncomplete(t *testing.T) {
 	if frame.Reason() != "" {
 		t.Fatalf("frame capture failed: %s", frame.Reason())
 	}
-	state, err = IngestObservation(context.Background(), frame, filepath.Join(dir, "absent"), "package-test-binary:probe", env, roots)
+	state, err = IngestObservation(context.Background(), frame, filepath.Join(dir, "absent"), "package-test-binary:probe", env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +53,7 @@ func TestIngestObservationFallsBackIncomplete(t *testing.T) {
 	if err := os.WriteFile(headerless, []byte("not a testlog\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	state, err = IngestObservation(context.Background(), frame, headerless, "package-test-binary:probe", env, roots)
+	state, err = IngestObservation(context.Background(), frame, headerless, "package-test-binary:probe", env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +68,7 @@ func TestIngestObservationFallsBackIncomplete(t *testing.T) {
 	if err := os.WriteFile(garbled, []byte("# test log\nnot an op line\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	state, err = IngestObservation(context.Background(), frame, garbled, "package-test-binary:probe", env, roots)
+	state, err = IngestObservation(context.Background(), frame, garbled, "package-test-binary:probe", env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,15 +108,18 @@ func TestIngestObservationClassifiesToolchainReads(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("TMPDIR", t.TempDir())
-	env := os.Environ()
-	state, err := IngestObservation(context.Background(), frame, capture, "package-test-binary:probe", env, GoEnvRoots{Toolchain: toolchain})
+	// The roots are facts of the ingested environment: the toolchain
+	// reports GOROOT for the environment the process ran under.
+	t.Setenv("GOROOT", toolchain)
+	state, err := IngestObservation(context.Background(), frame, capture, "package-test-binary:probe", os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if state.Unverifiable {
 		t.Fatalf("toolchain read sealed the observation despite the root classification: %+v", state)
 	}
-	state, err = IngestObservation(context.Background(), frame, capture, "package-test-binary:probe", env, GoEnvRoots{})
+	os.Unsetenv("GOROOT")
+	state, err = IngestObservation(context.Background(), frame, capture, "package-test-binary:probe", os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +145,7 @@ func TestIngestObservationAppliesScratchNamespaces(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	env := os.Environ()
 
-	state, err := IngestObservation(context.Background(), frame, capture, "package-test-binary:probe", env, GoEnvRoots{}, "bench-*")
+	state, err := IngestObservation(context.Background(), frame, capture, "package-test-binary:probe", env, "bench-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +160,7 @@ func TestIngestObservationAppliesScratchNamespaces(t *testing.T) {
 		t.Fatalf("declared scratch read recorded: %v", paths)
 	}
 
-	state, err = IngestObservation(context.Background(), frame, capture, "package-test-binary:probe", env, GoEnvRoots{})
+	state, err = IngestObservation(context.Background(), frame, capture, "package-test-binary:probe", env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +191,7 @@ func TestIngestObservationDeclaresEphemeralTempRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	state, err := IngestObservation(context.Background(), frame, capture, "package-test-binary:probe", env, GoEnvRoots{})
+	state, err := IngestObservation(context.Background(), frame, capture, "package-test-binary:probe", env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,21 +207,22 @@ func TestIngestObservationDeclaresEphemeralTempRoot(t *testing.T) {
 	}
 }
 
-// The module-cache and build-cache roots forward exactly as the
-// toolchain root does: a read under a declared root classifies
-// guard-covered and the observation stays verifiable; undeclared, the
+// The module-cache and build-cache roots are facts of the ingested
+// environment exactly as the toolchain root is: a read under the
+// environment's root classifies guard-covered and the observation
+// stays verifiable; under an environment naming no such root, the
 // same read seals it (spec §7.8).
 func TestIngestObservationClassifiesCacheReads(t *testing.T) {
 	for name, tc := range map[string]struct {
-		declare func(root string) GoEnvRoots
+		declare func(root string) string // the environment entry naming the root
 		read    func(root string) string
 	}{
 		"module cache": {
-			declare: func(root string) GoEnvRoots { return GoEnvRoots{ModuleCache: root} },
+			declare: func(root string) string { return "GOMODCACHE=" + root },
 			read:    func(root string) string { return filepath.Join(root, "example.com", "dep@v1.0.0", "dep.go") },
 		},
 		"build cache": {
-			declare: func(root string) GoEnvRoots { return GoEnvRoots{BuildCache: root} },
+			declare: func(root string) string { return "GOCACHE=" + root },
 			read:    func(root string) string { return filepath.Join(root, "aa", "object") },
 		},
 	} {
@@ -242,15 +245,17 @@ func TestIngestObservationClassifiesCacheReads(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv("TMPDIR", t.TempDir())
-			env := os.Environ()
-			state, err := IngestObservation(context.Background(), frame, capture, "package-test-binary:probe", env, tc.declare(root))
+			key, value, _ := strings.Cut(tc.declare(root), "=")
+			t.Setenv(key, value)
+			state, err := IngestObservation(context.Background(), frame, capture, "package-test-binary:probe", os.Environ())
 			if err != nil {
 				t.Fatal(err)
 			}
 			if state.Unverifiable {
 				t.Fatalf("declared %s read sealed: %+v", name, state)
 			}
-			state, err = IngestObservation(context.Background(), frame, capture, "package-test-binary:probe", env, GoEnvRoots{})
+			os.Unsetenv(key)
+			state, err = IngestObservation(context.Background(), frame, capture, "package-test-binary:probe", os.Environ())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -258,5 +263,63 @@ func TestIngestObservationClassifiesCacheReads(t *testing.T) {
 				t.Fatalf("undeclared %s read completed verifiable: %+v", name, state)
 			}
 		})
+	}
+}
+
+// The ingest carries the environment the process ran under, PWD naming
+// the package directory — not the module root: a non-root package's
+// observation completes and its cwd-relative read resolves under the
+// package (spec §7.8; the facade refuses any other PWD as incomplete,
+// which would silently blank the evidence of every non-root package).
+func TestIngestObservationRunsUnderThePackageDirectory(t *testing.T) {
+	root := t.TempDir()
+	pkg := filepath.Join(root, "sub")
+	if err := os.MkdirAll(pkg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkg, "fixture.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	frame := CaptureObservationFrame(context.Background(), root, "sub")
+	if frame.Reason() != "" {
+		t.Fatalf("frame capture failed: %s", frame.Reason())
+	}
+	capture := filepath.Join(t.TempDir(), "log")
+	if err := os.WriteFile(capture, []byte("# test log\nopen fixture.txt\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", t.TempDir())
+	state, err := IngestObservation(context.Background(), frame, capture, "package-test-binary:probe", os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Unverifiable {
+		t.Fatalf("a non-root package's observation did not complete: %+v", state)
+	}
+	paths, err := runtimeinput.Paths(state.Manifest, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 || paths[0] != filepath.Join(pkg, "fixture.txt") {
+		t.Fatalf("the cwd-relative read resolved as %v, want %s", paths, filepath.Join(pkg, "fixture.txt"))
+	}
+	// A declared scratch pattern names a namespace over the PACKAGE
+	// directory: a scratch read in a non-root package records nothing
+	// under the declaration (a namespace over the root would be inert
+	// against the package's bracket, and every run would re-stale on
+	// the minted name).
+	scratch := filepath.Join(t.TempDir(), "log")
+	if err := os.WriteFile(scratch, []byte("# test log\nopen bench-xyz/out.txt\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state, err = IngestObservation(context.Background(), frame, scratch, "package-test-binary:probe", os.Environ(), "bench-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Unverifiable {
+		t.Fatalf("scratch-declared non-root ingest sealed: %+v", state)
+	}
+	if paths, err = runtimeinput.Paths(state.Manifest, root); err != nil || len(paths) != 0 {
+		t.Fatalf("declared scratch read in a non-root package recorded: %v, %v", paths, err)
 	}
 }

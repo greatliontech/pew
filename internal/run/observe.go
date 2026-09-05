@@ -2,10 +2,6 @@ package run
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
@@ -26,34 +22,6 @@ func CaptureObservationFrame(ctx context.Context, moduleDir, pkgRel string) runt
 		filepath.Join(moduleDir, filepath.FromSlash(pkgRel)), runtimeinput.FrameOptions{})
 }
 
-// GoEnvRoots carries the toolchain-mediated classification roots the
-// testlog ingest options need: reads under them are guard-covered
-// (toolchain pin, version-addressed module immutability, cache
-// rederivation) rather than observed inputs.
-type GoEnvRoots struct {
-	Toolchain   string `json:"GOROOT"`
-	ModuleCache string `json:"GOMODCACHE"`
-	BuildCache  string `json:"GOCACHE"`
-}
-
-// ReadGoEnvRoots reads the classification roots from the same toolchain
-// and environment the measurement runs under.
-func ReadGoEnvRoots(moduleDir string, env []string) (GoEnvRoots, error) {
-	cmd := exec.Command("go", "env", "-json", "GOROOT", "GOMODCACHE", "GOCACHE")
-	resolved := gotool.CommandDir(moduleDir)
-	cmd.Dir = resolved
-	cmd.Env = gotool.CommandEnvironment(env, resolved)
-	out, err := cmd.Output()
-	if err != nil {
-		return GoEnvRoots{}, fmt.Errorf("go env: %w", err)
-	}
-	var roots GoEnvRoots
-	if err := json.Unmarshal(out, &roots); err != nil {
-		return GoEnvRoots{}, fmt.Errorf("go env: %w", err)
-	}
-	return roots, nil
-}
-
 // IngestObservation completes the run's observation from the testlog
 // capture and the pre-spawn frame through the facade's fold discipline
 // (spec §7.8): a refused frame, a missing, unreadable, or never-opened
@@ -69,8 +37,10 @@ func ReadGoEnvRoots(moduleDir string, env []string) (GoEnvRoots, error) {
 // package directory, admitting recordless only reads the engine proves
 // absent at both bracket endpoints — the declaration forfeits exactly
 // the appearance-pin of absence-probes matching the pattern, the
-// caller-side responsibility the directive's author takes on.
-func IngestObservation(ctx context.Context, frame runtimeinput.ProducerFrame, logPath, identity string, env []string, roots GoEnvRoots, scratch ...string) (runtimeinput.State, error) {
+// caller-side responsibility the directive's author takes on. The
+// classification roots come from the environment the process ran
+// under: the ingest carries the same environment the spawn used.
+func IngestObservation(ctx context.Context, frame runtimeinput.ProducerFrame, logPath, identity string, env []string, scratch ...string) (runtimeinput.State, error) {
 	namespaces := make([]runtimeinput.ScratchNamespace, 0, len(scratch))
 	for _, pattern := range scratch {
 		namespaces = append(namespaces, runtimeinput.ScratchNamespace{Dir: frame.PkgRel, Pattern: pattern})
@@ -78,12 +48,9 @@ func IngestObservation(ctx context.Context, frame runtimeinput.ProducerFrame, lo
 	observation, _, err := frame.Observe(ctx, logPath, runtimeinput.ProducerIngest{
 		Identity: identity,
 		Env:      gotool.CommandEnvironment(env, frame.PkgDir),
-		Roots: runtimeinput.ClassificationRoots{
-			Toolchain:     roots.Toolchain,
-			ModuleCache:   roots.ModuleCache,
-			BuildCache:    roots.BuildCache,
-			EphemeralTemp: filepath.Clean(os.TempDir()),
-		},
+		// The classification roots (toolchain, module cache, build
+		// cache, the temp root) are facts of the ingested environment
+		// the facade resolves; pew mints no scratch root of its own.
 		ScratchNamespaces: namespaces,
 	})
 	if err != nil {

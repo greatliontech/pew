@@ -520,13 +520,9 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 	if _, err := rc.executeGo(ctx, p.Module.Dir, "", env, run.BuildArgs(p.ImportPath, warmupPath)); err != nil {
 		return err
 	}
-	// Environment truths are per package, not per process: the classification
-	// roots and the target platform come from the same toolchain and
-	// environment every per-benchmark invocation runs under.
-	envRoots, err := run.ReadGoEnvRoots(p.Module.Dir, env)
-	if err != nil {
-		return err
-	}
+	// The target platform is a per-package truth: it comes from the same
+	// toolchain and environment every per-benchmark invocation runs
+	// under.
 	goos, goarch, err := run.ReadTargetPlatform(p.Module.Dir, env)
 	if err != nil {
 		return err
@@ -560,7 +556,7 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 			break
 		}
 		reportPhase(fmt.Sprintf("measuring %s arm %d/%d", p.ImportPath, i+1, len(runBenches)))
-		m, refused, err := measureBench(ctx, errw, rc, gc, p, envs.measured(), opts, pkgRel, name, envRoots, truth, scratch, conditions)
+		m, refused, err := measureBench(ctx, errw, rc, gc, p, envs.measured(), opts, pkgRel, name, truth, scratch, conditions)
 		if err != nil {
 			if ctx.Err() != nil {
 				stoppedAt = i
@@ -723,7 +719,7 @@ type armMeasurement struct {
 // surfaces as a crash and as a moved bracket, neither masking the other. In
 // every case only this arm's recording is discarded, its prior recording
 // untouched.
-func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, env []string, opts run.Options, pkgRel, name string, envRoots run.GoEnvRoots, truth run.ToolchainTruth, scratch []string, base run.Conditions) (armMeasurement, []string, error) {
+func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, env []string, opts run.Options, pkgRel, name string, truth run.ToolchainTruth, scratch []string, base run.Conditions) (armMeasurement, []string, error) {
 	pattern, err := restrictBenchmarkPattern(opts.Bench, []string{name})
 	if err != nil {
 		return armMeasurement{}, nil, err
@@ -802,7 +798,7 @@ func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStat
 	}
 	armConditions := base
 	armConditions.Throttled = throttled
-	runtimeState, err := run.IngestObservation(ctx, frame, testlogPath, "package-test-binary:"+p.ImportPath, env, envRoots, scratch...)
+	runtimeState, err := run.IngestObservation(ctx, frame, testlogPath, "package-test-binary:"+p.ImportPath, env, scratch...)
 	if err != nil {
 		return armMeasurement{}, nil, err
 	}
