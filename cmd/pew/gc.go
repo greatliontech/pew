@@ -49,11 +49,11 @@ func runGC(w io.Writer, benchDir string) error {
 		if p.Module.Dir == "" {
 			continue
 		}
-		dir := benchDir
-		if dir == "" {
-			dir = filepath.Join(p.Module.Dir, "benchmarks")
+		dir, err := moduleBenchDir(benchDir, p.Module.Dir)
+		if err != nil {
+			return err
 		}
-		pkgRel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, p.Module.Path), "/")
+		pkgRel := packageRel(p)
 		g := groups[dir]
 		if g == nil {
 			g = &gcGroup{moduleDir: p.Module.Dir, live: map[string]map[string]bool{}, protected: map[string]bool{}}

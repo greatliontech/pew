@@ -55,6 +55,9 @@ func newStatCmd() *cobra.Command {
 			if sc.explain && sc.jsonOut {
 				return fmt.Errorf("stat: --explain and -json are mutually exclusive (the explanation is a human view)")
 			}
+			if err := store.ValidateLabel(sc.label); err != nil {
+				return err
+			}
 			return runStat(cmd.OutOrStdout(), cmd.ErrOrStderr(), sc, args)
 		},
 	}
@@ -492,7 +495,7 @@ func statModules(pkgs []pkgMeta, sc statConfig, errw io.Writer) ([]*statModule, 
 		}
 		m := byDir[p.Module.Dir]
 		if m == nil {
-			dir, err := statBenchDir(p.Module.Dir, sc.benchDir)
+			dir, err := moduleBenchDir(sc.benchDir, p.Module.Dir)
 			if err != nil {
 				return nil, err
 			}
@@ -518,7 +521,7 @@ func statModules(pkgs []pkgMeta, sc statConfig, errw io.Writer) ([]*statModule, 
 			fmt.Fprintf(errw, "pew: warning: %s: %v\n", p.ImportPath, err)
 			continue
 		}
-		pkgRel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, p.Module.Path), "/")
+		pkgRel := packageRel(p)
 		for _, b := range benches {
 			m.current[statKey{pkgRel: pkgRel, bench: b, label: sc.label}] = currentBench{importPath: p.ImportPath, moduleDir: p.Module.Dir, pkgDir: p.Dir, mainPkg: p.Name == "main"}
 		}
@@ -529,16 +532,6 @@ func statModules(pkgs []pkgMeta, sc statConfig, errw io.Writer) ([]*statModule, 
 	}
 	sort.Slice(mods, func(i, j int) bool { return mods[i].moduleDir < mods[j].moduleDir })
 	return mods, nil
-}
-
-func statBenchDir(moduleDir, benchDir string) (string, error) {
-	if benchDir == "" {
-		return filepath.Join(moduleDir, "benchmarks"), nil
-	}
-	if filepath.IsAbs(benchDir) {
-		return benchDir, nil
-	}
-	return filepath.Abs(benchDir)
 }
 
 func historicalScanRoots(mods []*statModule) ([]string, error) {
@@ -592,7 +585,7 @@ func addHistoricalModules(mods []*statModule, repo *gitblob.Repo, refs []string,
 				if err != nil || f.Module == nil {
 					continue
 				}
-				benchDir, err := statBenchDir(moduleDir, sc.benchDir)
+				benchDir, err := moduleBenchDir(sc.benchDir, moduleDir)
 				if err != nil {
 					return nil, err
 				}

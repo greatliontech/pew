@@ -270,3 +270,57 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "26b5ca50f19bb885758fbf7fb397859630345b7b39807f3916da8be4eed34401"
 }
+
+bindings {
+  requirement_id: "REQ-pew-preparation"
+  content_hash: "fd391b4964e9ec1830eccfad12182830e08adcdf837687d1e798c45a8996c749"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestRunRefusesAnInvalidLabelAtEntry"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "24a09b2f472a514e49a32663a96b9543bd30a64d3b4ff029fb6a5255d72d57f6"
+}
+
+bindings {
+  requirement_id: "REQ-pew-preparation"
+  content_hash: "fd391b4964e9ec1830eccfad12182830e08adcdf837687d1e798c45a8996c749"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestRunPreparesEveryPackageBeforeAnyMeasurement"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6c914994a9b22296aa5290840be9262b9b4321d8eb33b5993b834322e6e9e32f"
+}
+
+bindings {
+  requirement_id: "REQ-pew-preparation"
+  content_hash: "fd391b4964e9ec1830eccfad12182830e08adcdf837687d1e798c45a8996c749"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestRunRefusesAStoreCoveredSourceBeforeTheWarmupBuild"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ceb071df652a18f42c7ef0d8a1d267e11e8aa13bca86af6ecc2c3e10d5a6cdb9"
+}
+
+bindings {
+  requirement_id: "REQ-pew-preparation"
+  content_hash: "fd391b4964e9ec1830eccfad12182830e08adcdf837687d1e798c45a8996c749"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestABPreparesEveryPackageBeforeAnyIteration"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "666f4005323e77f39099f58dc66a99ac04683987fcdd2dafe8e8e25fd9d24785"
+}
+
+bindings {
+  requirement_id: "REQ-pew-preparation"
+  content_hash: "fd391b4964e9ec1830eccfad12182830e08adcdf837687d1e798c45a8996c749"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestABStampsGuardProvenance"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d0c8433d43662f5fc515f5176fcfc551b42154ae06964a47468ab635e41cecf9"
+}
+
+bindings {
+  requirement_id: "REQ-pew-preparation"
+  content_hash: "fd391b4964e9ec1830eccfad12182830e08adcdf837687d1e798c45a8996c749"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestRunRefusesAnOverlappingDestinationBeforeTheWarmupBuild"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5a5f08f97274cca2db4444553f54a835f061e5286bfef744c4ff467a46126e11"
+}

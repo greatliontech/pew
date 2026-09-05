@@ -3,4 +3,5 @@
 
 requirement_id: "REQ-pew-mutable-local"
 reason: "the closure guards are enforced in the shared gofresh engine's own corpus (closure.md, purity.md); pew-side integration anchors over the engine seam are pending"
+content_hash: "7f2ae82fb280d181a4206e9507a191805f9d60217973e908db2c28897be95c56"
 lands { covered: "REQ-pew-mutable-local" }

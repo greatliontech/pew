@@ -64,6 +64,15 @@ func newRunCmd() *cobra.Command {
 					return fmt.Errorf("run: %s is both --assume-pure and --impure", b)
 				}
 			}
+			// A label the store cannot name is a flag value: it refuses
+			// here, before any listing or measurement (spec
+			// REQ-pew-preparation).
+			if err := store.ValidateLabel(rc.label); err != nil {
+				return err
+			}
+			if err := validateBenchmarkPattern(rc.opts.Bench); err != nil {
+				return err
+			}
 			if err := resolveVouches(); err != nil {
 				return err
 			}
@@ -134,38 +143,22 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 	}
 	gc := newGitStateCache(excludeDirs)
 	env := os.Environ()
-	// The scratch sweep runs at COMMAND ENTRY, before the module state
-	// cache pins its baseline: a leftover carrying git-visible files
-	// would otherwise enter the cached baseline, and its removal would
-	// abort the run as "repository state moved" — the exact failure the
-	// sweep exists to prevent.
-	for _, p := range pkgs {
-		if p.Module.Dir == "" {
-			continue
-		}
-		scratch, err := scratchPatterns(p)
-		if err != nil {
-			return err
-		}
-		if err := sweepScratchLeftovers(errw, p.Dir, scratch); err != nil {
-			return err
-		}
-	}
-	for _, p := range pkgs {
-		if p.Module.Dir == "" {
-			continue
-		}
-		_, _ = gc.state(p.Module.Dir)
-	}
+	// Every package prepares before any package measures (spec
+	// REQ-pew-preparation): the refusals the listing and the flags decide
+	// — the benchmark declarations, the store destinations, the effective
+	// GOFLAGS and PGO input, the toolchain provenance of every module —
+	// fire here, so a later package's preparation failure is known
+	// before an earlier package spends its measurement. Like status, a
+	// per-package failure (one that does not build, an unreadable PGO
+	// profile) is reported and does not abort the rest of the tree; a
+	// toolchain provenance failure aborts the invocation.
 	var failures []string
+	var prepared []*packagePreparation
 	for _, p := range pkgs {
 		if p.Module.Dir == "" {
 			continue
 		}
-		// Like status, a per-package failure (e.g. one that does not build, or
-		// an unreadable PGO profile) is reported and does not abort the rest
-		// of the tree.
-		e, pgoInput, err := newEngineForPkg(p, env)
+		prep, err := preparePackage(rc, p, env)
 		if err != nil {
 			var pe *toolchainProvenanceError
 			if errors.As(err, &pe) {
@@ -173,12 +166,38 @@ func runRun(w, errw io.Writer, rc runConfig, patterns []string) error {
 			}
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
 			failures = append(failures, p.ImportPath)
+			// A refused package runs nothing, but the sweep still visits
+			// it: its leftover would otherwise enter a sibling's baseline
+			// and stamp that sibling's recording dirty.
+			if prep != nil {
+				prep.runBenches = nil
+				prepared = append(prepared, prep)
+			}
 			continue
 		}
-		runErr := runPackage(w, errw, e, gc, rc, p, env, conditions, pgoInput)
-		if runErr != nil {
-			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, runErr)
-			failures = append(failures, p.ImportPath)
+		prepared = append(prepared, prep)
+	}
+	// The scratch sweep runs before the module state cache pins its
+	// baseline: a leftover carrying git-visible files would otherwise
+	// enter the cached baseline, and its removal would abort the run as
+	// "repository state moved" — the exact failure the sweep exists to
+	// prevent. It sweeps the prepared packages' directories with the
+	// directives their records carry.
+	for _, prep := range prepared {
+		if err := sweepScratchLeftovers(errw, prep.pkg.Dir, prep.scratch); err != nil {
+			return err
+		}
+	}
+	for _, prep := range prepared {
+		_, _ = gc.state(prep.pkg.Module.Dir)
+	}
+	for _, prep := range prepared {
+		if len(prep.runBenches) == 0 {
+			continue
+		}
+		if runErr := runPreparedPackage(w, errw, gc, rc, prep, env, conditions); runErr != nil {
+			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", prep.pkg.ImportPath, runErr)
+			failures = append(failures, prep.pkg.ImportPath)
 		}
 	}
 	if len(failures) > 0 {
@@ -198,6 +217,12 @@ type gitStateCache struct {
 type gitStateResult struct {
 	state gitblob.RepositoryState
 	err   error
+}
+
+// packageRel is a package's module-relative, slash-separated path — the
+// store's package coordinate ("" for the module root).
+func packageRel(p pkgMeta) string {
+	return strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, p.Module.Path), "/")
 }
 
 // moduleBenchDir resolves the recording store for a module: the configured
@@ -282,31 +307,84 @@ func (c *gitStateCache) snapshot(moduleDir string) (gitblob.RepositoryState, err
 	return gitblob.Snapshot(moduleDir, c.exclude...)
 }
 
-func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig, p pkgMeta, env []string, conditions run.Conditions, pgoInput string) error {
-	benches, err := selectedBenchmarks(p)
-	if err != nil {
-		return err
-	}
-	if len(benches) == 0 {
-		return nil
-	}
+// packagePreparation is one package's preparation record (spec
+// REQ-pew-preparation): everything the listing and the flags decide,
+// computed after `go list` and before any engine build or measurement
+// — the benchmark declarations and the ones the pattern selects, the
+// scratch directives, the recording store and the validated
+// destinations, and the engine with its effective PGO input (which
+// samples the module's GOFLAGS and toolchain provenance). A package
+// with nothing selected keeps a record too — its scratch directives
+// still drive the entry sweep — but builds no engine and has nothing
+// to refuse or run.
+type packagePreparation struct {
+	pkg                 pkgMeta
+	benches, runBenches []string
+	scratch             []string
+	benchDir, pkgRel    string
+	st                  *store.Store
+	destinations        []store.Destination
+	engine              *gofresh.Engine
+	pgoInput            string
+}
+
+// preparePackage builds a package's preparation record, firing every
+// refusal its inputs decide. The order is the cost order: the
+// declarations (a parse) and the destinations (path rules and one
+// Lstat each) before the engine (two `go env` processes and the PGO
+// digest), so the cheapest refusal fires first. A refused package
+// still returns the record it got as far as — its scratch directives
+// drive the entry sweep whether or not it runs — beside the error.
+func preparePackage(rc runConfig, p pkgMeta, env []string) (*packagePreparation, error) {
+	return preparePackageWith(rc, p, func() (*gofresh.Engine, string, error) { return newEngineForPkg(p, env) })
+}
+
+// preparePackageWith is preparePackage over a caller-supplied engine
+// constructor — the seam tests inject a prebuilt engine through.
+func preparePackageWith(rc runConfig, p pkgMeta, newEngine func() (*gofresh.Engine, string, error)) (*packagePreparation, error) {
 	scratch, err := scratchPatterns(p)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	benches, err := selectedBenchmarks(p)
+	if err != nil {
+		return nil, err
+	}
+	prep := &packagePreparation{pkg: p, benches: benches, scratch: scratch}
+	if len(benches) == 0 {
+		return prep, nil
 	}
 	runBenches, err := matchingBenchmarks(benches, rc.opts.Bench)
 	if err != nil {
-		return err
+		return prep, err
 	}
 	if len(runBenches) == 0 {
-		return nil
+		return prep, nil
 	}
 	dir, err := moduleBenchDir(rc.benchDir, p.Module.Dir)
 	if err != nil {
-		return err
+		return prep, err
 	}
 	st := store.New(dir)
-	pkgRel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, p.Module.Path), "/")
+	pkgRel := packageRel(p)
+	keys := make([]store.Key, 0, len(runBenches))
+	for _, bench := range runBenches {
+		keys = append(keys, store.Key{PkgRel: pkgRel, Bench: bench, Label: rc.label})
+	}
+	destinations, err := st.Destinations(keys)
+	if err != nil {
+		return prep, err
+	}
+	e, pgoInput, err := newEngine()
+	if err != nil {
+		return prep, err
+	}
+	prep.runBenches, prep.benchDir, prep.pkgRel, prep.st, prep.destinations, prep.engine, prep.pgoInput = runBenches, dir, pkgRel, st, destinations, e, pgoInput
+	return prep, nil
+}
+
+func runPreparedPackage(w, errw io.Writer, gc *gitStateCache, rc runConfig, prep *packagePreparation, env []string, conditions run.Conditions) error {
+	p, e, st, pkgRel, scratch, runBenches, pgoInput := prep.pkg, prep.engine, prep.st, prep.pkgRel, prep.scratch, prep.runBenches, prep.pgoInput
 	baseline, err := gc.state(p.Module.Dir)
 	if err != nil {
 		return err
@@ -364,6 +442,20 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 	}
 	encodedLedger, err := run.EncodeLedger(run.LedgerFromGofresh(packageLedger))
 	if err != nil {
+		return err
+	}
+	// The two refusals the view decides fire the moment it exists,
+	// before the warm-up build and the first arm (spec
+	// REQ-pew-preparation): a measured source under the recording store,
+	// or a recording destination overlapping a source input.
+	if err := rejectStoreCoveredSources(view.SourceFiles(), gc.exclude...); err != nil {
+		return err
+	}
+	recordingPaths := make([]string, 0, len(prep.destinations))
+	for _, d := range prep.destinations {
+		recordingPaths = append(recordingPaths, d.Path)
+	}
+	if err := rejectRecordingDestinations(view.SourceFiles(), recordingPaths); err != nil {
 		return err
 	}
 
@@ -471,20 +563,6 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 			written = append(written, name)
 		}
 		sort.Slice(writes, func(i, j int) bool { return writes[i].Bench < writes[j].Bench })
-		recordingPaths := make([]string, 0, len(writes))
-		for _, write := range writes {
-			path, err := st.Path(write.PkgRel, write.Bench, write.Label)
-			if err != nil {
-				return err
-			}
-			recordingPaths = append(recordingPaths, path)
-		}
-		if err := rejectStoreCoveredSources(view.SourceFiles(), gc.exclude...); err != nil {
-			return err
-		}
-		if err := rejectRecordingDestinations(view.SourceFiles(), recordingPaths); err != nil {
-			return err
-		}
 		if err := view.Validate(ctx); err != nil {
 			return err
 		}
@@ -731,6 +809,14 @@ func requireBenchmarkGroups(names []string, groups map[string][]*benchfmt.Result
 		}
 	}
 	return nil
+}
+
+// validateBenchmarkPattern refuses a -bench pattern that does not
+// compile — a flag value, refused at command entry on every verb that
+// takes one, before any listing (REQ-pew-preparation).
+func validateBenchmarkPattern(pattern string) error {
+	_, err := matchingBenchmarks(nil, pattern)
+	return err
 }
 
 func matchingBenchmarks(names []string, pattern string) ([]string, error) {

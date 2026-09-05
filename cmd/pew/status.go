@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"unicode"
@@ -49,6 +48,9 @@ func newStatusCmd() *cobra.Command {
 			}
 			if explain && jsonOut {
 				return fmt.Errorf("status: --explain and -json are mutually exclusive (the explanation is a human view)")
+			}
+			if err := store.ValidateLabel(label); err != nil {
+				return err
 			}
 			patterns := args
 			if len(patterns) == 0 {
@@ -254,12 +256,12 @@ func statusPackage(w, errw io.Writer, e *gofresh.Engine, benchDir, label string,
 	if len(benches) == 0 {
 		return nil
 	}
-	dir := benchDir
-	if dir == "" {
-		dir = filepath.Join(p.Module.Dir, "benchmarks")
+	dir, err := moduleBenchDir(benchDir, p.Module.Dir)
+	if err != nil {
+		return err
 	}
 	st := store.New(dir)
-	pkgRel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, p.Module.Path), "/")
+	pkgRel := packageRel(p)
 	rows, err := checkPackage(st, e, p.ImportPath, pkgRel, p.Module.Dir, benches, label)
 	if err != nil {
 		return err

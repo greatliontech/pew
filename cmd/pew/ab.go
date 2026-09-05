@@ -116,6 +116,14 @@ func newABCmd() *cobra.Command {
 		Long:  guidanceHelp("ab"),
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// The flag values the verb alone decides refuse here, before
+			// any listing (REQ-pew-preparation).
+			if ac.count < 1 {
+				return fmt.Errorf("ab: count must be at least 1")
+			}
+			if err := validateBenchmarkPattern(ac.bench); err != nil {
+				return err
+			}
 			return runAB(cmd.OutOrStdout(), cmd.ErrOrStderr(), ac, args)
 		},
 	}
@@ -171,41 +179,82 @@ func runAB(w, errw io.Writer, ac abConfig, patterns []string) error {
 	}
 	defer cleanup()
 	env := os.Environ()
+	// Every package prepares before any package measures (spec
+	// REQ-pew-preparation): containment, the B side's existence, both
+	// trees' benchmark declarations against the pattern, both builds,
+	// both guard captures, and the guard comparison — so a later
+	// package's refusal is known before an earlier package spends its
+	// 2 × count iterations, and a guard mismatch never reaches a first
+	// iteration.
+	var preps []*abPreparation
 	for _, p := range pkgs {
-		// Each package's own module maps into the worktree - a go.work
-		// pattern can resolve packages from several modules, and a
-		// module outside this repository has no B side to compare.
-		moduleRel, err := filepath.Rel(repoRoot, p.Module.Dir)
-		if err != nil || strings.HasPrefix(moduleRel, "..") {
-			return fmt.Errorf("ab: package %s lives in a module outside this repository (%s)", p.ImportPath, p.Module.Dir)
+		prep, err := prepareABPackage(ac, p, repoRoot, worktree, env)
+		if prep != nil && prep.tmp != "" {
+			defer os.RemoveAll(prep.tmp)
 		}
-		if err := abPackage(w, errw, ac, p, repoRoot, worktree, moduleRel, env); err != nil {
+		if err != nil {
+			return err
+		}
+		preps = append(preps, prep)
+	}
+	for _, prep := range preps {
+		if err := abPackage(w, errw, ac, prep, env); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func abPackage(w, errw io.Writer, ac abConfig, p pkgMeta, repoRoot, worktree, moduleRel string, env []string) error {
+// abPreparation is one package's A/B preparation record: both sides
+// located, built, and guard-captured, the guards agreeing on every
+// comparison key, before the first iteration.
+type abPreparation struct {
+	pkg              pkgMeta
+	sideBPkgDir      string
+	tmp, binA, binB  string
+	guardsA, guardsB guard.Guards
+}
+
+// prepareABPackage builds a package's A/B preparation record, firing
+// every refusal the two trees decide before any iteration; a returned
+// record with a temp dir owns it even when the error is non-nil.
+func prepareABPackage(ac abConfig, p pkgMeta, repoRoot, worktree string, env []string) (*abPreparation, error) {
+	// Each package's own module maps into the worktree - a go.work
+	// pattern can resolve packages from several modules, and a
+	// module outside this repository has no B side to compare.
+	moduleRel, err := filepath.Rel(repoRoot, p.Module.Dir)
+	if err != nil || strings.HasPrefix(moduleRel, "..") {
+		return nil, fmt.Errorf("ab: package %s lives in a module outside this repository (%s)", p.ImportPath, p.Module.Dir)
+	}
 	pkgRelToModule, err := filepath.Rel(p.Module.Dir, p.Dir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	sideBModule := filepath.Join(worktree, moduleRel)
 	sideBPkgDir := filepath.Join(sideBModule, pkgRelToModule)
 	if _, err := os.Stat(sideBPkgDir); err != nil {
-		return fmt.Errorf("ab: package %s does not exist at %s: %w", p.ImportPath, ac.ref, err)
+		return nil, fmt.Errorf("ab: package %s does not exist at %s: %w", p.ImportPath, ac.ref, err)
 	}
+	// The pattern must name a benchmark on both sides: the declarations
+	// are parseable from source before any build or run.
+	if err := abPatternSelects(p, sideBPkgDir, ac); err != nil {
+		return nil, err
+	}
+	prep := &abPreparation{pkg: p, sideBPkgDir: sideBPkgDir}
 	// Both sides build BEFORE either side measures: two standing
 	// binaries make interleaving free, and the shared build cache makes
-	// the second build cheap.
-	tmp, err := os.MkdirTemp("", "pew-ab-*")
+	// the second build cheap. Every package's binaries stand for the
+	// whole run (preparation precedes the first iteration), so they
+	// live beside the repository like the worktree does — never under a
+	// temp root that may be memory-backed, where a tree's worth of test
+	// binaries would perturb the measurement they serve.
+	tmp, err := os.MkdirTemp(filepath.Dir(repoRoot), ".pew-ab-bin-*")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer os.RemoveAll(tmp)
-	binA := filepath.Join(tmp, "a.test")
-	binB := filepath.Join(tmp, "b.test")
+	prep.tmp = tmp
+	prep.binA = filepath.Join(tmp, "a.test")
+	prep.binB = filepath.Join(tmp, "b.test")
 	// Builds run at each side's MODULE root with a relative package
 	// target, exactly as the recording path builds: a relative -pgo in
 	// GOFLAGS resolves against the build cwd, and the guard digest pins
@@ -215,11 +264,11 @@ func abPackage(w, errw io.Writer, ac abConfig, p pkgMeta, repoRoot, worktree, mo
 	if pkgRelToModule != "." {
 		relTarget = "./" + filepath.ToSlash(pkgRelToModule)
 	}
-	if err := ac.buildBinary(p.Module.Dir, env, []string{"test", "-c", "-o", binA, relTarget}); err != nil {
-		return fmt.Errorf("ab: building side A (working tree): %w", err)
+	if err := ac.buildBinary(p.Module.Dir, env, []string{"test", "-c", "-o", prep.binA, relTarget}); err != nil {
+		return prep, fmt.Errorf("ab: building side A (working tree): %w", err)
 	}
-	if err := ac.buildBinary(sideBModule, env, []string{"test", "-c", "-o", binB, relTarget}); err != nil {
-		return fmt.Errorf("ab: building side B (%s): %w", ac.ref, err)
+	if err := ac.buildBinary(sideBModule, env, []string{"test", "-c", "-o", prep.binB, relTarget}); err != nil {
+		return prep, fmt.Errorf("ab: building side B (%s): %w", ac.ref, err)
 	}
 	// Guards are captured at build time, not after measurement: the stamp
 	// claims the BUILD identity of the two standing binaries, and the
@@ -231,16 +280,79 @@ func abPackage(w, errw io.Writer, ac abConfig, p pkgMeta, repoRoot, worktree, mo
 	// default.pgo there regardless of what the working tree renamed.
 	nameB, err := abPackageName(sideBPkgDir, env)
 	if err != nil {
-		return fmt.Errorf("ab: resolving side B package at %s: %w", ac.ref, err)
+		return prep, fmt.Errorf("ab: resolving side B package at %s: %w", ac.ref, err)
 	}
-	guardsA, err := ac.sideGuards(p.Module.Dir, p.Dir, p.Name == "main", env)
+	prep.guardsA, err = ac.sideGuards(p.Module.Dir, p.Dir, p.Name == "main", env)
 	if err != nil {
-		return fmt.Errorf("ab: capturing side A guards: %w", err)
+		return prep, fmt.Errorf("ab: capturing side A guards: %w", err)
 	}
-	guardsB, err := ac.sideGuards(sideBModule, sideBPkgDir, nameB == "main", env)
+	prep.guardsB, err = ac.sideGuards(sideBModule, sideBPkgDir, nameB == "main", env)
 	if err != nil {
-		return fmt.Errorf("ab: capturing side B guards: %w", err)
+		return prep, fmt.Errorf("ab: capturing side B guards: %w", err)
 	}
+	// A guard mismatch is refused HERE, before the first iteration (spec
+	// §12): the comparator would only note it after the whole
+	// measurement, which is the spend the refusal exists to save.
+	if err := abGuardsAgree(p.ImportPath, ac.ref, prep.guardsA, prep.guardsB); err != nil {
+		return prep, err
+	}
+	return prep, nil
+}
+
+// abPatternSelects refuses a pattern naming no benchmark on either side.
+func abPatternSelects(p pkgMeta, sideBPkgDir string, ac abConfig) error {
+	benchesA, err := selectedBenchmarks(p)
+	if err != nil {
+		return err
+	}
+	setB, _, err := sourceBenchmarks(sideBPkgDir)
+	if err != nil {
+		return fmt.Errorf("ab: scanning side B benchmarks at %s: %w", ac.ref, err)
+	}
+	benchesB := make([]string, 0, len(setB))
+	for b := range setB {
+		benchesB = append(benchesB, b)
+	}
+	// Side A first: the listing's declarations are exact, the B side's
+	// scan is over every test file in the directory.
+	for _, side := range []struct {
+		name    string
+		benches []string
+	}{{"side A", benchesA}, {"side B", benchesB}} {
+		matched, err := matchingBenchmarks(side.benches, ac.bench)
+		if err != nil {
+			return err
+		}
+		if len(matched) == 0 {
+			return fmt.Errorf("ab: %s: pattern %q selects no benchmark on %s", p.ImportPath, ac.bench, side.name)
+		}
+	}
+	return nil
+}
+
+// abGuardsAgree refuses a B side whose build identity differs from A's
+// on any comparison guard — the four keys the measurement comparison
+// judges (run.GuardConfig's order: toolchain, buildconfig, machine,
+// runtimeconfig) — naming the first differing guard and both values.
+// Two live captures compare by value alone: a stored recording's
+// completeness rule (an empty recorded guard is a mismatch) is not
+// theirs, and no guard's emptiness may shadow a later guard's
+// difference. Two sides captured on one host from one environment
+// share the machine and runtime-configuration guards by construction;
+// the toolchain directive and the PGO bytes are the ones a ref can
+// change.
+func abGuardsAgree(importPath, ref string, a, b guard.Guards) error {
+	sideA, sideB := run.GuardConfig(a), run.GuardConfig(b)
+	for i := range sideA {
+		if va, vb := string(sideA[i].Value), string(sideB[i].Value); va != vb {
+			return fmt.Errorf("ab: %s: %s mismatch (A=%s B=%s at %s); refusing before measurement", importPath, sideA[i].Key, va, vb, ref)
+		}
+	}
+	return nil
+}
+
+func abPackage(w, errw io.Writer, ac abConfig, prep *abPreparation, env []string) error {
+	p, sideBPkgDir, binA, binB, guardsA, guardsB := prep.pkg, prep.sideBPkgDir, prep.binA, prep.binB, prep.guardsA, prep.guardsB
 	args := []string{"-test.run=^$", "-test.bench=" + ac.bench, "-test.count=1"}
 	if ac.benchtime != "" {
 		args = append(args, "-test.benchtime="+ac.benchtime)

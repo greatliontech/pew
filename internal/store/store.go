@@ -94,8 +94,8 @@ func (s *Store) Path(pkgRel, bench, label string) (string, error) {
 	}
 	name := bench
 	if label != "" {
-		if !labelRe.MatchString(label) {
-			return "", fmt.Errorf("store: invalid label %q (want [A-Za-z0-9_-]+)", label)
+		if err := ValidateLabel(label); err != nil {
+			return "", err
 		}
 		name = bench + "." + label
 	}
@@ -152,6 +152,59 @@ func (s *Store) WriteBatch(requests []WriteRequest) error {
 	return s.writeBatch(requests, nil)
 }
 
+// ValidateLabel refuses a variant label the store cannot name; the
+// flag that carries one is refused at command entry through it, before
+// any listing or measurement.
+func ValidateLabel(label string) error {
+	if label != "" && !labelRe.MatchString(label) {
+		return fmt.Errorf("store: invalid label %q (want [A-Za-z0-9_-]+)", label)
+	}
+	return nil
+}
+
+// Key names one recording: its package coordinate, benchmark, and label.
+type Key struct {
+	PkgRel, Bench, Label string
+}
+
+// Destination is one recording's resolved store path.
+type Destination struct {
+	Key
+	Path string
+}
+
+// Destinations resolves and validates the store paths a set of
+// recordings would install to — the label, package path, and benchmark
+// name each well-formed, no two recordings sharing a path, and no path
+// occupied by anything but a regular file — in the order given. It is
+// the one derivation of a recording's destination: a write installs
+// through it, and a run's preparation refuses through it before any
+// measurement, since every input it judges is known from the listing
+// and the flags alone.
+func (s *Store) Destinations(keys []Key) ([]Destination, error) {
+	out := make([]Destination, 0, len(keys))
+	seen := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		path, err := s.Path(k.PkgRel, k.Bench, k.Label)
+		if err != nil {
+			return nil, err
+		}
+		if seen[path] {
+			return nil, fmt.Errorf("store: duplicate recording destination: %s", path)
+		}
+		seen[path] = true
+		if info, err := os.Lstat(path); err == nil {
+			if !info.Mode().IsRegular() {
+				return nil, fmt.Errorf("store: recording destination is not a regular file: %s", path)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		out = append(out, Destination{Key: k, Path: path})
+	}
+	return out, nil
+}
+
 func (s *Store) writeBatch(requests []WriteRequest, beforeInstall func()) error {
 	type stagedWrite struct {
 		path, temp, backup string
@@ -159,7 +212,6 @@ func (s *Store) writeBatch(requests []WriteRequest, beforeInstall func()) error 
 		installed          bool
 	}
 	staged := make([]stagedWrite, 0, len(requests))
-	destinations := make(map[string]bool, len(requests))
 	cleanupTemps := func() {
 		for _, item := range staged {
 			if item.temp != "" {
@@ -167,30 +219,22 @@ func (s *Store) writeBatch(requests []WriteRequest, beforeInstall func()) error 
 			}
 		}
 	}
+	// The one destination derivation over the whole batch: empty
+	// recordings refuse first, then every path resolves and the
+	// duplicate check spans the batch.
+	keys := make([]Key, 0, len(requests))
 	for _, request := range requests {
 		if len(request.Results) == 0 {
-			cleanupTemps()
 			return fmt.Errorf("store: refusing to write empty recording for %s", request.Bench)
 		}
-		path, err := s.Path(request.PkgRel, request.Bench, request.Label)
-		if err != nil {
-			cleanupTemps()
-			return err
-		}
-		if destinations[path] {
-			cleanupTemps()
-			return fmt.Errorf("store: duplicate recording destination: %s", path)
-		}
-		destinations[path] = true
-		if info, err := os.Lstat(path); err == nil {
-			if !info.Mode().IsRegular() {
-				cleanupTemps()
-				return fmt.Errorf("store: recording destination is not a regular file: %s", path)
-			}
-		} else if !errors.Is(err, os.ErrNotExist) {
-			cleanupTemps()
-			return err
-		}
+		keys = append(keys, Key{PkgRel: request.PkgRel, Bench: request.Bench, Label: request.Label})
+	}
+	dests, err := s.Destinations(keys)
+	if err != nil {
+		return err
+	}
+	for i, request := range requests {
+		path := dests[i].Path
 		dir := filepath.Dir(path)
 		if err := s.ensureDir(dir); err != nil {
 			cleanupTemps()

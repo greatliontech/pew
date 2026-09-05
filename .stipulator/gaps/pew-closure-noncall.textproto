@@ -3,4 +3,5 @@
 
 requirement_id: "REQ-pew-closure-noncall"
 reason: "the closure guards are enforced in the shared gofresh engine's own corpus (closure.md, purity.md); pew-side integration anchors over the engine seam are pending"
+content_hash: "02739da44b7b9a6810c110b029225559056b4f1e826bbb697353d3e918028d4b"
 lands { covered: "REQ-pew-closure-noncall" }

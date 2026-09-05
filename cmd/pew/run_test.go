@@ -2083,3 +2083,18 @@ func TestRunPerArmScratchSweepIsolation(t *testing.T) {
 		t.Errorf("sibling manifest carries the leaving arm's scratch leftover: %s", manifest)
 	}
 }
+
+// runPackage prepares one package over a prebuilt engine and runs it:
+// the shape the per-package tests drive, preparation included, so every
+// preparation-time refusal they exercise fires where the command fires
+// it.
+func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig, p pkgMeta, env []string, conditions runpkg.Conditions, pgoInput string) error {
+	prep, err := preparePackageWith(rc, p, func() (*gofresh.Engine, string, error) { return e, pgoInput, nil })
+	if err != nil {
+		return err
+	}
+	if prep == nil || len(prep.runBenches) == 0 {
+		return nil
+	}
+	return runPreparedPackage(w, errw, gc, rc, prep, env, conditions)
+}

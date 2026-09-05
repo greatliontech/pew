@@ -232,14 +232,18 @@ func TestABStampsGuardProvenance(t *testing.T) {
 		}
 	}
 
-	// A per-side build-identity difference is a genuine mismatch: the
-	// refusal machinery must stay live through the stamping, and side B
-	// (the ref) must land as base. The working-tree module dir repeats
-	// across runs while each run's worktree is unique, so membership in
-	// the first run's dirs identifies side A without any call-order
-	// assumption.
+	// A per-side build-identity difference is a genuine mismatch,
+	// refused before the first iteration with the guard and both sides
+	// named (spec §12, REQ-pew-preparation) — never a note after the
+	// measurement spend. The working-tree module dir repeats across runs
+	// while each run's worktree is unique, so membership in the first
+	// run's dirs identifies side A without any call-order assumption.
 	split := base
-	split.execute = shared.execute
+	iterations := 0
+	split.execute = func(dir, pin string, env []string, bin string, args []string) ([]byte, error) {
+		iterations++
+		return shared.execute(dir, pin, env, bin, args)
+	}
 	split.guards = func(moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
 		g := guard.Guards{Toolchain: "go1", BuildConfig: "b1", Machine: "m1", RuntimeConfig: "r1"}
 		seenInSharedRun := false
@@ -255,11 +259,44 @@ func TestABStampsGuardProvenance(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if err := runAB(&out, &errOut, split, []string{"."}); err != nil {
-		t.Fatalf("runAB: %v\nstderr: %s", err, errOut.String())
+	err = runAB(&out, &errOut, split, []string{"."})
+	if err == nil || !strings.Contains(err.Error(), "toolchain mismatch (A=go1 B=go2") {
+		t.Fatalf("differing toolchain guards did not refuse with the mismatch named: %v\n%s", err, out.String())
 	}
-	if !strings.Contains(out.String(), "toolchain mismatch (base=go2 new=go1)") || !strings.Contains(out.String(), "not compared") {
-		t.Fatalf("differing toolchain guards did not refuse with side B as base:\n%s", out.String())
+	if iterations != 0 {
+		t.Fatalf("a refused guard mismatch still ran %d iterations", iterations)
+	}
+	// The PGO bytes are the other build identity a ref can change: a
+	// buildconfig-only difference refuses the same way.
+	pgo := split
+	pgo.guards = func(moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
+		g := guard.Guards{Toolchain: "go1", BuildConfig: "b1", Machine: "m1", RuntimeConfig: "r1"}
+		for _, d := range sharedDirs {
+			if d == moduleDir {
+				return g, nil
+			}
+		}
+		g.BuildConfig = "b2"
+		return g, nil
+	}
+	iterations = 0
+	out.Reset()
+	err = runAB(&out, &errOut, pgo, []string{"."})
+	if err == nil || !strings.Contains(err.Error(), "buildconfig mismatch (A=b1 B=b2") || iterations != 0 {
+		t.Fatalf("differing PGO guards = %v after %d iterations; want the refusal before any", err, iterations)
+	}
+	// An earlier guard empty on both sides never shadows a later
+	// difference: two live captures compare by value, guard by guard.
+	shadow := pgo
+	shadow.guards = func(moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
+		g, _ := pgo.guards(moduleDir, pkgDir, mainPkg, env)
+		g.Toolchain = ""
+		return g, nil
+	}
+	iterations = 0
+	err = runAB(&out, &errOut, shadow, []string{"."})
+	if err == nil || !strings.Contains(err.Error(), "buildconfig mismatch (A=b1 B=b2") || iterations != 0 {
+		t.Fatalf("an empty toolchain guard shadowed the PGO difference: %v after %d iterations", err, iterations)
 	}
 }
 
