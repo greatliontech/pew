@@ -94,7 +94,19 @@ func newEngineForPkg(p pkgMeta, env []string) (*gofresh.Engine, string, error) {
 	return newEngineAt(p.Module.Dir, p.Dir, p.Name == "main", env)
 }
 
+// newEngineForPkgProducer is newEngineForPkg with the environment the
+// measured processes run under when it differs from the analysis one
+// (a pinned run's GOMAXPROCS): the runtime-configuration guard and
+// runtime-input revalidation take it, loads and builds keep env.
+func newEngineForPkgProducer(p pkgMeta, env, producerEnv []string) (*gofresh.Engine, string, error) {
+	return newEngineAtProducer(p.Module.Dir, p.Dir, p.Name == "main", env, producerEnv)
+}
+
 func newEngineAt(moduleDir, pkgDir string, mainPkg bool, env []string) (*gofresh.Engine, string, error) {
+	return newEngineAtProducer(moduleDir, pkgDir, mainPkg, env, nil)
+}
+
+func newEngineAtProducer(moduleDir, pkgDir string, mainPkg bool, env, producerEnv []string) (*gofresh.Engine, string, error) {
 	if err := resolveVouches(); err != nil {
 		return nil, "", err
 	}
@@ -106,7 +118,7 @@ func newEngineAt(moduleDir, pkgDir string, mainPkg bool, env []string) (*gofresh
 	if err != nil {
 		return nil, "", err
 	}
-	e, err := buildEngine(moduleDir, env, pgo)
+	e, err := buildEngine(moduleDir, env, producerEnv, pgo)
 	return e, pgo, err
 }
 
@@ -190,7 +202,7 @@ func emitEngineDiagnostic(p gofresh.Progress) {
 	reportPhase(fmt.Sprintf("analysis %s %s", p.Phase, p.Package))
 }
 
-func buildEngine(moduleDir string, env []string, pgo string) (*gofresh.Engine, error) {
+func buildEngine(moduleDir string, env, producerEnv []string, pgo string) (*gofresh.Engine, error) {
 	// Every pew engine attests single-subject execution: `pew run`
 	// measures each benchmark in a process of its own (spec §9), and
 	// status/stat must judge recordings under the same premise they
@@ -204,6 +216,9 @@ func buildEngine(moduleDir string, env []string, pgo string) (*gofresh.Engine, e
 		gofresh.WithProgress(emitEngineDiagnostic)}
 	if pgo != "" {
 		opts = append(opts, gofresh.WithBuildInputs(pgo))
+	}
+	if producerEnv != nil {
+		opts = append(opts, gofresh.WithProducerEnv(producerEnv...))
 	}
 	if len(dynamicStateVouches) > 0 {
 		opts = append(opts, gofresh.WithDynamicStateVouches(dynamicStateVouches...))
@@ -374,14 +389,13 @@ type benchVerdict struct {
 // plus one more per rider - cost, not soundness: every fingerprint
 // component is per subject or per package except the guards, which
 // come from the module, environment, and kind alone, so the verdicts
-// are identical under any subject grouping. The
-// per-benchmark purity fold and every per-recording gate are unchanged.
+// are identical under any subject grouping. Every per-recording gate
+// is unchanged.
 func checkPackage(ctx context.Context, st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir string, benches []string, label string, view *gofresh.View) (map[string]*benchVerdict, error) {
 	out := map[string]*benchVerdict{}
 	type pending struct {
 		bench  string
 		fp     gofresh.Fingerprint
-		pure   string
 		ledger string
 	}
 	var checks []pending
@@ -400,12 +414,12 @@ func checkPackage(ctx context.Context, st *store.Store, e *gofresh.Engine, pkgPa
 			bv.v, bv.reason = verdictStale, "format"
 			continue
 		}
-		fp, pure, recordedLedger, ok := fingerprintFromConfig(recs[0].Config)
+		fp, recordedLedger, ok := fingerprintFromConfig(recs[0].Config)
 		if !ok {
 			bv.v, bv.reason = verdictStale, "format"
 			continue
 		}
-		checks = append(checks, pending{b, fp, pure, recordedLedger})
+		checks = append(checks, pending{b, fp, recordedLedger})
 	}
 	if len(checks) == 0 {
 		return out, nil
@@ -446,7 +460,6 @@ func checkPackage(ctx context.Context, st *store.Store, e *gofresh.Engine, pkgPa
 				v, refreshedFP, pendingLedger = rv, refreshed, encoded
 			}
 		}
-		v = applyPurity(v, c.pure)
 		if v.Status == gofresh.Valid && pendingLedger != "" {
 			bv.grownLedger = pendingLedger
 			bv.fp = refreshedFP
@@ -464,7 +477,7 @@ func verdictForRecs(ctx context.Context, e *gofresh.Engine, pkgPath, moduleDir, 
 	if !store.IsRecordingShape(recs) {
 		return verdictStale, "format", gofresh.Fingerprint{}, "", nil
 	}
-	fp, pure, recordedLedger, ok := fingerprintFromConfig(recs[0].Config)
+	fp, recordedLedger, ok := fingerprintFromConfig(recs[0].Config)
 	if !ok {
 		return verdictStale, "format", gofresh.Fingerprint{}, "", nil
 	}
@@ -476,15 +489,14 @@ func verdictForRecs(ctx context.Context, e *gofresh.Engine, pkgPath, moduleDir, 
 	var refreshedFP gofresh.Fingerprint
 	if v.Status == gofresh.Stale && v.Reason == "test variants" {
 		if refreshed, encoded, rv, ok := inertGrownRecheck(ctx, e, moduleDir, pkgPath, bench, recordedLedger, fp); ok {
-			// The refreshed verdict takes the ordinary verdict's place and
-			// rides the same purity fold below: a record that would read
+			// The refreshed verdict takes the ordinary verdict's place: a
+			// record that would read
 			// valid but for the proven-inert compartment movement serves,
 			// while a pin that hid behind the compartment reason surfaces
 			// under its own attribution (spec §7.9).
 			v, refreshedFP, pendingLedger = rv, refreshed, encoded
 		}
 	}
-	v = applyPurity(v, pure)
 	grownLedger := ""
 	if v.Status == gofresh.Valid && pendingLedger != "" {
 		// The serve succeeded: the refreshed fingerprint is the one the
@@ -511,7 +523,7 @@ func verdictForRecs(ctx context.Context, e *gofresh.Engine, pkgPath, moduleDir, 
 // added declarations no unchanged declaration can observe), and the
 // recorded fingerprint refreshed to the current compartment hash re-checks,
 // its verdict replacing the ordinary one — every remaining pin enforced
-// exactly as an ordinary verdict, the purity fold included downstream. Any
+// exactly as an ordinary verdict. Any
 // fault refuses and the original verdict stands.
 func inertGrownRecheck(ctx context.Context, e *gofresh.Engine, moduleDir, pkgPath, bench, recordedLedger string, fp gofresh.Fingerprint) (gofresh.Fingerprint, string, gofresh.Verdict, bool) {
 	subject := gofresh.Subject{Package: pkgPath, Symbol: bench}
@@ -559,8 +571,8 @@ func inertGrownRecheckOn(ctx context.Context, view *gofresh.View, subject gofres
 
 // fingerprintFromConfig reads the recorded fingerprint out of a recording's config
 // lines (spec §5: pew owns the serialization, gofresh owns the semantics), plus the
-// recorded per-benchmark purity flag ("" when none).
-func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, string, bool) {
+// recorded test-variant ledger.
+func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, bool) {
 	m := make(map[string]string, len(cfg))
 	formatCount := 0
 	for _, c := range cfg {
@@ -570,7 +582,7 @@ func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, 
 		}
 	}
 	if m["pew-format-invalid"] == "true" || formatCount != 1 || m["pew-format"] != runpkg.RecordingFormat {
-		return gofresh.Fingerprint{}, "", "", false
+		return gofresh.Fingerprint{}, "", false
 	}
 	return gofresh.Fingerprint{
 		MaximalClosure:     m["pew-closure"],
@@ -589,30 +601,7 @@ func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, 
 		RuntimeInputs:            m["pew-runtime-inputs"],
 		RuntimeDigest:            m["pew-runtime"],
 		ResultKind:               gofresh.Measurement,
-	}, m["pure"], m["pew-test-variant-ledger"], true
-}
-
-// applyPurity folds the recorded per-benchmark purity flag into the engine verdict
-// (spec §7.3, §7.5). --impure (pure:false) declares external state: the benchmark
-// always re-runs unless a guard already staled it, so any non-stale verdict becomes
-// unverifiable "impure". --assume-pure (pure:true) is the author suppressing the
-// remaining unverifiability after every hashable guard held, so unverifiable
-// becomes valid — except an engine verdict carrying the //gofresh:external
-// directive's reason: the in-code external declaration is not a blind spot the
-// caller may vouch away (§7.5), exactly as the in-code //gofresh:pure channel is
-// applied inside the engine itself (newEngineForPkg).
-func applyPurity(v gofresh.Verdict, pure string) gofresh.Verdict {
-	switch pure {
-	case "false":
-		if v.Status != gofresh.Stale {
-			return gofresh.Verdict{Status: gofresh.Unverifiable, Reason: "impure"}
-		}
-	case "true":
-		if v.Status == gofresh.Unverifiable && v.Reason != "external directive" {
-			return gofresh.Verdict{Status: gofresh.Valid}
-		}
-	}
-	return v
+	}, m["pew-test-variant-ledger"], true
 }
 
 func resolvePackages(patterns []string) ([]pkgMeta, error) {

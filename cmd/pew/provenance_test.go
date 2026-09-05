@@ -33,7 +33,7 @@ func TestBuildEngineRefusesToolchainSkew(t *testing.T) {
 	}
 	dir := t.TempDir()
 	env := append(os.Environ(), "PEW_PROVENANCE_PROBE=1")
-	if _, err := buildEngine(dir, env, ""); err == nil {
+	if _, err := buildEngine(dir, env, nil, ""); err == nil {
 		t.Fatal("buildEngine accepted an ambient toolchain a whole major ahead of the binary")
 	} else if !strings.Contains(err.Error(), "cross-major") {
 		t.Fatalf("skew refusal = %v, want the cross-major class named", err)
@@ -59,7 +59,7 @@ func TestBuildEngineRefusesUnidentifiableToolchain(t *testing.T) {
 	goVersionSampler = func(dir string, env []string) (string, error) {
 		return "devel +abc123", nil
 	}
-	if _, err := buildEngine(t.TempDir(), os.Environ(), ""); err == nil {
+	if _, err := buildEngine(t.TempDir(), os.Environ(), nil, ""); err == nil {
 		t.Fatal("buildEngine accepted an unidentifiable ambient toolchain")
 	} else if !strings.Contains(err.Error(), "unidentifiable") {
 		t.Fatalf("refusal = %v, want the unidentifiable class named", err)

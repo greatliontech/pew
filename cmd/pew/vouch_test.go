@@ -43,7 +43,7 @@ func TestVouchesConfigRoundTrip(t *testing.T) {
 		{Key: "pew-closure", Value: []byte("h"), File: true},
 		runpkg.GofreshVouchesConfig("a.example/dep.Var"),
 	}
-	fp, _, _, ok := fingerprintFromConfig(cfg)
+	fp, _, ok := fingerprintFromConfig(cfg)
 	if !ok || fp.DynamicStateVouches != "a.example/dep.Var" {
 		t.Fatalf("round trip = %+v ok=%v", fp, ok)
 	}
@@ -115,7 +115,7 @@ func BenchmarkCount(b *testing.B) {
 		t.Helper()
 		dynamicStateVouches = vouches
 		defer func() { dynamicStateVouches = nil }()
-		e, err := buildEngine(dir, os.Environ(), "")
+		e, err := buildEngine(dir, os.Environ(), nil, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,7 +129,7 @@ func BenchmarkCount(b *testing.B) {
 		}
 		return fp
 	}
-	plainEngine, err := buildEngine(dir, os.Environ(), "")
+	plainEngine, err := buildEngine(dir, os.Environ(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func BenchmarkCount(b *testing.B) {
 	// The vouched VERDICT no longer names the culprit - the discharge is
 	// load-bearing, not merely recorded.
 	dynamicStateVouches = []string{culprit}
-	vouchedEngine, err := buildEngine(dir, os.Environ(), "")
+	vouchedEngine, err := buildEngine(dir, os.Environ(), nil, "")
 	dynamicStateVouches = nil
 	if err != nil {
 		t.Fatal(err)

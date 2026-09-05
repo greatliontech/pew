@@ -55,7 +55,7 @@ func TestFingerprintConfigRoundTrip(t *testing.T) {
 		runpkg.ProvenanceConfig("c1", false, want.Guards, runpkg.Conditions{}),
 		fingerprintConfigs(want, "ledger-encoded", want.RuntimeDigest, want.RuntimeInputs)...,
 	)
-	got, pure, ledger, ok := fingerprintFromConfig(cfg)
+	got, ledger, ok := fingerprintFromConfig(cfg)
 	if !ok {
 		t.Fatal("fingerprintFromConfig rejected the writer's own output")
 	}
@@ -64,8 +64,5 @@ func TestFingerprintConfigRoundTrip(t *testing.T) {
 	}
 	if ledger != "ledger-encoded" {
 		t.Errorf("ledger = %q, want %q", ledger, "ledger-encoded")
-	}
-	if pure != "" {
-		t.Errorf("pure = %q, want unset (PureConfig is a separate per-benchmark line)", pure)
 	}
 }

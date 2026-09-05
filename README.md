@@ -56,7 +56,7 @@ observation completeness. pew completes each benchmark invocation's observation 
 bracket and a completed-process ingest, so a benchmark whose closure reaches no unverifiable
 runtime input verifies, while a file-reading benchmark is refused on its own closure reason; an
 observation that cannot complete records explicit incomplete evidence with its reason. An
-explicit `--assume-pure` or `//gofresh:pure` assertion is the documented full-trust override. Current recordings carry `pew-format: 2`; unversioned or unknown formats are
+explicit `//gofresh:pure` directive on the declaration is the documented full-trust override. Current recordings carry `pew-format: 2`; unversioned or unknown formats are
 rejected and must be regenerated.
 
 By default recordings live under `<module>/benchmarks`. Use `--bench-dir` on the
@@ -80,7 +80,7 @@ go test -run '^$' -bench '^BenchmarkName$' -benchmem -count 10 -benchtime 1s <pk
 - `--count 10` records enough samples for meaningful comparison.
 - `--benchtime 1s` keeps each sample time-based and compatible with Go's auto-scaling benchmark loop.
 
-Use `--pin` for CPU affinity and `--strict` to make run-hygiene warnings fatal. The observed run
+Use `--pin` to pin the measurement to one CPU set derived from the host's topology (reported with its derivation before the run; a pinned recording and an unpinned one stale each other, so keep both under distinct `--label`s) and `--strict` to make run-hygiene warnings fatal. The observed run
 conditions (governor, turbo/boost, 1-minute load, thermal throttling, battery) are recorded with
 every result as the `pew-runconditions` line — unobservable signals are recorded as explicit
 `unknown` — so a stored baseline documents the conditions it was measured under. Run conditions are

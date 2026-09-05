@@ -9,42 +9,6 @@ import (
 	"golang.org/x/perf/benchfmt"
 )
 
-// TestApplyPurity pins the recorded purity-flag semantics (spec §7.3, §7.5):
-// --impure re-runs on any non-stale verdict; --assume-pure lifts unverifiable to
-// valid after every hashable guard held; a stale verdict is never overridden.
-func TestApplyPurity(t *testing.T) {
-	staleV := gofresh.Verdict{Status: gofresh.Stale, Reason: "closure"}
-	validV := gofresh.Verdict{Status: gofresh.Valid}
-	unverV := gofresh.Verdict{Status: gofresh.Unverifiable, Reason: "reaches os.Open"}
-
-	tests := []struct {
-		name string
-		in   gofresh.Verdict
-		pure string
-		want gofresh.Verdict
-	}{
-		{"no flag passes through valid", validV, "", validV},
-		{"no flag passes through unverifiable", unverV, "", unverV},
-		{"impure demotes valid", validV, "false", gofresh.Verdict{Status: gofresh.Unverifiable, Reason: "impure"}},
-		{"impure demotes unverifiable", unverV, "false", gofresh.Verdict{Status: gofresh.Unverifiable, Reason: "impure"}},
-		{"impure never overrides stale", staleV, "false", staleV},
-		{"assume-pure lifts unverifiable", unverV, "true", validV},
-		// The //gofresh:external directive's verdict is the author's in-code
-		// external-state declaration (spec §7.5): not a blind spot the caller
-		// may vouch away, so assume-pure never upgrades it.
-		{"assume-pure never lifts external directive", gofresh.Verdict{Status: gofresh.Unverifiable, Reason: "external directive"}, "true", gofresh.Verdict{Status: gofresh.Unverifiable, Reason: "external directive"}},
-		{"assume-pure never lifts stale", staleV, "true", staleV},
-		{"assume-pure leaves valid alone", validV, "true", validV},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := applyPurity(tc.in, tc.pure); got != tc.want {
-				t.Errorf("applyPurity(%+v, %q) = %+v, want %+v", tc.in, tc.pure, got, tc.want)
-			}
-		})
-	}
-}
-
 // TestFingerprintFromConfig pins the config-line ↔ fingerprint mapping (spec §5:
 // pew owns the serialization; gofresh owns the semantics).
 func TestFingerprintFromConfig(t *testing.T) {
@@ -61,9 +25,8 @@ func TestFingerprintFromConfig(t *testing.T) {
 		{Key: "pew-runtime", Value: []byte("rd")},
 		{Key: "pew-runtime-inputs", Value: []byte("manifest")},
 		{Key: "pew-purity", Value: []byte("source directive")},
-		{Key: "pure", Value: []byte("true")},
 	}
-	fp, pure, recordedLedger, ok := fingerprintFromConfig(cfg)
+	fp, recordedLedger, ok := fingerprintFromConfig(cfg)
 	if !ok {
 		t.Fatal("current recording format rejected")
 	}
@@ -77,21 +40,18 @@ func TestFingerprintFromConfig(t *testing.T) {
 	if g.Toolchain != "tc" || g.BuildConfig != "bc" || g.Machine != "m" || g.RuntimeConfig != "rc" {
 		t.Errorf("guards = %+v", g)
 	}
-	if pure != "true" {
-		t.Errorf("pure = %q, want true", pure)
-	}
 	unknown := append([]benchfmt.Config(nil), cfg...)
 	unknown[0].Value = []byte("1")
 	duplicate := append(append([]benchfmt.Config(nil), cfg...), benchfmt.Config{Key: "pew-format", Value: []byte(runpkg.RecordingFormat)})
 	for name, malformed := range map[string][]benchfmt.Config{"unknown": unknown, "duplicate": duplicate} {
-		if _, _, _, ok := fingerprintFromConfig(malformed); ok {
+		if _, _, ok := fingerprintFromConfig(malformed); ok {
 			t.Errorf("%s recording format accepted", name)
 		}
 	}
 
-	fp, pure, _, ok = fingerprintFromConfig(nil)
-	if ok || fp != (gofresh.Fingerprint{}) || pure != "" {
-		t.Errorf("unversioned config: fp=%+v pure=%q ok=%v, want rejection", fp, pure, ok)
+	fp, _, ok = fingerprintFromConfig(nil)
+	if ok || fp != (gofresh.Fingerprint{}) {
+		t.Errorf("unversioned config: fp=%+v ok=%v, want rejection", fp, ok)
 	}
 }
 

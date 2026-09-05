@@ -135,6 +135,6 @@ func recordedGuards(recs []*benchfmt.Result) (guard.Guards, bool) {
 	if len(recs) == 0 {
 		return guard.Guards{}, false
 	}
-	fp, _, _, ok := fingerprintFromConfig(recs[0].Config)
+	fp, _, ok := fingerprintFromConfig(recs[0].Config)
 	return fp.Guards, ok
 }

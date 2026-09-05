@@ -21,10 +21,12 @@ import (
 )
 
 type runConfig struct {
-	benchDir, pin, label string
-	opts                 run.Options
-	strict, all          bool
-	pure, impure         map[string]bool // benchmark names flagged --assume-pure / --impure
+	benchDir, label string
+	// pin is the derived CPU set a pinned run measures on, unpinned when
+	// empty; the --pin switch derives it at entry.
+	pin         run.Pin
+	opts        run.Options
+	strict, all bool
 	// throttle snapshots the thermal-throttle counters bracketing each
 	// benchmark's measurement invocation (spec §9); nil means
 	// run.SnapshotThrottle. A seam so tests control the observed delta
@@ -55,19 +57,13 @@ func (rc runConfig) executeGo(ctx context.Context, moduleDir, pin string, env, a
 
 func newRunCmd() *cobra.Command {
 	var rc runConfig
+	var pin bool
 	rc.opts = run.Options{Count: 10, Benchtime: "1s", Bench: "."}
-	var assumePure, impure []string
 	cmd := &cobra.Command{
 		Use:   "run [packages]",
 		Short: guidanceShort("run"),
 		Long:  guidanceHelp("run"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			rc.pure, rc.impure = toSet(assumePure), toSet(impure)
-			for b := range rc.pure {
-				if rc.impure[b] {
-					return fmt.Errorf("run: %s is both --assume-pure and --impure", b)
-				}
-			}
 			// A label the store cannot name is a flag value: it refuses
 			// here, before any listing or measurement (spec
 			// REQ-pew-preparation).
@@ -79,6 +75,13 @@ func newRunCmd() *cobra.Command {
 			}
 			if err := resolveVouches(); err != nil {
 				return err
+			}
+			if pin {
+				derived, err := derivePin(cmd.ErrOrStderr())
+				if err != nil {
+					return fmt.Errorf("run: %w", err)
+				}
+				rc.pin = derived
 			}
 			patterns := args
 			if len(patterns) == 0 {
@@ -94,25 +97,12 @@ func newRunCmd() *cobra.Command {
 	f.IntVar(&rc.opts.Count, "count", 10, "-count: measurement runs per benchmark")
 	f.StringVar(&rc.opts.Benchtime, "benchtime", "1s", "-benchtime: duration/iterations per measurement")
 	f.StringVar(&rc.opts.Bench, "bench", ".", "-bench: benchmark name pattern")
-	f.StringVar(&rc.pin, "pin", "", `pin to CPUs via "taskset -c" (e.g. "2-5"); empty = no pinning`)
+	f.BoolVar(&pin, "pin", false, "pin the measurement to one CPU set derived from the host's topology (taskset)")
 	f.BoolVar(&rc.strict, "strict", false, "treat quiesce warnings as fatal")
 	f.StringVar(&rc.label, "label", "", "variant label for the recording filename")
-	f.StringArrayVar(&assumePure, "assume-pure", nil, "mark a benchmark perf-pure, suppressing Class-B detection (repeatable)")
-	f.StringArrayVar(&impure, "impure", nil, "mark a benchmark external / always-rerun (repeatable)")
 	f.BoolVar(&rc.all, "all", false, "measure every selected benchmark, a valid recording included (the default serves what is proven and measures the rest)")
 	f.StringArrayVar(&rawVouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, the load-bearing set recorded as pew-vouches (spec §12)")
 	return cmd
-}
-
-func toSet(xs []string) map[string]bool {
-	if len(xs) == 0 {
-		return nil
-	}
-	m := make(map[string]bool, len(xs))
-	for _, x := range xs {
-		m[x] = true
-	}
-	return m
 }
 
 func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []string) error {
@@ -149,7 +139,7 @@ func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []str
 		}
 	}
 	gc := newGitStateCache(excludeDirs)
-	env := os.Environ()
+	envs := newEnvironments(os.Environ(), rc.pin)
 	// Every package prepares before any package measures (spec
 	// REQ-pew-preparation): the refusals the listing and the flags decide
 	// — the benchmark declarations, the store destinations, the effective
@@ -169,7 +159,7 @@ func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []str
 			return interrupted("interrupted while preparing %s (package %d/%d); nothing measured", p.ImportPath, i+1, len(pkgs))
 		}
 		reportPhase(fmt.Sprintf("preparing %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
-		prep, err := preparePackage(rc, p, env)
+		prep, err := preparePackage(rc, p, envs)
 		if err != nil {
 			var pe *toolchainProvenanceError
 			if errors.As(err, &pe) {
@@ -209,7 +199,7 @@ func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []str
 		if err := ctx.Err(); err != nil {
 			return interrupted("interrupted before %s (package %d/%d)%s", prep.pkg.ImportPath, i+1, len(prepared), failedSoFar(failures))
 		}
-		if runErr := runPreparedPackage(ctx, w, errw, gc, rc, prep, env, conditions); runErr != nil {
+		if runErr := runPreparedPackage(ctx, w, errw, gc, rc, prep, envs, conditions); runErr != nil {
 			var stopped *interruptedError
 			if errors.As(runErr, &stopped) {
 				// The run ends here with the interruption's own report:
@@ -366,8 +356,13 @@ type packagePreparation struct {
 // digest), so the cheapest refusal fires first. A refused package
 // still returns the record it got as far as — its scratch directives
 // drive the entry sweep whether or not it runs — beside the error.
-func preparePackage(rc runConfig, p pkgMeta, env []string) (*packagePreparation, error) {
-	return preparePackageWith(rc, p, func() (*gofresh.Engine, string, error) { return newEngineForPkg(p, env) })
+func preparePackage(rc runConfig, p pkgMeta, envs environments) (*packagePreparation, error) {
+	// A pinned run's engine judges and captures the runtime-configuration
+	// guard under the measured process's environment (its producer
+	// environment), while loads and builds stay on the analysis one.
+	return preparePackageWith(rc, p, func() (*gofresh.Engine, string, error) {
+		return newEngineForPkgProducer(p, envs.analysis, envs.runtime)
+	})
 }
 
 // preparePackageWith is preparePackage over a caller-supplied engine
@@ -414,7 +409,8 @@ func preparePackageWith(rc runConfig, p pkgMeta, newEngine func() (*gofresh.Engi
 	return prep, nil
 }
 
-func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCache, rc runConfig, prep *packagePreparation, env []string, conditions run.Conditions) error {
+func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCache, rc runConfig, prep *packagePreparation, envs environments, conditions run.Conditions) error {
+	env := envs.analysis
 	p, e, st, pkgRel, scratch, runBenches := prep.pkg, prep.engine, prep.st, prep.pkgRel, prep.scratch, prep.runBenches
 	baseline, err := gc.state(p.Module.Dir)
 	if err != nil {
@@ -458,7 +454,6 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 		if err != nil {
 			return err
 		}
-		need = requiredBenchmarks(runBenches, need, rc.impure)
 		if len(need) == 0 {
 			fmt.Fprintf(w, "%s: all benchmarks valid, nothing to run\n", p.ImportPath)
 			return nil
@@ -558,7 +553,7 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 			break
 		}
 		reportPhase(fmt.Sprintf("measuring %s arm %d/%d", p.ImportPath, i+1, len(runBenches)))
-		m, refused, err := measureBench(ctx, errw, rc, gc, p, env, opts, pkgRel, name, envRoots, truth, scratch, conditions)
+		m, refused, err := measureBench(ctx, errw, rc, gc, p, envs.measured(), opts, pkgRel, name, envRoots, truth, scratch, conditions)
 		if err != nil {
 			if ctx.Err() != nil {
 				stoppedAt = i
@@ -656,15 +651,9 @@ func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitSta
 	for _, cfg := range fingerprintConfigs(fp, encodedLedger, m.digest, m.manifest) {
 		recs = withConfig(recs, cfg)
 	}
-	// Purity flags are per-benchmark (spec §7.5): apply only to the named ones.
-	if rc.pure[name] {
-		recs = withConfig(recs, run.PureConfig("true"))
-	} else if rc.impure[name] {
-		recs = withConfig(recs, run.PureConfig("false"))
-	}
 	// A new GOMAXPROCS variant lineage records loudly, not silently:
-	// result names embed the suffix (BenchmarkX-24), so a --pin run on a
-	// wider host mints rows nothing on record can bridge, and the
+	// result names embed the suffix (BenchmarkX-24), so a --pin run
+	// mints rows nothing unpinned on record can bridge, and the
 	// operator must not learn that from a later stat - after the
 	// measurement time is spent (spec §10.1's grouping never bridges
 	// suffixes). Warning, never refusal: first recordings and deliberate
@@ -772,7 +761,7 @@ func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStat
 	// resolved package directory the ingest pins — byte-faithful even
 	// through a symlinked checkout, with no per-site bridging.
 	throttleBase := rc.snapshotThrottle()
-	out, execErr := rc.executeGo(ctx, p.Module.Dir, rc.pin, env, append(run.TestArgs(p.ImportPath, armOpts), "-args", "-test.testlogfile="+testlogPath))
+	out, execErr := rc.executeGo(ctx, p.Module.Dir, rc.pin.List(), env, append(run.TestArgs(p.ImportPath, armOpts), "-args", "-test.testlogfile="+testlogPath))
 	// Throttling is run-scoped evidence (spec §9): the recorded value is the
 	// counter delta across exactly this benchmark's measurement, warned
 	// here — the only moment the evidence exists — and fatal under
@@ -1013,23 +1002,6 @@ func benchmarkPatternSpace(r rune) bool {
 		return true
 	}
 	return false
-}
-
-func requiredBenchmarks(all, stale []string, impure map[string]bool) []string {
-	selected := make(map[string]bool, len(stale)+len(impure))
-	for _, name := range stale {
-		selected[name] = true
-	}
-	for name := range impure {
-		selected[name] = true
-	}
-	result := make([]string, 0, len(selected))
-	for _, name := range all {
-		if selected[name] {
-			result = append(result, name)
-		}
-	}
-	return result
 }
 
 // fingerprintConfigs is the writer-side enumeration of the recording

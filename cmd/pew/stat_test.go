@@ -647,7 +647,7 @@ func TestReadSideRetainsStaleFormatBlobForReporting(t *testing.T) {
 	}
 	if recs, ok, err := readSide(st, reader, newer.String(), "pkg", "BenchmarkGhost", ""); err != nil || !ok || len(recs) == 0 {
 		t.Fatalf("stale-format side unavailable for reporting: ok=%v len=%d err=%v", ok, len(recs), err)
-	} else if _, _, _, formatOK := fingerprintFromConfig(recs[0].Config); formatOK {
+	} else if _, _, formatOK := fingerprintFromConfig(recs[0].Config); formatOK {
 		t.Fatal("stale-format historical side accepted")
 	}
 }
@@ -1201,36 +1201,6 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 		t.Errorf("checkOne = {%s %q}, want {stale machine}", v, reason)
 	}
 
-	// End to end through checkOne, a recording flagged --impure (pure: false) whose
-	// guards all hold is unverifiable "impure": it always re-runs (§7.3).
-	impCfg := []benchfmt.Config{
-		{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
-		{Key: "commit", Value: []byte("c1"), File: true},
-		{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
-		{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
-		{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
-		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
-		{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
-		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
-		{Key: "pew-dynamic-state", Value: []byte(fp.DynamicStateStrategy), File: true},
-		{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
-		{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
-		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
-		{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
-		{Key: "dirty", Value: []byte("false"), File: true},
-		{Key: "pure", Value: []byte("false"), File: true},
-	}
-	impRecs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: impCfg}}
-	if err := st.Write("", bench, "imp", impRecs); err != nil {
-		t.Fatalf("Write imp: %v", err)
-	}
-	v, reason, _, _, err = checkOne(st, e, pkg, "", ".", bench, "imp")
-	if err != nil {
-		t.Fatalf("checkOne imp: %v", err)
-	}
-	if v != verdictUnverifiable || reason != "impure" {
-		t.Errorf("checkOne imp = {%s %q}, want {unverifiable impure}", v, reason)
-	}
 }
 
 // TestStatFailOnRegressionEmptyStoreFailsClosed pins the §10.1 empty-comparison

@@ -66,9 +66,6 @@ func TestRecordedConfigSerializable(t *testing.T) {
 	if !ClosureConfig("x").File {
 		t.Error("pew-closure config must have File:true")
 	}
-	if !PureConfig("true").File {
-		t.Error("pure config must have File:true")
-	}
 	if cfg := GofreshPurityConfig("source directive"); !cfg.File || cfg.Key != "pew-purity" || string(cfg.Value) != "source directive" {
 		t.Errorf("gofresh purity config = %+v", cfg)
 	}
@@ -376,7 +373,7 @@ func TestRecordingConfigKeySetIsClosed(t *testing.T) {
 	}
 	extra := ProvenanceConfig("c1", false, guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"}, Conditions{})
 	extra = append(extra, RuntimeConfig("rt", "manifest")...)
-	extra = append(extra, ClosureConfig("cl"), TestVariantConfig("tv"), TestVariantLedgerConfig("lg"), GofreshPurityConfig("d"), PureConfig("true"))
+	extra = append(extra, ClosureConfig("cl"), TestVariantConfig("tv"), TestVariantLedgerConfig("lg"), GofreshPurityConfig("d"))
 	closed := map[string]bool{"goos": true, "goarch": true, "pkg": true, "cpu": true}
 	for _, k := range RecordingConfigKeys {
 		closed[k] = true
@@ -405,9 +402,8 @@ func TestRecordingConfigKeysMirrorSpec(t *testing.T) {
 		"pew-dynamic-state", "pew-single-subject-discharges",
 		"pew-package-process-discharges", "pew-test-variants",
 		"pew-test-variant-ledger",
-		// plus the in-band derived closure line and the per-benchmark
-		// purity flag (§5 prose, §7.5):
-		"pew-closure", "pure",
+		// plus the in-band derived closure line (§5 prose):
+		"pew-closure",
 	}
 	want := map[string]bool{}
 	for _, k := range specTable {
@@ -629,7 +625,7 @@ func TestParseRejectsReservedFormatConfig(t *testing.T) {
 		"format-space":  "pew-format: 2",
 		"format-tab":    "pew-format:\t2",
 		"format-delete": "pew-format:",
-		"purity":        "pure: true",
+		"purity":        "pew-purity: forged",
 		"guard":         "commit: forged",
 		"test-variants": "pew-test-variants: forged",
 		"ledger":        "pew-test-variant-ledger: forged",
@@ -642,6 +638,18 @@ func TestParseRejectsReservedFormatConfig(t *testing.T) {
 			}
 		})
 	}
+	// `pure` is no pew key: the source directives are the one purity
+	// channel (spec §7.5), so a stream line naming it is a foreign key,
+	// dropped with a warning like any other (§5), never a refusal.
+	t.Run("pure is foreign", func(t *testing.T) {
+		_, _, dropped, err := Parse([]byte("pure: true\nBenchmarkRun-8 1 1 ns/op\n"))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if len(dropped) != 1 || dropped[0].Key != "pure" {
+			t.Fatalf("dropped = %+v, want the pure line dropped as foreign", dropped)
+		}
+	})
 }
 
 // TestLedgerCodecRefusals pins the recorded-ledger parser's refusal legs:

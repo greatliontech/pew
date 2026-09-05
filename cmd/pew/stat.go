@@ -406,7 +406,7 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 						if err := resolveVouches(); err != nil {
 							return err
 						}
-						engine, err = buildEngine(cur.moduleDir, os.Environ(), pgo)
+						engine, err = buildEngine(cur.moduleDir, os.Environ(), nil, pgo)
 						if err != nil {
 							return err
 						}
@@ -763,7 +763,7 @@ func recordingCurrent(recs []*benchfmt.Result) bool {
 	if !store.IsRecordingShape(recs) {
 		return false
 	}
-	_, _, _, ok := fingerprintFromConfig(recs[0].Config)
+	_, _, ok := fingerprintFromConfig(recs[0].Config)
 	return ok
 }
 

@@ -35,7 +35,7 @@ valid for HEAD, or must I re-run it?"** mechanically rather than by guesswork.
   the current tree, with **no false "valid" within pew's specified guard model**: source closure,
   runtime-input evidence, toolchain, machine, and build configuration. Class-B external-dependence
   detection has the documented best-effort boundary in §7.3; known external state outside that
-  detection is declared with `--impure`.
+  detection is declared with the `//gofresh:external` directive.
 - **G3 — Run hygiene.** Drive `go test -bench` with statistics-grade defaults (multiple counts,
   fixed benchtime, optional CPU pinning, environment quiesce checks).
 - **G4 — Comparison.** Detect regressions with proper statistics across three baseline modes
@@ -107,10 +107,10 @@ profile differs between packages (§9):
 with no discriminator, a duplicate, alternate whitespace or line endings, or another value —
 format-1 recordings included — is
 `stale (format)` and is regenerated, never interpreted as an earlier shape. Benchmark
-output that attempts to define `pew-*` or any other Pew-owned provenance, guard, or purity key is
+output that attempts to define `pew-*` or any other Pew-owned provenance or guard key is
 refused before storage. A recording of the current format missing any mandatory field is likewise `stale (format)`
 before guard or purity interpretation. Duplicate rejection applies to every recording key — the
-table above plus `pew-closure` and the per-benchmark `pure` line (§7.5) — not only `pew-format`:
+table above plus `pew-closure` — not only `pew-format`:
 a recording that repeats any of them is `stale (format)`. A format-2 recording's mandatory field
 set includes `pew-test-variants` and `pew-test-variant-ledger`.
 Format governs interpretation rather than measurement identity and is projected from comparisons.
@@ -136,8 +136,7 @@ recording carrying a file-configuration key outside the closed set (written befo
 enforcement, or hand-edited) is surfaced with a warning naming the key at every verdict read —
 it fragments comparison grouping silently, and regeneration is the remediation. `pew run` stores recordings whose
 configuration keys are drawn only from the closed set: the toolchain's four, the §5
-provenance/guard keys, `pew-closure`, `pew-test-variants`, `pew-test-variant-ledger`, and the
-per-benchmark `pure` line. This is a producer
+provenance/guard keys, `pew-closure`, `pew-test-variants`, and `pew-test-variant-ledger`. This is a producer
 contract — read paths do not police historical recordings for foreign keys.
 `pew-purity` is benchmark-specific despite the surrounding uniform provenance keys and is omitted
 when capture used no purity assertion; omission is the canonical no-attribution encoding.
@@ -446,11 +445,10 @@ Class-B detection is **best-effort coverage**, not a hard guarantee — perfect 
 detection is impossible (§3 non-goal), so unlike REQ-pew-closure-soundness's source-soundness it can miss exotic cases.
 The set above is deliberately **small and high-confidence**: under-flagging is the documented
 boundary, while *over*-flagging is the real cost (a benchmark reading a fixed fixture in setup would
-be marked `unverifiable` → forced rerun), recovered by `--assume-pure` (§7.5). The complement for
-benchmarks the author *knows* read external state has two channels with the same semantics as the
-pure side: the per-invocation `--impure` marker (folds into the CLI surface, §12) and the durable
-`//gofresh:external` directive on the declaration, honored inside the shared engine (gofresh
-`REQ-external-directive`) — either always re-runs the benchmark while a failing hashable guard
+be marked `unverifiable` → forced rerun), recovered by the purity assertion (§7.5). The complement
+for benchmarks the author *knows* read external state is the durable `//gofresh:external`
+directive on the declaration, honored inside the shared engine (gofresh
+`REQ-external-directive`) — it always re-runs the benchmark while a failing hashable guard
 still reports `stale`.
 
 ### 7.4 Analysis requirements
@@ -486,29 +484,28 @@ still reports `stale`.
 ### 7.5 Escape hatch
 
 A benchmark flagged `unverifiable` for a dependence the author knows is perf-irrelevant (a fixed
-fixture file, a deterministic seed) can be asserted pure: `pew run --assume-pure <Bench>` records a
-`pure: true` provenance line. It suppresses **all** of `B`'s unverifiability — both the closure's
-Class-B marker (§7.3) *and* the runtime-input manifest's `unverifiable` flag (§7.8), so a benchmark
-that only `stat`s a fixed fixture can reach `valid`. This is a **full "trust me"**, not "the manifest
-keeps guarding": `--assume-pure` also waives the manifest's own blind spots (§7.8) — testlog-invisible
-reads (`os.Root`/`openat`), a pre-stream `syscall.Chdir` that desyncs a relative path — because those
-are exactly the unverifiabilities the author is asserting away. The **hashable** guards are *not*
-waived: the closure hash, the `pew-runtime` digest over whatever inputs the manifest *did* observe,
-and the toolchain/machine/build/runtime-config guards all still apply, so a change to an observed
-input still moves the recording to `stale`. This is the **user taking responsibility**, explicit and
-recorded — pew never silently assumes purity.
+fixture file, a deterministic seed) can be asserted pure with the durable directive
+`//gofresh:pure` on the benchmark declaration. It suppresses **all** of `B`'s unverifiability —
+both the closure's Class-B marker (§7.3) *and* the runtime-input manifest's `unverifiable` flag
+(§7.8), so a benchmark that only `stat`s a fixed fixture can reach `valid`. This is a **full
+"trust me"**, not "the manifest keeps guarding": the assertion also waives the manifest's own
+blind spots (§7.8) — testlog-invisible reads (`os.Root`/`openat`), a pre-stream `syscall.Chdir`
+that desyncs a relative path — because those are exactly the unverifiabilities the author is
+asserting away. The **hashable** guards are *not* waived: the closure hash, the `pew-runtime`
+digest over whatever inputs the manifest *did* observe, and the toolchain/machine/build/runtime-
+config guards all still apply, so a change to an observed input still moves the recording to
+`stale`. This is the **author taking responsibility**, explicit and recorded — pew never silently
+assumes purity.
 
-The assertion has two channels with the same semantics. The **CLI flag** (`--assume-pure <Bench>`)
-is per-invocation, recorded as the `pure: true` line. The **durable directive** `//gofresh:pure` on
-the benchmark declaration travels with the code — written once, reviewed in code review, honored by
-every consumer of the shared gofresh engine (gofresh `REQ-purity-directive`). The exact Gofresh
-attribution used by capture is recorded as `pew-purity`; source equality can prove it unchanged, but
-an old recording with no attribution re-runs rather than acquiring historical evidence. Precedence:
-an external-state declaration beats every purity assertion. `--impure` (§7.3) is applied after the
-engine verdict and forces a re-run even for a directive-pure benchmark; the `//gofresh:external`
-directive is enforced inside the engine (a declaration carrying both directives is refused there,
-gofresh `REQ-external-precedence`), and `--assume-pure` never upgrades its verdict — the in-code
-external declaration is not a blind spot the caller may vouch away.
+The directive is the one channel: it travels with the code — written once, reviewed in code
+review, honored by every consumer of the shared gofresh engine (gofresh `REQ-purity-directive`),
+never re-applied per invocation. The exact Gofresh attribution used by capture is recorded as
+`pew-purity`; source equality can prove it unchanged, but an old recording with no attribution
+re-runs rather than acquiring historical evidence. Precedence: an external-state declaration beats
+every purity assertion. The `//gofresh:external` directive is enforced inside the engine (a
+declaration carrying both directives is refused there, gofresh `REQ-external-precedence`), and no
+purity assertion upgrades its verdict — the in-code external declaration is not a blind spot the
+author may vouch away.
 
 ### 7.6 What changes vs what is recomputed
 
@@ -615,9 +612,8 @@ the recording's `pew-test-variant-ledger` must diff **inert** against the curren
 ledger per Gofresh's classifier — the only movement is added declarations no unchanged
 declaration can observe (a plain function that is not `TestMain`, a const, or a type; anything
 changed, removed, or initialization-bearing refuses) — and the recorded fingerprint refreshed
-to the current compartment hash re-checks, its verdict replacing the ordinary one and riding
-the same purity fold (§7.5), so every remaining pin is enforced exactly as an ordinary
-verdict. Any fault refuses and the ordinary stale verdict stands (the safe direction:
+to the current compartment hash re-checks, its verdict replacing the ordinary one, so every
+remaining pin is enforced exactly as an ordinary verdict. Any fault refuses and the ordinary stale verdict stands (the safe direction:
 a spurious re-run, never a spurious reuse).
 
 The rule is a validity judgment shared by every verdict surface (`status`, `stat`'s
@@ -707,9 +703,9 @@ provenance is captured atomically with the run:
   n=3 gives a degenerate interval), **`-benchtime=1s`** time-based (works with Go 1.24+ `b.Loop()`;
   per-op comparison makes the auto-scaled iteration count fine). The benchmark pattern, count, and
   benchtime are configurable run-selection/statistical knobs.
-- **`-benchmem` is always on** for pew-recorded runs, so allocation metrics (`B/op`, `allocs/op`)
-  are captured alongside timing. It is cheap, keeps stored results comparable, and lets `pew stat`
-  flag allocation regressions without requiring a second run.
+- **`-benchmem` is always on** for every pew measurement, `ab`'s sides included, so allocation
+  metrics (`B/op`, `allocs/op`) are captured alongside timing. It is cheap, keeps stored results
+  comparable, and lets `pew stat` flag allocation regressions without requiring a second run.
 - **Build-affecting `go test` inputs are not generic run knobs.** Flags and environment that can
   change generated code (`-tags`, `-gcflags`, `-ldflags`, PGO, cgo/compiler env, architecture
   feature env) must be represented in the `buildconfig` guard (§7) before pew exposes or changes
@@ -730,10 +726,14 @@ provenance is captured atomically with the run:
   paths resolve against the module root, where pew runs the go command. The profile is a build
   input outside the git-tracked source snapshots, so the producer revalidates its digest
   immediately before writing a recording and refuses the package on drift.
-- **CPU pinning is opt-in** (`--pin`, Linux `taskset`/cpuset), **off by default** — it cuts
-  scheduler-migration variance but is platform-specific and footgun-prone (core choice, SMT
-  siblings, containers/VMs), so forcing it on would be the surprising default. The first knob to
-  enable for serious runs.
+- **CPU pinning is opt-in** (`--pin`, Linux `taskset`), **off by default** — it cuts
+  scheduler-migration variance but changes the recorded GOMAXPROCS lineage, so forcing it on
+  would be the surprising default. The first knob to enable for serious runs. The switch names no
+  CPUs: the set is derived from what the kernel exposes, reported with its derivation before the
+  first measurement, and refused where it cannot be derived (REQ-pew-pin-derivation); the pin's
+  width is stated as `GOMAXPROCS` in the measured process's environment, so the runtime-configuration
+  guard (§5) keeps a pinned recording from serving an unpinned run — and the two stale each other,
+  sharing one destination (§6), so a store holding both keeps them apart by `--label`.
 - **Quiesce pre-checks WARN by default; `--strict` promotes them to hard-gates.** Pre-run checks:
   on-battery, non-`performance` governor, high load average, turbo. Warn-not-gate
   because hard-gating blocks legitimate quick runs and pew often can't fix the condition anyway
@@ -976,9 +976,9 @@ marked `pew-ab`/`dirty`, by shape never a stat baseline. `run` stores with overw
 records the one pre-run observation that drove the quiesce gate as
 the run-conditions line (§9), warns (never refuses) at record time
 when a run mints a new GOMAXPROCS variant lineage for a benchmark
-already on record, and honors the durable in-code purity forms
-(`//gofresh:pure`, `//gofresh:external`; §7.3, §7.5) beside the
-per-run overrides, and serves what is proven: a selected benchmark
+already on record, honors the durable in-code purity forms
+(`//gofresh:pure`, `//gofresh:external`; §7.3, §7.5) as the one
+purity channel, and serves what is proven: a selected benchmark
 whose recording is valid against the run's own typed view is not
 re-measured unless `--all` asks for it (REQ-pew-serve-proven). Every
 verb reports the stretch in flight on one cadence, persists each unit
@@ -1061,7 +1061,7 @@ the document is a defect of whichever is wrong.
 
 **REQ-pew-sample-completeness** (behavior): **Recording sample completeness.** A recording produced by `pew run` MUST carry exactly the demanded `--count` samples for every result row; a benchmark whose stream output shows corruption evidence (unparseable lines naming it, orphaned measurement fields, sample-count deviation) is refused rather than recorded (§9 sample floor); corruption or repository-state motion in one benchmark's arm never discards another benchmark's completed measurements — single-subject execution (§9) makes every stream and state judgment arm-local, so neither output corruption nor non-source residue refuses a whole package; only source-input or HEAD drift (the premise every fingerprint shares) aborts a package write — and no corrupt line's content is ever recorded, as measurement data or as salvage artifact. *Violation:* a dependency's logger splices one line into one result row and either (a) the whole package's completed run — ~30 minutes of untouched benchmarks — is discarded, or (b) the affected benchmark records silently with fewer samples than demanded, and `pew stat` later compares a degenerate sample set as statistics-grade while every guard holds. *Kind:* entailed (§9 statistics-grade defaults + §5 provenance honesty). *Anchor tests:* a stream captured from a real consensus-node-logging run ⇒ the affected benchmark refused with the spliced line reported verbatim, the clean benchmark recorded with its full sample set; an orphaned-fields line with no attributable benchmark ⇒ the producing arm's own benchmark refused, its sibling recorded.
 
-**REQ-pew-key-set** (behavior): **The recording key set is closed.** Every recording `pew run` stores MUST carry file-configuration keys drawn only from the closed set of §5: the toolchain's four stream keys, pew's provenance/guard/manifest keys, `pew-closure`, and `pure`; every other stream-derived configuration key is dropped before storage with a warning. The toolchain keys' values are verified against out-of-band truth where one exists (`goos`/`goarch`/`pkg`) and against in-stream consistency for `cpu`, refusing the recording on disagreement; read paths warn on stored keys outside the closed set (§5's value arms). *Violation:* a benchmark dependency logs one `key: value`-shaped line to stdout; the key is recorded as durable configuration in this run but is absent from the baseline; §10.1's config grouping fragments and the benchmark drops out of comparison one-sided — a regression hides behind a log line while every other invariant holds. *Kind:* entailed (§5 self-describing artifacts + §10.1 grouping). *Anchor tests:* a stream carrying `raft: appending entries` ⇒ the key is stripped from every result and reported once; the composed run-path config serializes only closed-set keys.
+**REQ-pew-key-set** (behavior): **The recording key set is closed.** Every recording `pew run` stores MUST carry file-configuration keys drawn only from the closed set of §5: the toolchain's four stream keys, pew's provenance/guard/manifest keys, and `pew-closure`; every other stream-derived configuration key is dropped before storage with a warning. The toolchain keys' values are verified against out-of-band truth where one exists (`goos`/`goarch`/`pkg`) and against in-stream consistency for `cpu`, refusing the recording on disagreement; read paths warn on stored keys outside the closed set (§5's value arms). *Violation:* a benchmark dependency logs one `key: value`-shaped line to stdout; the key is recorded as durable configuration in this run but is absent from the baseline; §10.1's config grouping fragments and the benchmark drops out of comparison one-sided — a regression hides behind a log line while every other invariant holds. *Kind:* entailed (§5 self-describing artifacts + §10.1 grouping). *Anchor tests:* a stream carrying `raft: appending entries` ⇒ the key is stripped from every result and reported once; the composed run-path config serializes only closed-set keys.
 
 **REQ-pew-preparation** (behavior): **Every refusal a verb's inputs decide fires before its first measurement.** A verb MUST prepare every listed package before any package spends a build or a measurement: `run` derives, for each package after the listing, its benchmark declarations, its scratch directives, and the ones the pattern selects, and — for each package the pattern selects a benchmark in — its recording store and each recording's destination (a label the store cannot name, a malformed package or benchmark path, two recordings sharing a destination, a destination that is not a regular file), the effective GOFLAGS and PGO input, and the module's toolchain provenance — and refuses on any of them there; the two refusals its typed view decides (a measured source under the recording store, a destination overlapping a source input) fire the moment the view exists, before the warm-up build; the flag values the verb alone decides (`--label` on every verb that takes one, `--bench` on `run` and `ab`, `ab`'s `--count`) refuse at command entry. `ab` prepares every package — the module's containment in the repository, the B side's existence, the pattern selecting a benchmark on both sides, both builds (their standing binaries kept beside the repository, as the worktree is, never under a temp root that may be memory-backed), both guard captures — and refuses a guard disagreeing on any comparison key naming the guard and both values, before the first iteration of any package. *Violation:* `pew run --label 'a b'` measures every arm of the first package (`count` × `benchtime` per benchmark) and refuses at the write gate with the invalid label — every measured sample discarded; every other invariant holds. *Kind:* entailed (§9 "own the run" spends measurement only on recordings the run can keep; §12's ab refusal wording). *Anchor tests:* a run with an invalid label refuses before its first `go test`; a run whose second package's recording destination is occupied reports it before the first package measures; an ab whose B side pins a different toolchain, or different PGO bytes, refuses with the mismatch named and executes no iteration.
 
@@ -1072,3 +1072,5 @@ the document is a defect of whichever is wrong.
 **REQ-pew-unit-persistence** (behavior): **A unit persists the moment it completes.** `run` MUST install each measured arm's recording as soon as the arm measures, behind the write gate re-derived for that arm's own span (the view still valid, the source inputs' dirtiness, the PGO input unchanged, HEAD unmoved), never holding a package's arms for one write at the end; `ab` rewrites its `--out` artifact after each completed iteration pair; `gc` reports each removal as it lands. *Violation:* a package of N arms measured in full and lost to a HEAD move during the last arm — or to an interruption — because one batch write at the end was refused; an interrupted gc that deleted recordings and reported none. *Kind:* entailed (§9's measurement is per arm and every piece of evidence is arm-local; a durability model coarser than the soundness model loses evidence the spec already proves). *Anchor tests:* a HEAD move under the second arm keeps the first arm's recording; a comparison interrupted after one pair leaves that pair in the artifact; a store walk reports its removal itself.
 
 **REQ-pew-interruption** (behavior): **An interruption keeps what was persisted and says so.** Every verb MUST bind its context to SIGINT and SIGTERM so an interruption cancels the work in flight — the process under measurement is killed, the unit in flight is lost — and ends the verb before its next unit with a report naming what was kept and what was not measured, exiting non-zero. *Violation:* SIGINT kills pew mid-batch: the completed arms of the package in flight are gone with no message, and the operator learns from the next status which of them re-measure. *Kind:* entailed (§9 and REQ-pew-unit-persistence: kept units are only worth keeping if the operator is told). *Anchor tests:* a run interrupted during its second arm keeps the first and reports "1 recorded, 1 not measured"; an ab interrupted after one pair reports the pair kept.
+
+**REQ-pew-pin-derivation** (behavior): **A pin is derived from the host, never named or guessed.** The `--pin` switch on `run` and `ab` MUST derive its CPU set from what the kernel exposes, in this order: the process's affinity mask intersected with the online CPUs bounds every choice; a non-empty isolated CPU set inside that bound is the pin, whole; otherwise the allowed CPUs group into physical cores by thread siblings and the pin is one whole core — the highest-ranked by the kernel's exported per-CPU performance indicators taken in precedence `cpu_capacity`, `cpuinfo_max_freq`, `amd_pstate_highest_perf`, an indicator counting only when every core reads it and the values differ — ties broken toward a core whose every sibling is allowed, then away from CPU 0's core (judged over its full sibling list, allowed or not), then toward the highest core id; the derived set and its derivation are reported before the first build or measurement; the pin's width — its CPU count bounded by the runtime's own default for the process — is stated as `GOMAXPROCS` in the measured process's environment and in the engine's producer environment when the operator set no non-empty value, so the runtime-configuration guard separates a pinned recording from an unpinned one, while loads and builds stay on the analysis environment; and a host the set cannot be derived on (no affinity, no or unreadable topology, fewer than two allowed cores, a platform without sysfs) or cannot apply it on (no `taskset`) refuses under the flag's name before anything is spent. *Violation:* an operator names `--pin 22-23` on a hybrid host from a habit formed on another box and pins a week of baselines to the efficiency cores, or a container's cpuset excludes the named CPUs and every arm fails at taskset after the build. *Kind:* entailed (§9 pinning cuts variance only on a set chosen for the host; §12 derived defaults). *Anchor tests:* a uniform four-core fake host ⇒ the whole highest core outside CPU 0's; a hybrid host by ceiling, and one by amd-pstate score with uniform ceilings ⇒ the fast core outside CPU 0's; CPU 0 masked out but its sibling allowed ⇒ that core still avoided; an isolated set ⇒ taken whole; an affinity leaving one core ⇒ refused; no or empty topology ⇒ refused naming it; a pinned recording ⇒ stale on the runtime-configuration guard under an unpinned environment.

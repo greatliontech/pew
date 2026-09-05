@@ -9,9 +9,8 @@
 - `bench` — benchmark pattern (go test -bench syntax).
 - `count` — interleaved iterations per side (default 6).
 - `benchtime` — per-benchmark time or iteration budget (go test -benchtime).
-- `benchmem` — capture allocation statistics per side.
 - `ref` — B side: any git rev the repository resolves (default HEAD).
-- `pin` — CPU list for taskset pinning, both sides.
+- `pin` — pin both sides to one CPU set derived from the host's topology (taskset): the isolated set when the kernel has one, else one whole physical core, the fastest the kernel ranks, outside CPU 0's; the set and its derivation are reported first, and a host it cannot be derived on, or without taskset to apply it, refuses.
 - `strict` — refuse to measure under noisy machine conditions.
 - `out` — also write both sides' raw benchmark streams to this file, marked pew-ab/dirty — a derivation artifact, by shape never a stat baseline.
 **when:** use ab while a design or curve is still moving — the
@@ -41,11 +40,9 @@ HEAD while tuning a hot path.
 - `count` — measurement runs per benchmark (default 10).
 - `benchtime` — duration or iterations per measurement (default 1s).
 - `bench` — benchmark name pattern (default .).
-- `pin` — pin to CPUs via taskset (e.g. 2-5); empty means no pinning. A run minting a new GOMAXPROCS variant lineage for a benchmark already on record warns at record time — grouping never bridges the suffix, and the operator must not learn that from a later comparison after the measurement time is spent.
+- `pin` — pin the measurement to one CPU set derived from the host's topology (taskset): the isolated set when the kernel has one, else one whole physical core, the fastest the kernel ranks, outside CPU 0's; the set and its derivation are reported first, and a host it cannot be derived on, or without taskset to apply it, refuses. The pin's width is the measured process's GOMAXPROCS, a guarded runtime configuration: a pinned recording and an unpinned one stale each other and share a destination, so keep both under distinct labels. A run minting a new GOMAXPROCS variant lineage for a benchmark already on record warns at record time — grouping never bridges the suffix, and the operator must not learn that from a later comparison after the measurement time is spent.
 - `strict` — treat quiesce warnings as fatal.
 - `label` — variant label for the recording filename.
-- `assume-pure` — mark a benchmark perf-pure, suppressing Class-B detection (repeatable); the durable in-code form is a gofresh pure directive.
-- `impure` — mark a benchmark external, always-rerun (repeatable); the durable in-code form is a gofresh external directive. Mutually exclusive with the purity assertion per benchmark.
 - `all` — measure every selected benchmark, a valid recording included; the default serves what is proven and measures the rest (status's closure-analysis path, over the run's own typed view, intersecting the independent benchmark selection and never adding or recording an excluded benchmark).
 - `vouch` — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, the load-bearing set recorded on the recording.
 **when:** use run to measure and store — one pre-run observation

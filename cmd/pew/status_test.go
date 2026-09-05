@@ -122,7 +122,7 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := store.New(t.TempDir())
-	write := func(pure string) {
+	write := func() {
 		t.Helper()
 		cfg := []benchfmt.Config{
 			{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
@@ -140,9 +140,6 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 			{Key: "dirty", Value: []byte("false"), File: true},
 			{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
 		}
-		if pure != "" {
-			cfg = append(cfg, benchfmt.Config{Key: "pure", Value: []byte(pure), File: true})
-		}
 		recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
 		if err := st.Write("", bench, "", recs); err != nil {
 			t.Fatal(err)
@@ -152,24 +149,13 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 	p.Module.Path = pkg
 	p.Module.Dir = dir
 
-	write("")
+	write()
 	var out strings.Builder
 	if err := statusPackageOf(&out, io.Discard, e, st.Root, "", false, false, false, p); err != nil {
 		t.Fatalf("statusPackage: %v", err)
 	}
 	if got := out.String(); !strings.Contains(got, "unverifiable") || !strings.Contains(got, "external directive") {
 		t.Fatalf("status = %q, want unverifiable (external directive)", got)
-	}
-
-	// A recorded pure: true (a caller's --assume-pure) never vouches away the
-	// author's in-code external declaration.
-	write("true")
-	out.Reset()
-	if err := statusPackageOf(&out, io.Discard, e, st.Root, "", false, false, false, p); err != nil {
-		t.Fatalf("statusPackage assume-pure: %v", err)
-	}
-	if got := out.String(); !strings.Contains(got, "unverifiable") || !strings.Contains(got, "external directive") {
-		t.Fatalf("assume-pure status = %q, want unverifiable (external directive)", got)
 	}
 }
 

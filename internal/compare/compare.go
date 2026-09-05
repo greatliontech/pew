@@ -10,7 +10,7 @@
 // Grouping mirrors benchstat: results are grouped into tables by their file
 // configuration (.config) and into rows by full benchmark name (.fullname). pew's
 // own provenance keys (commit, toolchain, machine, buildconfig, dirty,
-// pew-runconditions, pew-closure, pew-runtime, pew-runtime-inputs, pure) are
+// pew-runconditions, pew-closure, pew-runtime, pew-runtime-inputs) are
 // projected away so that differing provenance between the two sides does not
 // fragment the grouping (§10.1); the native keys go test emits
 // (pkg, goos, goarch, cpu) are kept, so the same benchmark name in two different

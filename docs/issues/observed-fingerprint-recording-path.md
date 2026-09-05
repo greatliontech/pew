@@ -24,5 +24,5 @@ no-proof sentence retires. Consumer-side residue the proofs surface
 consumer's to clear; the refusal names them.
 
 Lands: its own train chunk — the recording path's verdict model is a
-spec-level change (§7.5/§7.8/§10 interactions: purity assertions,
---impure, stat baselines for observed recordings).
+spec-level change (§7.5/§7.8/§10 interactions: purity and external
+directives, stat baselines for observed recordings).

@@ -26,15 +26,6 @@ import (
 	"golang.org/x/perf/benchfmt"
 )
 
-func TestRequiredBenchmarksIncludesCurrentImpureSelection(t *testing.T) {
-	all := []string{"BenchmarkA", "BenchmarkB", "BenchmarkC"}
-	got := requiredBenchmarks(all, []string{"BenchmarkC"}, map[string]bool{"BenchmarkA": true})
-	want := []string{"BenchmarkA", "BenchmarkC"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("required benchmarks = %v, want %v", got, want)
-	}
-}
-
 func TestRequireBenchmarkGroupsRejectsMissingResult(t *testing.T) {
 	groups := map[string][]*benchfmt.Result{
 		"BenchmarkA": {{Name: benchfmt.Name("BenchmarkA")}},
@@ -253,7 +244,7 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fp, _, _, ok := fingerprintFromConfig(recs[0].Config)
+		fp, _, ok := fingerprintFromConfig(recs[0].Config)
 		if !ok {
 			t.Fatalf("%s recording lacks current format", bench)
 		}
@@ -1342,7 +1333,7 @@ func TestRunObservesThroughSymlinkedModule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fp, _, _, ok := fingerprintFromConfig(recs[0].Config)
+	fp, _, ok := fingerprintFromConfig(recs[0].Config)
 	if !ok {
 		t.Fatal("recording lacks current format")
 	}
@@ -1468,7 +1459,7 @@ func BenchmarkScratch(b *testing.B) {
 		if len(recs) == 0 {
 			t.Fatalf("%s: no recording", pkgRel)
 		}
-		fp, _, _, ok := fingerprintFromConfig(recs[0].Config)
+		fp, _, ok := fingerprintFromConfig(recs[0].Config)
 		if !ok {
 			t.Fatalf("%s recording lacks current format", pkgRel)
 		}
@@ -1581,7 +1572,7 @@ func TestRunPerArmRuntimeManifestAttribution(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fp, _, _, ok := fingerprintFromConfig(recs[0].Config)
+		fp, _, ok := fingerprintFromConfig(recs[0].Config)
 		if !ok {
 			t.Fatalf("%s recording lacks current format", bench)
 		}
@@ -1723,7 +1714,7 @@ func TestRunFailingArmDiscardsOnlyItsRecording(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sibling arm not recorded: %v", err)
 	}
-	if _, _, _, ok := fingerprintFromConfig(recs[0].Config); !ok {
+	if _, _, ok := fingerprintFromConfig(recs[0].Config); !ok {
 		t.Error("sibling arm's recording lacks the current well-formed format")
 	}
 	assertRunConditionsLine(t, "BenchmarkGood", recs[0].GetConfig("pew-runconditions"))
@@ -1907,7 +1898,7 @@ func TestRunFailingArmResidueRefusesOnlyItsArm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sibling arm not recorded despite a clean bracket of its own: %v", err)
 	}
-	if _, _, _, ok := fingerprintFromConfig(recs[0].Config); !ok {
+	if _, _, ok := fingerprintFromConfig(recs[0].Config); !ok {
 		t.Error("sibling arm's recording lacks the current well-formed format")
 	}
 	if !strings.Contains(out.String(), "recorded     example.com/armresidue.BenchmarkGood") {
@@ -2068,7 +2059,7 @@ func TestRunPerArmScratchSweepIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sibling arm not recorded: %v", err)
 	}
-	fp, _, _, ok := fingerprintFromConfig(recs[0].Config)
+	fp, _, ok := fingerprintFromConfig(recs[0].Config)
 	if !ok {
 		t.Fatal("sibling recording lacks current format")
 	}
@@ -2096,5 +2087,5 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 	if prep == nil || len(prep.runBenches) == 0 {
 		return nil
 	}
-	return runPreparedPackage(context.Background(), w, errw, gc, rc, prep, env, conditions)
+	return runPreparedPackage(context.Background(), w, errw, gc, rc, prep, newEnvironments(env, rc.pin), conditions)
 }

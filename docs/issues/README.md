@@ -17,6 +17,8 @@ close-out convention.
 | [spec-wide-requirement-forming](spec-wide-requirement-forming.md) | only §13 is REQ-formed; a test witnessing a §§1–12 contract has no id to bind against — convert sections on demand, same structure-only discipline | when a binding needs to claim a §§1–12 contract that carries no REQ id |
 | [gofresh-corpus-pin-lag](gofresh-corpus-pin-lag.md) | shape-corpus pin at gofresh v0.91.0, latest v0.92.0; the bump rides the next change set (fleet sweep 2026-08-31) | cross-tool train chunk 115 |
 | [ab-out-multi-package](ab-out-multi-package.md) | `ab --out` over several packages keeps only the last package's artifact; a per-package path or a multi-section format is a contract change | user decision |
+| [repo-level-vouch-source](repo-level-vouch-source.md) | vouch sets live only as flags, hand-mirrored (tugboat CLAUDE.md + the fleet sweep); the unsafe drift direction is silent | rides cross-tool train chunk 115 |
+| [statistical-knob-derivation](statistical-knob-derivation.md) | `--count`/`--benchtime`/`--threshold` stay fixed statistics-grade defaults; deriving them from the measurement changes REQ-pew-sample-completeness and §10.1's comparability | user decision |
 
 ## In-spec upgrade paths (tracked inline, not here)
 
@@ -29,4 +31,3 @@ index:
 - per-declaration hashing *into* cache deps (§7.7)
 - gitignored persistent closure memo (§6)
 - same-identity sample merge (§6)
-| [repo-level-vouch-source](repo-level-vouch-source.md) | vouch sets live only as flags, hand-mirrored (tugboat CLAUDE.md + the fleet sweep); the unsafe drift direction is silent | rides cross-tool train chunk 115 |

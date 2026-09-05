@@ -23,15 +23,6 @@ bindings {
   requirement_id: "REQ-pew-validity-verdict"
   content_hash: "f302c682f64ceddd1e8f8a1249376564484eb71f3bdd90f32045740cf47f3dc9"
   backend: "go"
-  symbol: "github.com/greatliontech/pew/cmd/pew.TestApplyPurity"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "af16cf4bf7cbd9cf1ee153e8038c958e44917fdd9c1f4965fc3aa61ea92a788c"
-}
-
-bindings {
-  requirement_id: "REQ-pew-validity-verdict"
-  content_hash: "f302c682f64ceddd1e8f8a1249376564484eb71f3bdd90f32045740cf47f3dc9"
-  backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.TestNonValidUsesLabel"
   role: BINDING_ROLE_TESTS
   shape_hash: "836b0b0236eed17ac11dd27a90f4dee1f6bef7f9ab85103eaeb2b3f8fa55f9d5"
@@ -156,7 +147,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-key-set"
-  content_hash: "8da10279a5e3c79582ce61f1bd7e1e2bf8d515d1dd07a2bd8aa8c2c22f9c2e71"
+  content_hash: "59a1dfe710dd3d4f7c167e37a1357fc593f801ca5f12c8399ec0891dc0dfad05"
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.TestRunPackageDropsForeignStreamConfig"
   role: BINDING_ROLE_TESTS
@@ -165,7 +156,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-key-set"
-  content_hash: "8da10279a5e3c79582ce61f1bd7e1e2bf8d515d1dd07a2bd8aa8c2c22f9c2e71"
+  content_hash: "59a1dfe710dd3d4f7c167e37a1357fc593f801ca5f12c8399ec0891dc0dfad05"
   backend: "go"
   symbol: "github.com/greatliontech/pew/internal/run.TestParseDropsForeignStreamConfig"
   role: BINDING_ROLE_TESTS
@@ -174,7 +165,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-key-set"
-  content_hash: "8da10279a5e3c79582ce61f1bd7e1e2bf8d515d1dd07a2bd8aa8c2c22f9c2e71"
+  content_hash: "59a1dfe710dd3d4f7c167e37a1357fc593f801ca5f12c8399ec0891dc0dfad05"
   backend: "go"
   symbol: "github.com/greatliontech/pew/internal/run.TestRecordingConfigKeySetIsClosed"
   role: BINDING_ROLE_TESTS
@@ -183,7 +174,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-key-set"
-  content_hash: "8da10279a5e3c79582ce61f1bd7e1e2bf8d515d1dd07a2bd8aa8c2c22f9c2e71"
+  content_hash: "59a1dfe710dd3d4f7c167e37a1357fc593f801ca5f12c8399ec0891dc0dfad05"
   backend: "go"
   symbol: "github.com/greatliontech/pew/internal/run.TestVerifyToolchainConfigRefusesSpoofedValues"
   role: BINDING_ROLE_TESTS
@@ -192,7 +183,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-key-set"
-  content_hash: "8da10279a5e3c79582ce61f1bd7e1e2bf8d515d1dd07a2bd8aa8c2c22f9c2e71"
+  content_hash: "59a1dfe710dd3d4f7c167e37a1357fc593f801ca5f12c8399ec0891dc0dfad05"
   backend: "go"
   symbol: "github.com/greatliontech/pew/internal/store.TestForeignConfigKeysDetectsHistoricalJunk"
   role: BINDING_ROLE_TESTS
@@ -440,4 +431,85 @@ bindings {
   symbol: "github.com/greatliontech/pew/internal/run.TestCancellationKillsTheProcessGroup"
   role: BINDING_ROLE_TESTS
   shape_hash: "7256ad810afae5aa9d8e83f4efd98e666ecd0a87ae21165357e8ce2f47268d93"
+}
+
+bindings {
+  requirement_id: "REQ-pew-pin-derivation"
+  content_hash: "8711b74110db2e23973cb4a6ba4b927ecf675c096945ef1b1b5fa328532dee5d"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/internal/run.TestDerivePinFollowsTheTopology"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1ae7c5f22fef466ee951a3334665bba42a78b779c843af31c548817b02cc5753"
+}
+
+bindings {
+  requirement_id: "REQ-pew-pin-derivation"
+  content_hash: "8711b74110db2e23973cb4a6ba4b927ecf675c096945ef1b1b5fa328532dee5d"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/internal/run.TestDerivePinRefusesWithoutAffinity"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "18813a21e034f3a571c57bf1d2bf3a68bc1e9bee51e8be0afb142eae75104919"
+}
+
+bindings {
+  requirement_id: "REQ-pew-pin-derivation"
+  content_hash: "8711b74110db2e23973cb4a6ba4b927ecf675c096945ef1b1b5fa328532dee5d"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestPinSwitchReportsItsDerivation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1caeec6b57b934cd2905a02d39c7a364f95f397b6d82ad7cb124a66c4e2928fb"
+}
+
+bindings {
+  requirement_id: "REQ-pew-pin-derivation"
+  content_hash: "8711b74110db2e23973cb4a6ba4b927ecf675c096945ef1b1b5fa328532dee5d"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestKnobSurfaceIsDerived"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "dbb55fd0554b8c3663330327666cac3ed1dfb5dd32c7b9090640b92364774869"
+}
+
+bindings {
+  requirement_id: "REQ-pew-pin-derivation"
+  content_hash: "8711b74110db2e23973cb4a6ba4b927ecf675c096945ef1b1b5fa328532dee5d"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestPinnedRunGuardsItsPin"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7aa022a9ca3409854bc3d09c3c0b2e11d48a7344033fbfa03e08cccbd4e08ace"
+}
+
+bindings {
+  requirement_id: "REQ-pew-pin-derivation"
+  content_hash: "8711b74110db2e23973cb4a6ba4b927ecf675c096945ef1b1b5fa328532dee5d"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestPinIsDerivedBeforeTheListing"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "662d32148a7d59b3ceb620072edcf294de336275bbf3f6c3719bbeba1cf052a0"
+}
+
+bindings {
+  requirement_id: "REQ-pew-pin-derivation"
+  content_hash: "8711b74110db2e23973cb4a6ba4b927ecf675c096945ef1b1b5fa328532dee5d"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/internal/run.TestDerivePinRefusesUnreadableTopology"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ddca11333346dbf3074cd294128bd40fead4d5dcbd4d9b80cd6da782b76684c5"
+}
+
+bindings {
+  requirement_id: "REQ-pew-pin-derivation"
+  content_hash: "8711b74110db2e23973cb4a6ba4b927ecf675c096945ef1b1b5fa328532dee5d"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestPinEnvironmentStatesTheWidth"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "02dfec2e29cb4a8231e4527d88fac358991d8b9df4d8c11d11cc8f59baadcc6b"
+}
+
+bindings {
+  requirement_id: "REQ-pew-pin-derivation"
+  content_hash: "8711b74110db2e23973cb4a6ba4b927ecf675c096945ef1b1b5fa328532dee5d"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/internal/run.TestRankCoresTiebreaks"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c3f7e54770261b1a90145464a24901abd0d189ade24c76b167b3cbcd6c4d74a4"
 }

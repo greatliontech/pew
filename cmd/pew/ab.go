@@ -24,9 +24,8 @@ type abConfig struct {
 	bench     string
 	count     int
 	benchtime string
-	benchmem  bool
 	ref       string
-	pin       string
+	pin       run.Pin // the derived CPU set both sides run on; unpinned when empty
 	strict    bool
 	out       string
 	throttle  func() run.ThrottleSnapshot
@@ -105,6 +104,7 @@ func (ac abConfig) buildBinary(ctx context.Context, dir string, env []string, ar
 
 func newABCmd() *cobra.Command {
 	ac := abConfig{}
+	var pin bool
 	cmd := &cobra.Command{
 		Use:   "ab [packages]",
 		Short: guidanceShort("ab"),
@@ -119,6 +119,13 @@ func newABCmd() *cobra.Command {
 			if err := validateBenchmarkPattern(ac.bench); err != nil {
 				return err
 			}
+			if pin {
+				derived, err := derivePin(cmd.ErrOrStderr())
+				if err != nil {
+					return fmt.Errorf("ab: %w", err)
+				}
+				ac.pin = derived
+			}
 			ctx, stop := commandContext(cmd)
 			defer stop()
 			return runAB(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), ac, args)
@@ -128,9 +135,8 @@ func newABCmd() *cobra.Command {
 	f.StringVar(&ac.bench, "bench", ".", "benchmark pattern (go test -bench syntax)")
 	f.IntVar(&ac.count, "count", 6, "interleaved iterations per side")
 	f.StringVar(&ac.benchtime, "benchtime", "", "per-benchmark time or iteration budget (go test -benchtime)")
-	f.BoolVar(&ac.benchmem, "benchmem", false, "capture allocation statistics per side")
 	f.StringVar(&ac.ref, "ref", "HEAD", "B side: any git rev the repository resolves")
-	f.StringVar(&ac.pin, "pin", "", "CPU list for taskset pinning, both sides")
+	f.BoolVar(&pin, "pin", false, "pin both sides to one CPU set derived from the host's topology (taskset)")
 	f.BoolVar(&ac.strict, "strict", false, "refuse to measure under noisy machine conditions")
 	f.StringVar(&ac.out, "out", "", "also write both sides' raw benchmark streams to this file (a derivation artifact, never a stat baseline)")
 	return cmd
@@ -176,7 +182,8 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 		return err
 	}
 	defer cleanup()
-	env := os.Environ()
+	envs := newEnvironments(os.Environ(), ac.pin)
+	env := envs.analysis
 	// Every package prepares before any package measures (spec
 	// REQ-pew-preparation): containment, the B side's existence, both
 	// trees' benchmark declarations against the pattern, both builds,
@@ -203,7 +210,7 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 		if err := ctx.Err(); err != nil {
 			return interrupted("ab: interrupted before %s (%d of %d packages compared)", prep.pkg.ImportPath, i, len(preps))
 		}
-		if err := abPackage(ctx, w, errw, ac, prep, i+1, len(preps), env); err != nil {
+		if err := abPackage(ctx, w, errw, ac, prep, i+1, len(preps), envs); err != nil {
 			return err
 		}
 	}
@@ -356,14 +363,17 @@ func abGuardsAgree(importPath, ref string, a, b guard.Guards) error {
 	return nil
 }
 
-func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPreparation, index, total int, env []string) error {
+func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPreparation, index, total int, envs environments) error {
 	p, sideBPkgDir, binA, binB, guardsA, guardsB := prep.pkg, prep.sideBPkgDir, prep.binA, prep.binB, prep.guardsA, prep.guardsB
-	args := []string{"-test.run=^$", "-test.bench=" + ac.bench, "-test.count=1"}
+	// Both sides measure under the pinned environment; the builds and
+	// guard captures stayed on the analysis one (the guards are compared
+	// between the sides, never recorded).
+	runtimeEnv := envs.measured()
+	// -test.benchmem is always on, as for run: allocation deltas ride
+	// every comparison without a second measurement (spec §9).
+	args := []string{"-test.run=^$", "-test.bench=" + ac.bench, "-test.count=1", "-test.benchmem"}
 	if ac.benchtime != "" {
 		args = append(args, "-test.benchtime="+ac.benchtime)
-	}
-	if ac.benchmem {
-		args = append(args, "-test.benchmem")
 	}
 	// Interleaved A/B per iteration: block ordering folds slow machine
 	// drift (thermal, page cache) into the measured delta; alternation
@@ -378,12 +388,12 @@ func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPrep
 			return interrupted("ab: %s: interrupted after %d of %d iterations (the artifact holds them)", p.ImportPath, i, ac.count)
 		}
 		reportPhase(fmt.Sprintf("comparing %s (%d/%d) iteration %d/%d", p.ImportPath, index, total, i+1, ac.count))
-		a, err := ac.executeBinary(ctx, p.Dir, ac.pin, env, binA, args)
+		a, err := ac.executeBinary(ctx, p.Dir, ac.pin.List(), runtimeEnv, binA, args)
 		if err != nil {
 			return fmt.Errorf("ab: side A iteration %d: %w", i+1, err)
 		}
 		outA = append(outA, a...)
-		b, err := ac.executeBinary(ctx, sideBPkgDir, ac.pin, env, binB, args)
+		b, err := ac.executeBinary(ctx, sideBPkgDir, ac.pin.List(), runtimeEnv, binB, args)
 		if err != nil {
 			return fmt.Errorf("ab: side B iteration %d: %w", i+1, err)
 		}

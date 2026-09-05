@@ -53,6 +53,28 @@ func Execute(dir, pin string, env, args []string) ([]byte, error) {
 	return ExecuteContext(context.Background(), dir, pin, env, args)
 }
 
+// Pin is a derived CPU pin (DerivePin): the CPUs a pinned measurement
+// runs on and the derivation that chose them, reported to the operator
+// before the first measurement.
+type Pin struct {
+	CPUs   []int // ascending
+	Reason string
+}
+
+// List is the pin in taskset's list form ("3,15"); empty when unpinned.
+func (p Pin) List() string { return formatCPUList(p.CPUs) }
+
+// Pinned reports whether the pin names any CPU.
+func (p Pin) Pinned() bool { return len(p.CPUs) > 0 }
+
+func formatCPUList(cpus []int) string {
+	parts := make([]string, len(cpus))
+	for i, c := range cpus {
+		parts[i] = strconv.Itoa(c)
+	}
+	return strings.Join(parts, ",")
+}
+
 // ExecuteContext is Execute under a context: cancellation kills the
 // whole process group — the `go` tool and the test binary it spawned —
 // so an interrupted verb never leaves a benchmark running.
@@ -360,7 +382,7 @@ func AuditStream(results []*benchfmt.Result, corrupt []CorruptLine, count int, s
 
 func reservedConfigKey(key string) bool {
 	switch key {
-	case "commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pure":
+	case "commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty":
 		return true
 	default:
 		return false
@@ -474,7 +496,7 @@ var RecordingConfigKeys = []string{
 	"runtimeconfig", "dirty", "pew-runconditions", "pew-closure",
 	"pew-dynamic-state", "pew-test-variants", "pew-test-variant-ledger",
 	"pew-runtime", "pew-runtime-inputs", "pew-purity", "pew-vouches",
-	"pew-single-subject-discharges", "pew-package-process-discharges", "pure",
+	"pew-single-subject-discharges", "pew-package-process-discharges",
 }
 
 // ProvenanceConfig returns the in-band provenance lines in spec §5 order: the
@@ -560,12 +582,6 @@ func GofreshEvidenceConfigs(purity, vouches, singleSubject, packageProcess strin
 		cfgs = append(cfgs, benchfmt.Config{Key: "pew-package-process-discharges", Value: []byte(packageProcess), File: true})
 	}
 	return cfgs
-}
-
-// PureConfig is the recorded purity flag ("true" for --assume-pure, "false" for
-// --impure). File:true so it serializes.
-func PureConfig(v string) benchfmt.Config {
-	return benchfmt.Config{Key: "pure", Value: []byte(v), File: true}
 }
 
 // TestVariantConfig is the recorded test-variant compartment hash line:
