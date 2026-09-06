@@ -12,6 +12,7 @@
 - `ref` — B side: any git rev the repository resolves (default HEAD).
 - `pin` — pin both sides to one CPU set derived from the host's topology (taskset): the isolated set when the kernel has one, else one whole physical core, the fastest the kernel ranks, outside CPU 0's; the set and its derivation are reported first, and a host it cannot be derived on, or without taskset to apply it, refuses.
 - `strict` — refuse to measure under noisy machine conditions.
+- `worktree-dir` — directory for side B's worktree and both binaries, honoured whenever given; its purpose is a repository parent that is unwritable or on another filesystem (default the repository's parent). A placement on another device, or inside the repository, is refused. At the next run's start the placement's `.pew-ab-worktree-*` residue that this repository minted and git no longer registers is swept (an empty mint too); another repository's residue is left alone.
 - `out` — also write both sides' raw benchmark streams to this file, marked pew-ab/dirty — a derivation artifact, by shape never a stat baseline.
 **when:** use ab while a design or curve is still moving — the
 uncommitted working tree (side A) measures against the ref (side B)
@@ -44,7 +45,7 @@ HEAD while tuning a hot path.
 - `strict` — treat quiesce warnings as fatal.
 - `label` — variant label for the recording filename.
 - `all` — measure every selected benchmark, a valid recording included; the default serves what is proven and measures the rest (status's closure-analysis path, over the run's own typed view, intersecting the independent benchmark selection and never adding or recording an excluded benchmark).
-- `vouch` — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, the load-bearing set recorded on the recording.
+- `vouch` — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, the load-bearing set recorded on the recording. A one-off acceptance extending the store's reviewed `vouches` file — one IMPORT-PATH:VARIABLE per line at the store root, `#` comments — the standing set every judged verb (run, status, stat) reads; a flag adds, never removes.
 **when:** use run to measure and store — one pre-run observation
 both drives the quiesce gate and is recorded as the run-conditions
 provenance line, so the recording states exactly the conditions the
@@ -64,7 +65,7 @@ change — the unchanged benchmarks serve, the changed ones measure.
 - `stale` — show only benchmarks that need re-running (non-valid); scriptable, the set run measures by default.
 - `explain` — explain each non-valid verdict: every guard's recorded vs current value, the closure hash, the runtime-input digest, and the manifest's watched identities — environment inputs disclosed as names with digest equality only, never values; a digest mismatch additionally names the moved watched inputs. Mutually exclusive with the JSON view (the explanation is a human view).
 - `json` — one JSON object per row; the field names are public surface and stable (package, benchmark, label, verdict, reason; a per-package failure emits package and error).
-- `vouch` — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), the same acceptance set run records.
+- `vouch` — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), a one-off acceptance extending the store's reviewed `vouches` file (one entry per line at the store root; the standing set every judged verb reads); the same acceptance set run records.
 **when:** use status as the inventory-plus-verdict view before
 measuring or comparing — the stale filter names what run will
 measure, and the explanation view answers why a verdict is
@@ -85,7 +86,7 @@ to re-measure.
 - `explain` — lay out the values behind a one-word skip or warning: a comparison key whose two sides disagree on a guard prints both sides' recorded values naming the moving guard, and a working-tree recording warned non-valid prints its recorded-vs-current explanation. Mutually exclusive with the JSON view.
 - `json` — one JSON object per comparison row, note, or empty-comparison marker; the field names are public surface and stable, and internal values (guard digests, closure hashes) are deliberately excluded — they belong to the explanation view.
 - `gate` — comma-separated units whose regression fails the build: sec/op, B/op, allocs/op (default sec/op).
-- `vouch` — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), the same acceptance set run records.
+- `vouch` — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), a one-off acceptance extending the store's reviewed `vouches` file (one entry per line at the store root; the standing set every judged verb reads); the same acceptance set run records.
 **when:** use stat as the comparison of record — it runs nothing,
 comparing already-stored results, and the baseline mode follows the
 argument count: no ref is auto (working-tree recording vs the

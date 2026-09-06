@@ -490,6 +490,16 @@ func TestStatusRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 	if got := out.String(); !strings.Contains(got, "stale") || !strings.Contains(got, "dynamic-state strategy") {
 		t.Errorf("predating recording status = %q, want stale (dynamic-state strategy)", got)
 	}
+	// The strategy-refused recording decoded, so --explain lays its
+	// recorded values against the current tree as for any stale verdict
+	// (REQ-pew-admission keeps the fingerprint on refusal).
+	out.Reset()
+	if err := statusPackageOf(&out, io.Discard, e, st.Root, "", false, true, false, p); err != nil {
+		t.Fatalf("statusPackage --explain: %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "recorded") || !strings.Contains(got, "closure") {
+		t.Errorf("strategy-stale recording under --explain printed no recorded-vs-current table:\n%s", got)
+	}
 }
 
 // statusPackageOf runs statusPackage over a package's own declarations,

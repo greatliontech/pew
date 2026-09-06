@@ -43,6 +43,7 @@ func newStatusCmd() *cobra.Command {
 		Short: guidanceShort("status"),
 		Long:  guidanceHelp("status"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			vouchStoreDir = benchDir
 			if err := resolveVouches(); err != nil {
 				return err
 			}
@@ -126,9 +127,10 @@ func newEngineAtProducer(moduleDir, pkgDir string, mainPkg bool, env, producerEn
 // them once into dynamicStateVouches before the first engine builds.
 var rawVouches []string
 
-// dynamicStateVouches is the process-wide reviewed vouch set from the
-// --vouch flags: one set for every engine a command builds, so run,
-// status, and stat verdicts judge under the same acceptances.
+// dynamicStateVouches is the process-wide vouch set from the --vouch
+// flags, extending the store's reviewed standing set (vouchfile.go) for
+// every engine a command builds, so run, status, and stat verdicts
+// judge under the same acceptances.
 var dynamicStateVouches []string
 
 // resolveVouches parses the collected --vouch values; every command
@@ -220,8 +222,12 @@ func buildEngine(moduleDir string, env, producerEnv []string, pgo string) (*gofr
 	if producerEnv != nil {
 		opts = append(opts, gofresh.WithProducerEnv(producerEnv...))
 	}
-	if len(dynamicStateVouches) > 0 {
-		opts = append(opts, gofresh.WithDynamicStateVouches(dynamicStateVouches...))
+	vouches, err := engineVouches(moduleDir)
+	if err != nil {
+		return nil, err
+	}
+	if len(vouches) > 0 {
+		opts = append(opts, gofresh.WithDynamicStateVouches(vouches...))
 	}
 	return gofresh.New(opts...)
 }
@@ -328,10 +334,11 @@ func statusPackage(ctx context.Context, w, errw io.Writer, e *gofresh.Engine, be
 			line += "  (" + reason + ")"
 		}
 		fmt.Fprintln(w, line)
-		// fp.MaximalClosure is non-empty iff the format check passed: shape
-		// validation requires a pew-closure key, so the empty sentinel is
+		// fp.MaximalClosure is non-empty iff the recording decoded: the
+		// format rung requires a pew-closure key, so the empty sentinel is
 		// exactly the unrecorded/stale-format/error set, which has nothing
-		// decodable to tabulate.
+		// decodable to tabulate — a strategy-refused recording decoded and
+		// explains like any stale one.
 		if explain && v != verdictValid && v != verdictUnrecorded && fp.MaximalClosure != "" {
 			explainRecordAgainstCurrent(w, e, p.Module.Dir, p.ImportPath, b, fp, os.Environ())
 		}
@@ -410,16 +417,14 @@ func checkPackage(ctx context.Context, st *store.Store, e *gofresh.Engine, pkgPa
 		}
 		bv := &benchVerdict{foreign: store.ForeignConfigKeys(recs)}
 		out[b] = bv
-		if !store.IsRecordingShape(recs) {
-			bv.v, bv.reason = verdictStale, "format"
+		adm := admitRecording(recs, true)
+		if !adm.ok {
+			// A strategy-refused recording decoded: its fingerprint rides
+			// the row so --explain can lay it against the current tree.
+			bv.v, bv.reason, bv.fp = verdictStale, adm.class, adm.fp
 			continue
 		}
-		fp, recordedLedger, ok := fingerprintFromConfig(recs[0].Config)
-		if !ok {
-			bv.v, bv.reason = verdictStale, "format"
-			continue
-		}
-		checks = append(checks, pending{b, fp, recordedLedger})
+		checks = append(checks, pending{b, adm.fp, adm.ledger})
 	}
 	if len(checks) == 0 {
 		return out, nil
@@ -474,13 +479,11 @@ func checkPackage(ctx context.Context, st *store.Store, e *gofresh.Engine, pkgPa
 // working-tree staleness warning directly — shares it, the inert-growth
 // rule included (spec §7.9).
 func verdictForRecs(ctx context.Context, e *gofresh.Engine, pkgPath, moduleDir, bench string, recs []*benchfmt.Result) (verdict, string, gofresh.Fingerprint, string, error) {
-	if !store.IsRecordingShape(recs) {
-		return verdictStale, "format", gofresh.Fingerprint{}, "", nil
+	adm := admitRecording(recs, true)
+	if !adm.ok {
+		return verdictStale, adm.class, adm.fp, "", nil
 	}
-	fp, recordedLedger, ok := fingerprintFromConfig(recs[0].Config)
-	if !ok {
-		return verdictStale, "format", gofresh.Fingerprint{}, "", nil
-	}
+	fp, recordedLedger := adm.fp, adm.ledger
 	v, err := e.Check(ctx, fp, gofresh.Subject{Package: pkgPath, Symbol: bench}, moduleDir)
 	if err != nil {
 		return "", "", gofresh.Fingerprint{}, "", err

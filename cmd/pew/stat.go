@@ -42,6 +42,7 @@ func newStatCmd() *cobra.Command {
 		Long:  guidanceHelp("stat"),
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			vouchStoreDir = sc.benchDir
 			if err := resolveVouches(); err != nil {
 				return err
 			}
@@ -320,8 +321,12 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 			// Each side's stale-format state warns and tallies independently
 			// (spec §10.1 per-side; the tally counts recording files), so with
 			// both sides stale neither file goes unmentioned.
-			baseStale := baseOK && !recordingCurrent(baseRecs)
-			newStale := newOK && !recordingCurrent(newRecs)
+			// One admissibility ladder for every surface (admitRecording):
+			// the format rung on both sides, the strategy rung on the
+			// working-tree side alone.
+			baseAdm, newAdm := admitRecording(baseRecs, false), admitRecording(newRecs, newSideIsWorkingTree)
+			baseStale := baseOK && !baseAdm.ok && baseAdm.class == "format"
+			newStale := newOK && !newAdm.ok && newAdm.class == "format"
 			if baseStale {
 				fmt.Fprintf(errw, "pew: warning: baseline %s:%s is stale (format); skipping — re-run `pew run`\n", bl.baseRef, key.bench)
 				tally.staleFormat++
@@ -349,7 +354,7 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 			// note (spec §5's strategy row, scoped by §7's exclusion). The
 			// base side enters no engine verdict on any path, so there is
 			// no laundering channel to guard there.
-			if newSideIsWorkingTree && newOK && !recordingStrategyCurrent(newRecs) {
+			if newOK && !newAdm.ok && newAdm.class == "dynamic-state strategy" {
 				fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is stale (dynamic-state strategy); skipping — re-run `pew run`\n", key.pkgRel, key.bench)
 				tally.staleStrategy++
 				continue
@@ -744,32 +749,10 @@ func sortedStatKeys(keys map[statKey]bool) []statKey {
 	return out
 }
 
-// recordingStrategyCurrent reports whether a recording was computed
-// under the engine's current dynamic-state strategy — another
-// strategy's, or a predating recording's empty, verdict semantics are
-// not this engine's. Its one caller applies it to the WORKING-TREE
-// side only (spec §5's pew-dynamic-state row): that side is
-// re-recordable and verdict-bearing, so it skips and re-records, while
-// a ref-resolved side always compares, a strategy difference surfacing
-// as compare's audit note — never a refusal.
-func recordingStrategyCurrent(recs []*benchfmt.Result) bool {
-	return len(recs) > 0 && recs[0].GetConfig("pew-dynamic-state") == gofresh.DynamicStateStrategy
-}
-
-// recordingCurrent reports whether a side's recording carries the current
-// shape and a decodable format-1 fingerprint — the bar for entering a
-// comparison; anything below it is stale (format).
-func recordingCurrent(recs []*benchfmt.Result) bool {
-	if !store.IsRecordingShape(recs) {
-		return false
-	}
-	_, _, ok := fingerprintFromConfig(recs[0].Config)
-	return ok
-}
-
-// isDirty reports whether a recording was made on a dirty working tree (§5). The
-// flag is uniform across a recording's results (one overwrite-written block), so
-// the first result decides.
+// isDirty reports whether a recording was made on a dirty working tree (§5).
+// `dirty` is a closed recording key, and admitRecording has already refused
+// any recording whose rows disagree on a closed key before this runs, so the
+// first row decides for the whole recording.
 func isDirty(recs []*benchfmt.Result) bool {
 	return len(recs) > 0 && recs[0].GetConfig("dirty") == "true"
 }

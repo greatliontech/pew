@@ -73,6 +73,7 @@ func newRunCmd() *cobra.Command {
 			if err := validateBenchmarkPattern(rc.opts.Bench); err != nil {
 				return err
 			}
+			vouchStoreDir = rc.benchDir
 			if err := resolveVouches(); err != nil {
 				return err
 			}

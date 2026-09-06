@@ -531,3 +531,57 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "e41eb42f5d3cc8a691232b75446e7006eb5b77f782c5240686fb349672fd6405"
 }
+
+bindings {
+  requirement_id: "REQ-pew-admission"
+  content_hash: "4f226c3d9d1a22c302954c8ff077f57dc6fe77d40088ea2db762e9741f497e78"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestAdmitRecordingClimbsOneLadderOverTheWholeRecording"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a055d0799ec477b35f4f33e67c2401eb800c18c0138913a9e4c70c859e5f22ff"
+}
+
+bindings {
+  requirement_id: "REQ-pew-vouch-source"
+  content_hash: "f86d214bdc12f0885290d54e3459c908ed06984d650b1d71dab5a2c08d7f6524"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestVouchFileIsTheStandingSetTheFlagsExtend"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1a5b95489dadecb686bb52f589d8ea2b8e9eef2af06ce5d49ef277a2252d4948"
+}
+
+bindings {
+  requirement_id: "REQ-pew-vouch-source"
+  content_hash: "f86d214bdc12f0885290d54e3459c908ed06984d650b1d71dab5a2c08d7f6524"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestVouchedEngineDischargesPinnedCulprit"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cbf7dd9dac5c0fc6c709209d0fa90699e13e25a16b9d82bfafc06a4975d986c7"
+}
+
+bindings {
+  requirement_id: "REQ-pew-verb-defaults"
+  content_hash: "bcb35644e57b02e13a647cf5066377567465a740f2e2683403b3f954e1fd8b5d"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestABWorktreeDirPlacesSideBWhereTheOperatorNames"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "50ce95a79a6a817452b7dd3837df0b38f3cd288f7ad5412ff4d1f734fe339878"
+}
+
+bindings {
+  requirement_id: "REQ-pew-verb-defaults"
+  content_hash: "bcb35644e57b02e13a647cf5066377567465a740f2e2683403b3f954e1fd8b5d"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestABSweepsStaleSideBWorktrees"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "058cf3e40f8cf6972316c1532f5bc71cb938fe2d6279385e39406a359d293daa"
+}
+
+bindings {
+  requirement_id: "REQ-pew-admission"
+  content_hash: "4f226c3d9d1a22c302954c8ff077f57dc6fe77d40088ea2db762e9741f497e78"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/internal/store.TestIsRecordingShapeRequiresRunConditions"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5c8ba60bbbaf0c962e960779a1e5bbc7f7338317e19e832171b16f5fa59bbf80"
+}

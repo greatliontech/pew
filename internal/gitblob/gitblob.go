@@ -30,9 +30,14 @@ type Repo struct {
 // Root returns the repository worktree root used for absolute path resolution.
 func (r *Repo) Root() string { return r.root }
 
-// Open opens the repository containing dir (walking up to the .git directory).
+// Open opens the repository containing dir (walking up to the .git
+// directory, or the .git file a linked worktree carries). A linked
+// worktree's objects and refs live in the main repository's common
+// directory, named by its gitdir's commondir file: resolved here, so a
+// checkout made by `git worktree add` — the baseline-at-an-older-ref
+// shape an A/B wants — reads and snapshots exactly as a plain clone.
 func Open(dir string) (*Repo, error) {
-	repo, err := gogit.PlainOpenWithOptions(dir, &gogit.PlainOpenOptions{DetectDotGit: true})
+	repo, err := gogit.PlainOpenWithOptions(dir, &gogit.PlainOpenOptions{DetectDotGit: true, EnableDotGitCommonDir: true})
 	if err != nil {
 		return nil, fmt.Errorf("gitblob: open repo at %s: %w", dir, err)
 	}

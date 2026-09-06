@@ -522,16 +522,25 @@ func IsRecordingShape(recs []*benchfmt.Result) bool {
 	if len(recs) == 0 {
 		return false
 	}
-	cfg := map[string]string{}
-	for _, c := range recs[0].Config {
-		cfg[c.Key] = string(c.Value)
-	}
-	for _, key := range []string{"commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pew-runconditions", "pew-closure", "pew-test-variants", "pew-test-variant-ledger", "pew-runtime", "pew-runtime-inputs"} {
-		if cfg[key] == "" {
+	// Every row is judged: a recording is one overwrite-written block,
+	// so a row disagreeing with its siblings is not a recording of the
+	// current shape (a hand edit, a spliced file), never a recording
+	// whose first row happens to pass.
+	for _, r := range recs {
+		cfg := map[string]string{}
+		for _, c := range r.Config {
+			cfg[c.Key] = string(c.Value)
+		}
+		for _, key := range []string{"commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pew-runconditions", "pew-closure", "pew-test-variants", "pew-test-variant-ledger", "pew-runtime", "pew-runtime-inputs"} {
+			if cfg[key] == "" {
+				return false
+			}
+		}
+		if cfg["dirty"] != "true" && cfg["dirty"] != "false" {
 			return false
 		}
 	}
-	return cfg["dirty"] == "true" || cfg["dirty"] == "false"
+	return true
 }
 
 // Remove deletes a recording and prunes empty package directories up to the store

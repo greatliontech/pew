@@ -26,12 +26,17 @@ type abConfig struct {
 	benchtime string
 	ref       string
 	pin       run.Pin // the derived CPU set both sides run on; unpinned when empty
-	strict    bool
-	out       string
-	throttle  func() run.ThrottleSnapshot
-	execute   func(dir, pin string, env []string, bin string, args []string) ([]byte, error)
-	build     func(dir string, env []string, args []string) error
-	guards    func(moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error)
+	// worktreeDir is the operator's placement for side B's worktree and
+	// both sides' binaries — a same-device directory named where the
+	// default sibling placement is unavailable (an unwritable parent, a
+	// repository at a mount boundary); empty selects the sibling.
+	worktreeDir string
+	strict      bool
+	out         string
+	throttle    func() run.ThrottleSnapshot
+	execute     func(dir, pin string, env []string, bin string, args []string) ([]byte, error)
+	build       func(dir string, env []string, args []string) error
+	guards      func(moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error)
 }
 
 // sideGuards captures one side's comparison-guard values in that side's own
@@ -137,6 +142,7 @@ func newABCmd() *cobra.Command {
 	f.StringVar(&ac.benchtime, "benchtime", "", "per-benchmark time or iteration budget (go test -benchtime)")
 	f.StringVar(&ac.ref, "ref", "HEAD", "B side: any git rev the repository resolves")
 	f.BoolVar(&pin, "pin", false, "pin both sides to one CPU set derived from the host's topology (taskset)")
+	f.StringVar(&ac.worktreeDir, "worktree-dir", "", "same-filesystem directory for side B's worktree and both binaries when the repository's parent is unwritable or on another filesystem (default: the repository's parent)")
 	f.BoolVar(&ac.strict, "strict", false, "refuse to measure under noisy machine conditions")
 	f.StringVar(&ac.out, "out", "", "also write both sides' raw benchmark streams to this file (a derivation artifact, never a stat baseline)")
 	return cmd
@@ -174,10 +180,20 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 	if err != nil {
 		return err
 	}
+	placement, err := abPlacement(repoRoot, ac.worktreeDir)
+	if err != nil {
+		return err
+	}
+	// A killed run's side-B worktree is durable residue beside the
+	// repository: swept here, before this run mints its own, by the same
+	// cross-check `git worktree prune` trusts.
+	for _, swept := range sweepStaleWorktrees(repoRoot, placement) {
+		fmt.Fprintf(errw, "pew: swept a stale side-B worktree %s (a killed run's residue)\n", swept)
+	}
 	// B side: the ref materialized in a disposable worktree - never a
 	// stash, never a mutation of the working tree; a crash leaves a
 	// removable directory and a writable repository.
-	worktree, cleanup, err := addWorktree(repoRoot, ac.ref)
+	worktree, cleanup, err := addWorktree(repoRoot, placement, ac.ref)
 	if err != nil {
 		return err
 	}
@@ -197,7 +213,7 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 			return interrupted("ab: interrupted while preparing %s (package %d/%d); nothing compared", p.ImportPath, i+1, len(pkgs))
 		}
 		reportPhase(fmt.Sprintf("preparing %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
-		prep, err := prepareABPackage(ctx, ac, p, repoRoot, worktree, env)
+		prep, err := prepareABPackage(ctx, ac, p, repoRoot, worktree, placement, env)
 		if prep != nil && prep.tmp != "" {
 			defer os.RemoveAll(prep.tmp)
 		}
@@ -230,7 +246,7 @@ type abPreparation struct {
 // prepareABPackage builds a package's A/B preparation record, firing
 // every refusal the two trees decide before any iteration; a returned
 // record with a temp dir owns it even when the error is non-nil.
-func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, worktree string, env []string) (*abPreparation, error) {
+func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, worktree, placement string, env []string) (*abPreparation, error) {
 	// Each package's own module maps into the worktree - a go.work
 	// pattern can resolve packages from several modules, and a
 	// module outside this repository has no B side to compare.
@@ -260,7 +276,7 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 	// live beside the repository like the worktree does — never under a
 	// temp root that may be memory-backed, where a tree's worth of test
 	// binaries would perturb the measurement they serve.
-	tmp, err := os.MkdirTemp(filepath.Dir(repoRoot), ".pew-ab-bin-*")
+	tmp, err := os.MkdirTemp(placement, ".pew-ab-bin-*")
 	if err != nil {
 		return nil, err
 	}
@@ -502,28 +518,19 @@ func gitTopLevel(dir string) (string, error) {
 
 // addWorktree materializes ref in a disposable detached worktree and
 // returns its path with a cleanup that removes it; the repository stays
-// writable throughout. The worktree is created BESIDE the repository —
-// same filesystem — never in the OS temp dir: a benchmark keeping its
-// media package-dir-relative (the durable-write arms) measures that
-// filesystem's storage, and an os.TempDir worktree on a tmpfs host
-// hands side B RAM-backed fsyncs while side A pays the disk, an
-// invalid experiment no interleaving can rescue. An unwritable parent
-// is a hard error, not a silent fallback to a different medium.
-func addWorktree(repoRoot, ref string) (string, func(), error) {
-	dir, err := os.MkdirTemp(filepath.Dir(repoRoot), ".pew-ab-worktree-*")
+// writable throughout. The worktree is created in the placement — the
+// repository's own parent by default, or the operator's --worktree-dir
+// — on the repository's filesystem, never in the OS temp dir: a
+// benchmark keeping its media package-dir-relative (the durable-write
+// arms) measures that filesystem's storage, and an os.TempDir worktree
+// on a tmpfs host hands side B RAM-backed fsyncs while side A pays the
+// disk, an invalid experiment no interleaving can rescue. An
+// unwritable placement is a hard error, not a silent fallback to a
+// different medium.
+func addWorktree(repoRoot, placement, ref string) (string, func(), error) {
+	dir, err := os.MkdirTemp(placement, ".pew-ab-worktree-*")
 	if err != nil {
-		return "", nil, fmt.Errorf("ab: creating the side-B worktree beside the repository (same filesystem, spec §12): %w", err)
-	}
-	// Sibling placement is same-filesystem only when the repository is
-	// not itself a mount boundary (a repo on a dedicated bench disk is
-	// exactly this tool's population) — so the contract is enforced by
-	// device identity, not assumed from the path shape.
-	if same, err := sameDevice(repoRoot, dir); err != nil {
-		os.RemoveAll(dir)
-		return "", nil, err
-	} else if !same {
-		os.RemoveAll(dir)
-		return "", nil, fmt.Errorf("ab: the repository parent %s is on a different filesystem than the repository — side B's media would not match side A's (spec §12)", filepath.Dir(repoRoot))
+		return "", nil, fmt.Errorf("ab: creating the side-B worktree in %s (the repository's filesystem, spec §12): %w", placement, err)
 	}
 	cmd := exec.Command("git", "-C", repoRoot, "worktree", "add", "--detach", dir, ref)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -538,4 +545,169 @@ func addWorktree(repoRoot, ref string) (string, func(), error) {
 		}
 	}
 	return dir, cleanup, nil
+}
+
+// abPlacement is the directory side B's worktree and both sides' binaries
+// are minted in: the repository's parent by default, or the operator's
+// --worktree-dir where that parent is unwritable or on another
+// filesystem. Either way the placement must share the repository's
+// device — a benchmark's media must be side A's — enforced by device
+// identity, not assumed from the path shape (a repository on a dedicated
+// bench disk is exactly this tool's population); an operator naming a
+// different-device directory is refused, never silently degraded, since
+// a different medium is the invalid experiment the placement exists to
+// prevent (spec §12).
+func abPlacement(repoRoot, operatorDir string) (string, error) {
+	placement := filepath.Dir(repoRoot)
+	named := "the repository parent"
+	if operatorDir != "" {
+		abs, err := filepath.Abs(operatorDir)
+		if err != nil {
+			return "", fmt.Errorf("ab: --worktree-dir: %w", err)
+		}
+		info, err := os.Stat(abs)
+		if err != nil {
+			return "", fmt.Errorf("ab: --worktree-dir %s: %w", operatorDir, err)
+		}
+		if !info.IsDir() {
+			return "", fmt.Errorf("ab: --worktree-dir %s is not a directory", operatorDir)
+		}
+		// Inside the repository the placement would dirty the working
+		// tree for the run's duration and put the residue sweep's
+		// RemoveAll inside it — the sibling default structurally cannot.
+		// repoRoot is physical (git's toplevel); resolve the operator's
+		// path too, so a symlink into the tree cannot pass the check.
+		physical := abs
+		if r, err := filepath.EvalSymlinks(abs); err == nil {
+			physical = r
+		}
+		if rel, err := filepath.Rel(repoRoot, physical); err == nil && filepath.IsLocal(rel) {
+			return "", fmt.Errorf("ab: --worktree-dir %s lies inside the repository; side B must be placed outside the working tree", operatorDir)
+		}
+		placement, named = abs, "--worktree-dir "+operatorDir
+	}
+	same, err := sameDevice(repoRoot, placement)
+	if err != nil {
+		return "", err
+	}
+	if !same {
+		return "", fmt.Errorf("ab: %s (%s) is on a different filesystem than the repository — side B's media would not match side A's; name a same-filesystem --worktree-dir (spec §12)", named, placement)
+	}
+	return placement, nil
+}
+
+// sweepStaleWorktrees removes the `.pew-ab-worktree-*` directories in the
+// placement that THIS repository minted — its `.git` file's gitdir lies
+// under the repository's common directory, or the directory is empty, a
+// mint git never populated — and that `git worktree list` no longer
+// registers: a killed run's residue, self-healed on the next
+// run instead of accumulating beside the repository, then the stale
+// registrations pruned, the cross-check `git worktree prune` itself
+// trusts. A registered worktree (a run in flight) is never touched, and
+// neither is a worktree another repository owns: sibling repositories
+// share the default placement, and a shared --worktree-dir is
+// legitimate, so ownership is read from the residue itself, never
+// inferred from the placement. Returns the swept directories.
+func sweepStaleWorktrees(repoRoot, placement string) []string {
+	entries, err := os.ReadDir(placement)
+	if err != nil {
+		return nil
+	}
+	commonDir, err := gitCommonDir(repoRoot)
+	if err != nil {
+		return nil
+	}
+	registered := map[string]bool{}
+	if out, err := exec.Command("git", "-C", repoRoot, "worktree", "list", "--porcelain").Output(); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			if path, ok := strings.CutPrefix(line, "worktree "); ok {
+				if resolved, err := filepath.EvalSymlinks(path); err == nil {
+					path = resolved
+				}
+				registered[path] = true
+			}
+		}
+	} else {
+		// Without the registry no residue can be told from a run in
+		// flight: sweep nothing.
+		return nil
+	}
+	var swept []string
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), ".pew-ab-worktree-") {
+			continue
+		}
+		path := filepath.Join(placement, entry.Name())
+		// This repository's residue, or an empty directory — a run
+		// killed between minting the directory and git writing its
+		// .git file leaves the latter; empty, it can be nobody's live
+		// worktree (a sibling's in-flight mint is re-created by its own
+		// `git worktree add`). Anything else is another repository's.
+		if !worktreeOwnedBy(path, commonDir) && !emptyDir(path) {
+			continue
+		}
+		resolved := path
+		if r, err := filepath.EvalSymlinks(path); err == nil {
+			resolved = r
+		}
+		if registered[resolved] {
+			continue
+		}
+		if err := os.RemoveAll(path); err == nil {
+			swept = append(swept, path)
+		}
+	}
+	if len(swept) > 0 {
+		_ = exec.Command("git", "-C", repoRoot, "worktree", "prune").Run()
+	}
+	return swept
+}
+
+// gitCommonDir is the repository's common git directory, resolved —
+// the one directory every worktree the repository owns points into.
+func gitCommonDir(repoRoot string) (string, error) {
+	out, err := exec.Command("git", "-C", repoRoot, "rev-parse", "--git-common-dir").Output()
+	if err != nil {
+		return "", err
+	}
+	dir := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(repoRoot, dir)
+	}
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
+	return dir, nil
+}
+
+// worktreeOwnedBy reports whether the directory is a linked worktree of
+// the repository whose common directory is commonDir: its `.git` file
+// names a gitdir under that directory. A directory with no readable
+// `.git` file (a crash before `git worktree add` wrote it) is nobody's
+// and counts as owned by no repository — never swept on ownership
+// grounds alone.
+// emptyDir reports whether dir holds no entries at all.
+func emptyDir(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	return err == nil && len(entries) == 0
+}
+
+func worktreeOwnedBy(dir, commonDir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, ".git"))
+	if err != nil {
+		return false
+	}
+	gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir:")
+	if !ok {
+		return false
+	}
+	gitdir = strings.TrimSpace(gitdir)
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(dir, gitdir)
+	}
+	if resolved, err := filepath.EvalSymlinks(gitdir); err == nil {
+		gitdir = resolved
+	}
+	rel, err := filepath.Rel(commonDir, gitdir)
+	return err == nil && filepath.IsLocal(rel)
 }

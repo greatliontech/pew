@@ -124,6 +124,12 @@ func TestIsRecordingShapeRequiresRunConditions(t *testing.T) {
 		if IsRecording([]*benchfmt.Result{without}) {
 			t.Fatalf("IsRecording accepted a recording without %s", key)
 		}
+		// Every row is judged: a recording whose first row is complete
+		// and a later row lacks the field is not one recording of the
+		// current shape (REQ-pew-admission's whole-recording rung).
+		if IsRecordingShape([]*benchfmt.Result{recs[0], without}) {
+			t.Fatalf("a later row without %s accepted behind a complete first row", key)
+		}
 	}
 }
 

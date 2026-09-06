@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -8,10 +9,12 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
 	runpkg "github.com/greatliontech/pew/internal/run"
+	"github.com/spf13/cobra"
 	"golang.org/x/perf/benchfmt"
 )
 
@@ -153,6 +156,7 @@ func BenchmarkCount(b *testing.B) {
 		t.Fatalf("no culprit parsed from %q", verdict.Reason)
 	}
 	culprit := m[1] + "." + m[3]
+	culpritEntry := m[1] + ":" + m[3] // the IMPORT-PATH:VARIABLE spelling
 
 	fp := capture(culprit)
 	if fp.DynamicStateVouches != culprit {
@@ -185,6 +189,23 @@ func BenchmarkCount(b *testing.B) {
 	if strings.Contains(vouchedVerdict.Reason, culprit) {
 		t.Fatalf("vouched verdict still names the culprit: %+v", vouchedVerdict)
 	}
+
+	// The store's reviewed vouch file is the standing set every engine
+	// over the module judges under, with no flag given: the same
+	// discharge, from the file beside the recordings (REQ-pew-vouch-source).
+	storeVouchMemo = sync.Map{}
+	vouchStoreDir = ""
+	if err := os.MkdirAll(filepath.Join(dir, "benchmarks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "benchmarks", vouchFileName), []byte("# reviewed 2026-09-06\n\n"+culpritEntry+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fileFP := capture()
+	if fileFP.DynamicStateVouches != culprit {
+		t.Fatalf("the store's vouch file did not discharge: %q, want %q", fileFP.DynamicStateVouches, culprit)
+	}
+	storeVouchMemo = sync.Map{}
 }
 
 // The flag-to-engine seam: resolveVouches parses the collected flag
@@ -209,5 +230,75 @@ func TestResolveVouchesSeam(t *testing.T) {
 	}
 	if dynamicStateVouches != nil {
 		t.Fatalf("empty flags left a stale set: %v", dynamicStateVouches)
+	}
+}
+
+// The vouch file's grammar: one IMPORT-PATH:VARIABLE per line, comments
+// and blank lines ignored, a malformed line refusing exactly as a
+// malformed flag; an absent file is the empty set; the flags extend the
+// file's set and never remove from it; the set is read from the store
+// --bench-dir names (REQ-pew-vouch-source).
+func TestVouchFileIsTheStandingSetTheFlagsExtend(t *testing.T) {
+	t.Cleanup(func() { storeVouchMemo = sync.Map{}; vouchStoreDir = ""; dynamicStateVouches = nil })
+	module := t.TempDir()
+	store := filepath.Join(module, "benchmarks")
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	storeVouchMemo, vouchStoreDir = sync.Map{}, ""
+	if got, err := engineVouches(module); err != nil || len(got) != 0 {
+		t.Fatalf("absent file = %v, %v; want the empty set", got, err)
+	}
+	if err := os.WriteFile(filepath.Join(store, vouchFileName), []byte("# standing\n\nexample.com/dep:Var\n  example.com/other:Second  \n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	storeVouchMemo = sync.Map{}
+	dynamicStateVouches = []string{"example.com/flag.Extra", "example.com/dep.Var"}
+	got, err := engineVouches(module)
+	if err != nil || strings.Join(got, ",") != "example.com/dep.Var,example.com/flag.Extra,example.com/other.Second" {
+		t.Fatalf("file ∪ flags = %v, %v", got, err)
+	}
+	// --bench-dir names the store whose file governs.
+	elsewhere := t.TempDir()
+	if err := os.WriteFile(filepath.Join(elsewhere, vouchFileName), []byte("example.com/named:Store\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	storeVouchMemo, vouchStoreDir, dynamicStateVouches = sync.Map{}, elsewhere, nil
+	if got, err := engineVouches(module); err != nil || strings.Join(got, ",") != "example.com/named.Store" {
+		t.Fatalf("named store's file = %v, %v", got, err)
+	}
+	// A malformed line refuses, naming the file.
+	if err := os.WriteFile(filepath.Join(elsewhere, vouchFileName), []byte("garbage\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	storeVouchMemo = sync.Map{}
+	if _, err := engineVouches(module); err == nil || !strings.Contains(err.Error(), "vouch file") || !strings.Contains(err.Error(), "IMPORT-PATH:VARIABLE") {
+		t.Fatalf("malformed vouch file = %v; want the refusal naming the file", err)
+	}
+}
+
+// Every judged verb hands its --bench-dir to the vouch source before its
+// first engine builds, so the store the flag names is the store whose
+// vouch file governs (REQ-pew-vouch-source).
+func TestJudgedVerbsNameTheirStoreForTheVouchFile(t *testing.T) {
+	t.Cleanup(func() { vouchStoreDir = ""; storeVouchMemo = sync.Map{} })
+	for _, verb := range []struct {
+		name string
+		cmd  func() *cobra.Command
+		args []string
+	}{
+		{"run", newRunCmd, []string{"--bench-dir", "/nonexistent/store", "./definitely/not/a/package"}},
+		{"status", newStatusCmd, []string{"--bench-dir", "/nonexistent/store", "./definitely/not/a/package"}},
+		{"stat", newStatCmd, []string{"--bench-dir", "/nonexistent/store"}},
+	} {
+		vouchStoreDir = ""
+		cmd := verb.cmd()
+		cmd.SetArgs(verb.args)
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+		_ = cmd.Execute()
+		if vouchStoreDir != "/nonexistent/store" {
+			t.Fatalf("%s left the vouch store at %q, want its --bench-dir", verb.name, vouchStoreDir)
+		}
 	}
 }

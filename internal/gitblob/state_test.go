@@ -162,3 +162,61 @@ func TestSnapshotExcludesRecordingStore(t *testing.T) {
 		t.Errorf("non-store dirt suppressed by the exclusion: dirty=%v err=%v", dirty, err)
 	}
 }
+
+// A linked worktree (`git worktree add`) keeps its objects and refs in
+// the main repository's common directory behind a `.git` file: the
+// snapshot, the committed-blob read, and the listing resolve through
+// that indirection exactly as in a plain clone — a baseline recorded
+// at an older ref in a worktree is the A/B use case (REQ-pew-recording
+// provenance; the field failure was "worktree status: object not
+// found").
+func TestLinkedWorktreeResolvesTheCommonDirectory(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not available")
+	}
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	git("config", "user.email", "t@example.com")
+	git("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-q", "-m", "init")
+	linked := filepath.Join(t.TempDir(), "linked")
+	git("worktree", "add", "-q", "--detach", linked)
+
+	state, err := Snapshot(linked)
+	if err != nil {
+		t.Fatalf("Snapshot in a linked worktree: %v", err)
+	}
+	if len(state.Commit) != 40 || state.Dirty {
+		t.Fatalf("linked worktree snapshot = %+v, want the commit and clean", state)
+	}
+	repo, err := Open(linked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, ok, err := repo.ReadAt("HEAD", filepath.Join(linked, "f.txt"))
+	if err != nil || !ok || string(content) != "x" {
+		t.Fatalf("ReadAt in a linked worktree = %q %v %v", content, ok, err)
+	}
+	if names, err := repo.ListAt("HEAD", linked); err != nil || len(names) != 1 {
+		t.Fatalf("ListAt in a linked worktree = %v %v", names, err)
+	}
+	// Dirtiness is the linked worktree's own.
+	if err := os.WriteFile(filepath.Join(linked, "g.txt"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := Snapshot(linked); err != nil || !again.Dirty {
+		t.Fatalf("dirty linked worktree = %+v %v", again, err)
+	}
+}

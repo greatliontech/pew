@@ -279,3 +279,56 @@ func TestPinIsDerivedBeforeTheListing(t *testing.T) {
 		})
 	}
 }
+
+// A run inside a linked worktree (`git worktree add`) records exactly as
+// in a plain clone: the repository state and the committed blobs resolve
+// through the worktree's common directory (spec §6.1; the field failure
+// was a whole-package "worktree status: object not found").
+func TestRunRecordsFromALinkedWorktree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain with the execute seam stubbed")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not available")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":      "module example.com/linked\n\ngo 1.26.4\n",
+		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc BenchmarkA(b *testing.B) {}\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commitFixture(t, dir)
+	linked := filepath.Join(t.TempDir(), "linked")
+	if out, err := exec.Command("git", "-C", dir, "worktree", "add", "-q", "--detach", linked).CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %v: %s", err, out)
+	}
+	withWorkingDir(t, linked)
+	rc := runConfig{
+		benchDir: filepath.Join(linked, "benchmarks"),
+		opts:     run.Options{Count: 1, Benchtime: "1x", Bench: "."},
+		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
+		execute: func(moduleDir, pin string, env, args []string) ([]byte, error) {
+			for _, a := range args {
+				if a == "-c" {
+					return nil, nil
+				}
+			}
+			return []byte("goos: linux\ngoarch: amd64\npkg: example.com/linked/a\ncpu: T\nBenchmarkA-2 1 5 ns/op\nPASS\n"), nil
+		},
+	}
+	var out, errw bytes.Buffer
+	if err := runRun(context.Background(), &out, &errw, rc, []string{"./..."}); err != nil {
+		t.Fatalf("run in a linked worktree: %v\n%s%s", err, out.String(), errw.String())
+	}
+	if !strings.Contains(out.String(), "recorded     example.com/linked/a.BenchmarkA") || strings.Contains(out.String(), "object not found") {
+		t.Fatalf("linked worktree run:\n%s", out.String())
+	}
+}
