@@ -13,4 +13,4 @@ Invariants preserved: the artifact stays marked `pew-ab`/`dirty`,
 never a stat baseline; each package's artifact holds exactly its own
 two streams.
 
-Lands: user decision
+Lands: cross-tool train chunk 174

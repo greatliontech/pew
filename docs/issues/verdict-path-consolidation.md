@@ -34,4 +34,4 @@ fingerprint for `--explain`).
 Invariants preserved: every row judged; closed-key agreement across
 rows; strategy rung on the working-tree side only (REQ-pew-admission).
 
-Lands: user decision
+Lands: cross-tool train chunk 174

@@ -20,4 +20,4 @@ carries, which spans the train's tools.
 Invariants preserved: the CLI's flag set and defaults keep one
 enforced contract; the served guidance stays the tool's own document.
 
-Lands: user decision
+Lands: cross-tool train chunk 173
