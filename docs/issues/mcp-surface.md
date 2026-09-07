@@ -22,4 +22,4 @@ Invariants preserved either way: the CLI's verb-defaults table stays
 the CLI's contract; a second surface derives its own defaults and is
 never the CLI rendered through a wrapper.
 
-Lands: user decision
+Lands: cross-tool train chunk 177 for the JSON and progress step; the MCP surface is deferred 2026-09-07 (user decision: revisit when a driving agent appears)
