@@ -18,6 +18,7 @@ close-out convention.
 | [serve-proven-blocked-by-benchmark-loop](serve-proven-blocked-by-benchmark-loop.md) | every benchmark reaching `b.N`/`b.Loop` is unverifiable under the engine's benchmark-loop scan, so the serve-proven default serves nothing real yet | cross-tool train chunk 118 |
 | [guidance-knobs-and-verb-table](guidance-knobs-and-verb-table.md) | §12's verb defaults table and the guidance knob blocks enumerate one contract twice; generating one from the other changes the fleet guidance format | user decision |
 | [verdict-path-consolidation](verdict-path-consolidation.md) | the vouch set is assembled from four process-wide globals and admission decodes each row three times; collapse to one resolver value and one row decode | user decision |
+| [gofresh-corpus-pin-lag](gofresh-corpus-pin-lag.md) | `go.mod` pins gofresh v0.95.0 while v0.97.0 is tagged; the two releases behind are chunk 138's evidence-root anchoring and bracket-root preflight, which gomutant already consumes (fleet sweep 2026-09-07) | cross-tool train chunk 118 (the seat of pew's next gofresh bump, shared with serve-proven-blocked-by-benchmark-loop; an earlier-ordered 98–101 ride is the same bump) |
 
 ## In-spec upgrade paths (tracked inline, not here)
 
