@@ -20,7 +20,7 @@ reason.
 Invariants preserved: no false valid; the closure hash, the
 compartment hash, and every guard still stale a real change.
 
-Lands: cross-tool train chunk 118 (gofresh benchmark-loop package-scan
+Lands: cross-tool train chunk 229
 audit) — at pew's next gofresh bump after it, the serve-proven pins
 gain a `b.Loop` body and this doc's rationale promotes into the
 REQ-pew-serve-proven prose.

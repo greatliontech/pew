@@ -1,5 +1,7 @@
 # Profile capture and attribution as recording companions
 
+Lands: cross-tool train chunk 15
+
 **Composition note carried from the closed derivation-ab-mode doc:
 per-side profile capture (`-cpuprofile`/`-benchmem` per A/B side)
 belongs in `pew ab` itself - profile attribution is part of the same

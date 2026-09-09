@@ -27,6 +27,6 @@ bound example coverage, so a `covered:` gap resolves instantly and a
 per-clause shortfall is inexpressible in the gap model (the same
 shape as gomutant's mcp-liveness cancellation clause).
 
-**Lands:** when a pew-side integration anchor exercising the gofresh
+Lands: cross-tool train chunk 232 (REQ-pew-derived-state gains a two-item payload list; the shortfall becomes a clause gap)
 engine's derived-state discard/recompute path lands in the test
 surface (bind it to `REQ-pew-derived-state` and delete this doc).

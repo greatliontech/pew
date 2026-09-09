@@ -23,6 +23,6 @@ no-proof sentence retires. Consumer-side residue the proofs surface
 (per-arm startup effects — tugboat's bench scaffolding) is each
 consumer's to clear; the refusal names them.
 
-Lands: its own train chunk — the recording path's verdict model is a
+Lands: cross-tool train chunk 127
 spec-level change (§7.5/§7.8/§10 interactions: purity and external
 directives, stat baselines for observed recordings).

@@ -18,7 +18,7 @@ here while gomutant's judgment of the same declaration differs. The
 bump is the whole remedy; the train's release-then-bump doctrine has
 the consumer bump ride the consumer's next change set.
 
-Lands: cross-tool train chunk 118 — the register's named seat for
+Lands: cross-tool train chunk 229
 pew's next gofresh bump (serve-proven-blocked-by-benchmark-loop.md
 already waits on that bump; one bump carries both, this doc mints no
 second trigger). Should the Band D field-mass triage order a 98–101

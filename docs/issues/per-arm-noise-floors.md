@@ -1,5 +1,7 @@
 # Per-arm noise floors from lineage history
 
+Lands: Cross-tool train chunk 15: folds into its opening design discussion (both grow what a recording carries about its own trustworthiness).
+
 ## Problem
 
 `pew stat` applies one global regression floor (`--threshold`,
