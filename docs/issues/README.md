@@ -16,7 +16,7 @@ close-out convention.
 | [mcp-surface](mcp-surface.md) | pew serves the CLI only; whether an LLM reader is owed an MCP surface (or `run`/`ab`/`gc` a `--json`) is a product-scope call | cross-tool train chunk 177 for the JSON and progress step; the MCP surface is deferred 2026-09-07 (user decision: revisit when a driving agent appears) |
 | [guidance-knobs-and-verb-table](guidance-knobs-and-verb-table.md) | §12's verb defaults table and the guidance knob blocks enumerate one contract twice; generating one from the other changes the fleet guidance format | cross-tool train chunk 173 |
 | [verdict-path-consolidation](verdict-path-consolidation.md) | the vouch set is assembled from four process-wide globals and admission decodes each row three times; collapse to one resolver value and one row decode | cross-tool train chunk 174 |
-| [audit-note-keys-mirror-the-spec](audit-note-keys-mirror-the-spec.md) | compare's audit-note keys and §5's audit rows are two hand-kept lists; one mirror pin or one registry mark | cross-tool train chunk 232 |
+| [audit-note-keys-mirror-the-spec](audit-note-keys-mirror-the-spec.md) | compare's audit-note keys and §5's audit rows are two hand-kept lists; one mirror pin or one registry mark | cross-tool train chunk 251 |
 
 ## In-spec upgrade paths (tracked inline, not here)
 
