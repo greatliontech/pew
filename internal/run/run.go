@@ -494,7 +494,7 @@ func BuildArgs(importPath, out string) []string {
 var RecordingConfigKeys = []string{
 	"pew-format", "commit", "toolchain", "machine", "buildconfig",
 	"runtimeconfig", "dirty", "pew-runconditions", "pew-closure",
-	"pew-dynamic-state", "pew-test-variants", "pew-test-variant-ledger",
+	"pew-dynamic-state", "pew-closure-strategy", "pew-test-variants", "pew-test-variant-ledger",
 	"pew-runtime", "pew-runtime-inputs", "pew-purity", "pew-vouches",
 	"pew-single-subject-discharges", "pew-package-process-discharges",
 }
@@ -548,6 +548,14 @@ func GofreshPurityConfig(attribution string) benchfmt.Config {
 // validity key.
 func GofreshVouchesConfig(vouches string) benchfmt.Config {
 	return benchfmt.Config{Key: "pew-vouches", Value: []byte(vouches), File: true}
+}
+
+// ClosureStrategyConfig is the recorded closure-derivation line: the
+// identity derivation the closure hashes were folded under, so a reader
+// compares two recordings' closures within one derivation and names a
+// derivation move as such (gofresh's ClosureStrategy).
+func ClosureStrategyConfig(strategy string) benchfmt.Config {
+	return benchfmt.Config{Key: "pew-closure-strategy", Value: []byte(strategy), File: true}
 }
 
 // DynamicStateStrategyConfig records the shared-dynamic-state

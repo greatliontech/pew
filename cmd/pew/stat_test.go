@@ -350,7 +350,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation, err := runtimeinput.Incomplete(dir, "package-test-binary:example.com/statdirective", "testlog lacks operation outcome evidence")
+	observation, err := runtimeinput.Incomplete(dir, "package-test-binary:example.com/statdirective", "testlog lacks operation outcome evidence", os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +440,7 @@ func TestStatRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation, err := runtimeinput.Incomplete(dir, "package-test-binary:example.com/statstrategy", "testlog lacks operation outcome evidence")
+	observation, err := runtimeinput.Incomplete(dir, "package-test-binary:example.com/statstrategy", "testlog lacks operation outcome evidence", os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1007,7 +1007,7 @@ func TestNonValidUsesLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	rt, err := runtimeinput.Incomplete(".", "package-test-binary:non-valid", "testlog lacks operation outcome evidence")
+	rt, err := runtimeinput.Incomplete(".", "package-test-binary:non-valid", "testlog lacks operation outcome evidence", os.Environ())
 	if err != nil {
 		t.Fatalf("runtime inputs: %v", err)
 	}
@@ -1074,7 +1074,7 @@ func TestRunConditionsDoNotAffectValidity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	rt, err := runtimeinput.Incomplete(".", "package-test-binary:run-conditions", "testlog lacks operation outcome evidence")
+	rt, err := runtimeinput.Incomplete(".", "package-test-binary:run-conditions", "testlog lacks operation outcome evidence", os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1168,7 +1168,7 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	rt, err := runtimeinput.Incomplete(".", "measurement-test", "test observation incomplete")
+	rt, err := runtimeinput.Incomplete(".", "measurement-test", "test observation incomplete", os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}

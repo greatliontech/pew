@@ -466,22 +466,25 @@ var conditionCategoricalFields = []string{"governor", "turbo", "throttled", "bat
 // note, never a grouping key. A side where some samples carry a line
 // and some omit it is itself mixed provenance and reports as such, so
 // a partially-recorded side can never silently read as one value.
-var auditNoteKeys = []string{"pew-vouches", "pew-dynamic-state", "pew-single-subject-discharges", "pew-package-process-discharges"}
+var auditNoteKeys = []string{"pew-vouches", "pew-dynamic-state", "pew-closure-strategy", "pew-single-subject-discharges", "pew-package-process-discharges"}
 
 var auditNoteNames = map[string]string{
 	"pew-vouches":                    "dynamic-state vouches",
 	"pew-dynamic-state":              "dynamic-state strategies",
+	"pew-closure-strategy":           "closure derivations",
 	"pew-single-subject-discharges":  "single-subject discharges",
 	"pew-package-process-discharges": "package-process discharges",
 }
 
 // auditNotes surfaces sides whose recorded gofresh provenance differs —
-// one mechanism for all four lines. For the strategy line the note is
-// the surface for every REF-RESOLVED side (a pinned tag, auto's HEAD,
-// either A/B ref): those sides always compare — stat skips only the
-// working-tree side before Compare sees it (spec §5's strategy row) —
-// so a cross-strategy comparison lands here. The mixed-within-a-side
-// arm additionally catches rows disagreeing past the first, which the
+// one mechanism for all five lines. For the dynamic-state strategy line
+// the note is the surface for every REF-RESOLVED side (a pinned tag,
+// auto's HEAD, either A/B ref): those sides always compare — stat skips
+// only the working-tree side before Compare sees it (spec §5's
+// dynamic-state row) — so a cross-strategy comparison lands here. The
+// closure-derivation line is audit with no skip on any side, so its
+// note is the surface for every side. The mixed-within-a-side arm
+// additionally catches rows disagreeing past the first, which the
 // skip's row-0 gate cannot see.
 func (g *group) auditNotes() []string {
 	var notes []string

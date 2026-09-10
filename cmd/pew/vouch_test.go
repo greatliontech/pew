@@ -206,6 +206,22 @@ func BenchmarkCount(b *testing.B) {
 		t.Fatalf("the store's vouch file did not discharge: %q, want %q", fileFP.DynamicStateVouches, culprit)
 	}
 	storeVouchMemo = sync.Map{}
+
+	// The reviewed set has one home, the store's root: a vouches file
+	// at the MODULE root — the engine's own repository file — is
+	// declined by pew's engines, so it discharges nothing here
+	// (REQ-pew-vouch-source; gofresh's WithoutRepositoryVouches).
+	if err := os.Remove(filepath.Join(dir, "benchmarks", vouchFileName)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "vouches"), []byte(culpritEntry+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	moduleFileFP := capture()
+	if moduleFileFP.DynamicStateVouches != "" {
+		t.Fatalf("the module root's vouches file discharged %q; pew's engines judge under the store's set alone", moduleFileFP.DynamicStateVouches)
+	}
+	storeVouchMemo = sync.Map{}
 }
 
 // The flag-to-engine seam: resolveVouches parses the collected flag

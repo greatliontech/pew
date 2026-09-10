@@ -8,9 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
-	"strings"
-	"unicode"
+	"slices"
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
@@ -148,37 +146,22 @@ func resolveVouches() error {
 	return nil
 }
 
-// parseDynamicStateVouches parses "IMPORT-PATH:VARIABLE" pairs (a colon
-// cannot appear in an import path, so a bare package is unrepresentable)
-// into gofresh's canonical identities, refusing control or space
-// characters and a variable that is not one Go identifier.
+// parseDynamicStateVouches maps --vouch entries onto gofresh's canonical
+// identities through the engine's own grammar (gofresh.ParseVouchEntry:
+// IMPORT-PATH:VARIABLE, one Go identifier for the variable), sorted and
+// compacted.
 func parseDynamicStateVouches(entries []string) ([]string, error) {
-	var identities []string
-	seen := map[string]bool{}
+	identities := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		pkg, name, ok := strings.Cut(entry, ":")
-		if !ok || pkg == "" || name == "" {
-			return nil, fmt.Errorf("vouch %q is not IMPORT-PATH:VARIABLE", entry)
+		identity, err := gofresh.ParseVouchEntry(entry)
+		if err != nil {
+			return nil, err
 		}
-		for _, r := range pkg {
-			if r <= ' ' || r == 0x7f || unicode.IsControl(r) {
-				return nil, fmt.Errorf("vouch package %q carries a control or space character", pkg)
-			}
-		}
-		for i, r := range name {
-			letter := unicode.IsLetter(r) || r == '_'
-			if (i == 0 && !letter) || (i > 0 && !letter && !unicode.IsDigit(r)) {
-				return nil, fmt.Errorf("vouch variable %q is not one Go identifier", name)
-			}
-		}
-		identity := pkg + "." + name
-		if !seen[identity] {
-			seen[identity] = true
-			identities = append(identities, identity)
-		}
+		identities = append(identities, identity)
 	}
-	sort.Strings(identities)
-	return identities, nil
+	// The engine's vouch set is a set: a repeated flag is one acceptance.
+	slices.Sort(identities)
+	return slices.Compact(identities), nil
 }
 
 // engineDiagnostics receives payload-bearing gofresh diagnostics from
@@ -214,8 +197,12 @@ func buildEngine(moduleDir string, env, producerEnv []string, pgo string) (*gofr
 	if err := checkToolchainProvenance(moduleDir, env); err != nil {
 		return nil, err
 	}
+	// The reviewed vouch set has one home, the store's root
+	// (REQ-pew-vouch-source): the engine declines the module's own
+	// vouches file and judges under the store's set extended by this
+	// invocation's flags.
 	opts := []gofresh.Option{gofresh.WithDir(moduleDir), gofresh.WithEnv(env...), gofresh.WithSingleSubjectExecution(),
-		gofresh.WithProgress(emitEngineDiagnostic)}
+		gofresh.WithProgress(emitEngineDiagnostic), gofresh.WithoutRepositoryVouches()}
 	if pgo != "" {
 		opts = append(opts, gofresh.WithBuildInputs(pgo))
 	}
@@ -589,6 +576,7 @@ func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, 
 	}
 	return gofresh.Fingerprint{
 		MaximalClosure:     m["pew-closure"],
+		ClosureStrategy:    m["pew-closure-strategy"],
 		TestVariantClosure: m["pew-test-variants"],
 		Guards: guard.Guards{
 			Toolchain:     m["toolchain"],

@@ -1017,6 +1017,7 @@ func benchmarkPatternSpace(r rune) bool {
 func fingerprintConfigs(fp gofresh.Fingerprint, encodedLedger, runtimeDigest, runtimeManifest string) []benchfmt.Config {
 	cfgs := []benchfmt.Config{
 		run.ClosureConfig(fp.MaximalClosure),
+		run.ClosureStrategyConfig(fp.ClosureStrategy),
 		run.DynamicStateStrategyConfig(fp.DynamicStateStrategy),
 		run.TestVariantConfig(fp.TestVariantClosure),
 		run.TestVariantLedgerConfig(encodedLedger),

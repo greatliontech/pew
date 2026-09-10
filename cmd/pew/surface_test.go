@@ -174,10 +174,10 @@ func TestRunReportsServedBenchmarks(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod": "module example.com/served\n\ngo 1.26.4\n",
-		// Empty bodies: a body reading b.N or b.Loop is unverifiable under
-		// gofresh's benchmark-loop package scan (its own audit, tracked in
-		// docs/issues/serve-proven-blocked-by-benchmark-loop.md), and the
-		// served count needs a valid recording to serve.
+		// Empty bodies keep the fixture's closure trivial; the served
+		// count needs a valid recording to serve, and the serve of a real
+		// body is TestRunServesValidRecordingsByDefault's
+		// (REQ-pew-serve-proven).
 		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc BenchmarkOne(b *testing.B) {}\n\nfunc BenchmarkTwo(b *testing.B) {}\n",
 		"b/b_test.go": "package b\n\nimport \"testing\"\n\nfunc BenchmarkSolo(b *testing.B) {}\n",
 	}

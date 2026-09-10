@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	github.com/go-git/go-git/v5 v5.19.1
-	github.com/greatliontech/gofresh v0.95.0
+	github.com/greatliontech/gofresh v0.101.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9
 	golang.org/x/mod v0.37.0

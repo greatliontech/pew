@@ -327,12 +327,15 @@ func TestRunRefusesAnOverlappingDestinationBeforeTheWarmupBuild(t *testing.T) {
 // valid benchmark again (REQ-pew-serve-proven).
 func TestRunServesValidRecordingsByDefault(t *testing.T) {
 	if testing.Short() {
-		t.Skip("loads a fixture package through the toolchain with the execute seam stubbed")
+		t.Skip("loads a fixture package through the toolchain and runs its benchmarks once")
 	}
 	dir := t.TempDir()
 	files := map[string]string{
-		"go.mod":        "module example.com/proven\n\ngo 1.26.4\n",
-		"bench_test.go": "package proven\n\nimport \"testing\"\n\nfunc BenchmarkHot(b *testing.B) {}\n",
+		"go.mod": "module example.com/proven\n\ngo 1.26.4\n",
+		// A real benchmark: its loop reaches the harness's pacing (b.Loop),
+		// which the engine audits as the harness's own — the serve is no
+		// longer confined to empty bodies.
+		"bench_test.go": "package proven\n\nimport \"testing\"\n\nfunc BenchmarkHot(b *testing.B) {\n\tfor b.Loop() {\n\t}\n}\n\nfunc BenchmarkCounted(b *testing.B) {\n\tfor i := 0; i < b.N; i++ {\n\t}\n}\n",
 	}
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
@@ -365,8 +368,8 @@ func TestRunServesValidRecordingsByDefault(t *testing.T) {
 	if err := runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"."}); err != nil {
 		t.Fatalf("first run: %v\n%s", err, out.String())
 	}
-	if measurements != 1 {
-		t.Fatalf("first run measured %d times; want the unrecorded benchmark once", measurements)
+	if measurements != 2 {
+		t.Fatalf("first run measured %d times; want the two unrecorded benchmarks once each", measurements)
 	}
 	out.Reset()
 	// One typed view per package serves the freshness judgment and the
@@ -384,7 +387,7 @@ func TestRunServesValidRecordingsByDefault(t *testing.T) {
 	if loads != 1 {
 		t.Fatalf("the second run built %d typed views; want the one its judgment and capture share", loads)
 	}
-	if measurements != 1 || !strings.Contains(out.String(), "valid, nothing to run") {
+	if measurements != 2 || !strings.Contains(out.String(), "valid, nothing to run") {
 		t.Fatalf("second run over an unchanged tree measured (%d total) or said nothing:\n%s", measurements, out.String())
 	}
 	all := rc
@@ -393,8 +396,8 @@ func TestRunServesValidRecordingsByDefault(t *testing.T) {
 	if err := runRun(context.Background(), &out, &bytes.Buffer{}, all, []string{"."}); err != nil {
 		t.Fatalf("--all run: %v\n%s", err, out.String())
 	}
-	if measurements != 2 {
-		t.Fatalf("--all measured %d times in total; want the valid benchmark measured again", measurements)
+	if measurements != 4 {
+		t.Fatalf("--all measured %d times in total; want both valid benchmarks measured again", measurements)
 	}
 }
 

@@ -32,6 +32,7 @@ func TestAuditNotesStillCompare(t *testing.T) {
 		wantNote string
 	}{
 		{"pew-dynamic-state", "gofresh/dynamic-state@33", "gofresh/dynamic-state@34", "dynamic-state strategies differ"},
+		{"pew-closure-strategy", "gofresh/closure@1 gofresh/canonical-member@1 gofresh/variant-parse@1", "gofresh/closure@1 gofresh/canonical-member@2 gofresh/variant-parse@1", "closure derivations differ"},
 		{"pew-single-subject-discharges", "", "a.example/dep.Var", "single-subject discharges differ"},
 		{"pew-package-process-discharges", "", "b.example/dep.Other", "package-process discharges differ"},
 	}

@@ -62,7 +62,11 @@ func (ac abConfig) sideGuards(moduleDir, pkgDir string, mainPkg bool, env []stri
 	if pgo != "" {
 		buildInputs = append(buildInputs, pgo)
 	}
-	return guard.CaptureForContextEnv(context.Background(), moduleDir, env, guard.Measurement, buildInputs...)
+	// The runtime environment is the analysis environment here: ab's
+	// guards are compared between the two sides and never recorded, and
+	// both sides measure under the same pin, so the comparative capture
+	// reads the shared analysis env for the runtime guard as well.
+	return guard.Capture(context.Background(), moduleDir, env, env, guard.Measurement, nil, buildInputs...)
 }
 
 // abPackageName resolves a package directory's package name with the same

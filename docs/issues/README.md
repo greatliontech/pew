@@ -14,10 +14,9 @@ close-out convention.
 | [spec-wide-requirement-forming](spec-wide-requirement-forming.md) | only §13 is REQ-formed; a test witnessing a §§1–12 contract has no id to bind against — convert sections on demand, same structure-only discipline | when a binding needs to claim a §§1–12 contract that carries no REQ id |
 | [ab-out-multi-package](ab-out-multi-package.md) | `ab --out` over several packages keeps only the last package's artifact; a per-package path or a multi-section format is a contract change | cross-tool train chunk 174 |
 | [mcp-surface](mcp-surface.md) | pew serves the CLI only; whether an LLM reader is owed an MCP surface (or `run`/`ab`/`gc` a `--json`) is a product-scope call | cross-tool train chunk 177 for the JSON and progress step; the MCP surface is deferred 2026-09-07 (user decision: revisit when a driving agent appears) |
-| [serve-proven-blocked-by-benchmark-loop](serve-proven-blocked-by-benchmark-loop.md) | every benchmark reaching `b.N`/`b.Loop` is unverifiable under the engine's benchmark-loop scan, so the serve-proven default serves nothing real yet | cross-tool train chunk 229 |
 | [guidance-knobs-and-verb-table](guidance-knobs-and-verb-table.md) | §12's verb defaults table and the guidance knob blocks enumerate one contract twice; generating one from the other changes the fleet guidance format | cross-tool train chunk 173 |
 | [verdict-path-consolidation](verdict-path-consolidation.md) | the vouch set is assembled from four process-wide globals and admission decodes each row three times; collapse to one resolver value and one row decode | cross-tool train chunk 174 |
-| [gofresh-corpus-pin-lag](gofresh-corpus-pin-lag.md) | `go.mod` pins gofresh v0.95.0 while v0.97.0 is tagged; the two releases behind are chunk 138's evidence-root anchoring and bracket-root preflight, which gomutant already consumes (fleet sweep 2026-09-07) | cross-tool train chunk 229 |
+| [audit-note-keys-mirror-the-spec](audit-note-keys-mirror-the-spec.md) | compare's audit-note keys and §5's audit rows are two hand-kept lists; one mirror pin or one registry mark | cross-tool train chunk 232 |
 
 ## In-spec upgrade paths (tracked inline, not here)
 

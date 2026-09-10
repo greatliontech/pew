@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -35,7 +36,7 @@ func TestStatusPackageUsesLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	rt, err := runtimeinput.Incomplete(".", "package-test-binary:status-label", "testlog lacks operation outcome evidence")
+	rt, err := runtimeinput.Incomplete(".", "package-test-binary:status-label", "testlog lacks operation outcome evidence", os.Environ())
 	if err != nil {
 		t.Fatalf("runtime inputs: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 	if fp.PurityAssertion != "" {
 		t.Fatalf("purity assertion on an external benchmark = %q, want none", fp.PurityAssertion)
 	}
-	rt, err := runtimeinput.Incomplete(dir, "package-test-binary:external-status", "testlog lacks operation outcome evidence")
+	rt, err := runtimeinput.Incomplete(dir, "package-test-binary:external-status", "testlog lacks operation outcome evidence", os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +178,7 @@ func TestStatusExplainNamesTheMovingGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt, err := runtimeinput.Incomplete(".", "package-test-binary:explain", "testlog lacks operation outcome evidence")
+	rt, err := runtimeinput.Incomplete(".", "package-test-binary:explain", "testlog lacks operation outcome evidence", os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +397,7 @@ func TestStatusWarnsOnForeignConfigKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	rt, err := runtimeinput.Incomplete(".", "package-test-binary:status-foreign", "testlog lacks operation outcome evidence")
+	rt, err := runtimeinput.Incomplete(".", "package-test-binary:status-foreign", "testlog lacks operation outcome evidence", os.Environ())
 	if err != nil {
 		t.Fatalf("runtime inputs: %v", err)
 	}
@@ -454,7 +455,7 @@ func TestStatusRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	rt, err := runtimeinput.Incomplete(".", "package-test-binary:predate", "testlog lacks operation outcome evidence")
+	rt, err := runtimeinput.Incomplete(".", "package-test-binary:predate", "testlog lacks operation outcome evidence", os.Environ())
 	if err != nil {
 		t.Fatalf("runtime inputs: %v", err)
 	}
@@ -510,4 +511,65 @@ func statusPackageOf(w, errw io.Writer, e *gofresh.Engine, benchDir, label strin
 		return err
 	}
 	return statusPackage(context.Background(), w, errw, e, benchDir, label, staleOnly, explain, jsonOut, p, benches)
+}
+
+// An explanation names a closure-derivation move as such: a recording
+// folded under another gofresh closure strategy shows the strategy row
+// beside the hash rows, while a recording under the current one shows
+// no strategy row — two hashes folded by different strategies say
+// nothing about each other's source (spec §5's `pew-closure-strategy`).
+func TestExplainNamesAClosureDerivationMove(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a fixture package through the toolchain")
+	}
+	e, pkg, bench, fp := explainFixture(t)
+	var same strings.Builder
+	explainRecordAgainstCurrent(&same, e, ".", pkg, bench, fp, os.Environ())
+	if strings.Contains(same.String(), "closure strategy") {
+		t.Fatalf("a recording under the current derivation shows a strategy row:\n%s", same.String())
+	}
+	// A move in a late component — the shape gofresh's own bumps take —
+	// renders whole: an elision to a shared prefix would show two
+	// derivations as one.
+	moved := fp
+	moved.ClosureStrategy = strings.Replace(gofresh.ClosureStrategy, "canonical-member@", "canonical-member@0", 1)
+	if moved.ClosureStrategy == gofresh.ClosureStrategy || moved.ClosureStrategy[:24] != gofresh.ClosureStrategy[:24] {
+		t.Fatalf("fixture: the moved derivation must share the current one's prefix and differ later: %q vs %q", moved.ClosureStrategy, gofresh.ClosureStrategy)
+	}
+	var out strings.Builder
+	explainRecordAgainstCurrent(&out, e, ".", pkg, bench, moved, os.Environ())
+	got := out.String()
+	var row string
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "closure strategy") {
+			row = line
+		}
+	}
+	if row == "" || !strings.HasSuffix(strings.TrimSpace(row), "NO") {
+		t.Fatalf("the derivation move is not named as a mismatch:\n%s", got)
+	}
+	// The recorded derivation sits under the recorded column and the
+	// current one under current, each whole and quoted — the quotes mark
+	// the boundary, since the values carry spaces.
+	recorded, current := strconv.Quote(moved.ClosureStrategy), strconv.Quote(gofresh.ClosureStrategy)
+	if !strings.Contains(row, recorded) || !strings.Contains(row, current) || strings.Index(row, recorded) > strings.Index(row, current) {
+		t.Fatalf("the strategy row does not carry recorded then current, whole and quoted: %q", row)
+	}
+}
+
+// explainFixture is the explanation tests' engine over the repo's own
+// bench fixture with the benchmark's current fingerprint.
+func explainFixture(t *testing.T) (*gofresh.Engine, string, string, gofresh.Fingerprint) {
+	t.Helper()
+	e, _, err := newEngineAt(".", ".", false, os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
+	const bench = "BenchmarkDecode"
+	fp, err := e.CaptureFor(t.Context(), gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e, pkg, bench, fp
 }

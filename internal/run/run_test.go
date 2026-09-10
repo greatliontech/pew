@@ -400,8 +400,8 @@ func TestRecordingConfigKeysMirrorSpec(t *testing.T) {
 		"runtimeconfig", "dirty", "pew-runconditions", "pew-runtime",
 		"pew-runtime-inputs", "pew-purity", "pew-vouches",
 		"pew-dynamic-state", "pew-single-subject-discharges",
-		"pew-package-process-discharges", "pew-test-variants",
-		"pew-test-variant-ledger",
+		"pew-package-process-discharges", "pew-closure-strategy",
+		"pew-test-variants", "pew-test-variant-ledger",
 		// plus the in-band derived closure line (§5 prose):
 		"pew-closure",
 	}

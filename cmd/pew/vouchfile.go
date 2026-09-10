@@ -1,14 +1,11 @@
 package main
 
 import (
-	"bufio"
-	"errors"
-	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
+
+	gofresh "github.com/greatliontech/gofresh"
 )
 
 // vouchFileName is the reviewed standing vouch set's file, at the
@@ -27,8 +24,11 @@ var vouchStoreDir string
 var storeVouchMemo sync.Map // store root → []string or error
 
 // storeVouches reads the standing vouch set of the store governing
-// moduleDir, memoized per store root: an absent file is the empty set,
-// a malformed line refuses exactly as a malformed --vouch does.
+// moduleDir through the engine's own grammar (gofresh.ReadVouchFile —
+// one IMPORT-PATH:VARIABLE per line, comments and blank lines ignored),
+// memoized per store root: an absent file is the empty set, a malformed
+// line refuses naming the file and line, exactly as a malformed --vouch
+// does.
 func storeVouches(moduleDir string) ([]string, error) {
 	dir, err := moduleBenchDir(vouchStoreDir, moduleDir)
 	if err != nil {
@@ -43,44 +43,12 @@ func storeVouches(moduleDir string) ([]string, error) {
 			return v, nil
 		}
 	}
-	identities, err := readVouchFile(path)
+	identities, err := gofresh.ReadVouchFile(path)
 	if err != nil {
 		storeVouchMemo.Store(path, err)
 		return nil, err
 	}
 	storeVouchMemo.Store(path, identities)
-	return identities, nil
-}
-
-// readVouchFile parses a vouch file into canonical identities; a
-// missing file is the empty set.
-func readVouchFile(path string) ([]string, error) {
-	f, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("vouch file %s: %w", path, err)
-	}
-	defer f.Close()
-	var entries []string
-	sc := bufio.NewScanner(f)
-	line := 0
-	for sc.Scan() {
-		line++
-		text := strings.TrimSpace(sc.Text())
-		if text == "" || strings.HasPrefix(text, "#") {
-			continue
-		}
-		entries = append(entries, text)
-	}
-	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("vouch file %s: %w", path, err)
-	}
-	identities, err := parseDynamicStateVouches(entries)
-	if err != nil {
-		return nil, fmt.Errorf("vouch file %s: %w", path, err)
-	}
 	return identities, nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	gofresh "github.com/greatliontech/gofresh"
@@ -21,7 +22,8 @@ import (
 // long and opaque, so they are elided to a recognizable prefix; equality is
 // decided over the full values by the caller, never over the elision.
 // Annotations (parenthesized diagnostics) are never elided — the text is the
-// information.
+// information — and a verbatim row (a version string) bypasses this
+// function at the row.
 func explainValue(v string) string {
 	if v == "" {
 		return "(absent)"
@@ -32,7 +34,13 @@ func explainValue(v string) string {
 	return v
 }
 
-type explainRow struct{ name, a, b string }
+// explainRow is one recorded/current pair; a verbatim row is a version
+// string rendered whole — a derivation moves in a late component, and
+// an elision would show two different derivations as one.
+type explainRow struct {
+	name, a, b string
+	verbatim   bool
+}
 
 func writeExplainRows(w io.Writer, aLabel, bLabel string, rows []explainRow) {
 	fmt.Fprintf(w, "    %-14s %-27s %-27s %s\n", "input", aLabel, bLabel, "match")
@@ -41,16 +49,22 @@ func writeExplainRows(w io.Writer, aLabel, bLabel string, rows []explainRow) {
 		if r.a != r.b {
 			match = "NO"
 		}
-		fmt.Fprintf(w, "    %-14s %-27s %-27s %s\n", r.name, explainValue(r.a), explainValue(r.b), match)
+		a, b := explainValue(r.a), explainValue(r.b)
+		if r.verbatim {
+			// Whole and quoted: the values carry spaces, so the quotes
+			// are what marks where recorded ends and current begins.
+			a, b = strconv.Quote(r.a), strconv.Quote(r.b)
+		}
+		fmt.Fprintf(w, "    %-14s %-27s %-27s %s\n", r.name, a, b, match)
 	}
 }
 
 func guardRows(a, b guard.Guards) []explainRow {
 	return []explainRow{
-		{"toolchain", a.Toolchain, b.Toolchain},
-		{"machine", a.Machine, b.Machine},
-		{"buildconfig", a.BuildConfig, b.BuildConfig},
-		{"runtimeconfig", a.RuntimeConfig, b.RuntimeConfig},
+		{name: "toolchain", a: a.Toolchain, b: b.Toolchain},
+		{name: "machine", a: a.Machine, b: b.Machine},
+		{name: "buildconfig", a: a.BuildConfig, b: b.BuildConfig},
+		{name: "runtimeconfig", a: a.RuntimeConfig, b: b.RuntimeConfig},
 	}
 }
 
@@ -69,15 +83,20 @@ func explainRecordAgainstCurrent(w io.Writer, e *gofresh.Engine, moduleDir, impo
 		return
 	}
 	rows := guardRows(fp.Guards, curFP.Guards)
-	rows = append(rows, explainRow{"closure", fp.MaximalClosure, curFP.MaximalClosure})
-	rows = append(rows, explainRow{"test-variants", fp.TestVariantClosure, curFP.TestVariantClosure})
+	rows = append(rows, explainRow{name: "closure", a: fp.MaximalClosure, b: curFP.MaximalClosure})
+	if fp.ClosureStrategy != curFP.ClosureStrategy {
+		// A derivation move: the two closure hashes were folded by
+		// different strategies and say nothing about each other's source.
+		rows = append(rows, explainRow{name: "closure strategy", a: fp.ClosureStrategy, b: curFP.ClosureStrategy, verbatim: true})
+	}
+	rows = append(rows, explainRow{name: "test-variants", a: fp.TestVariantClosure, b: curFP.TestVariantClosure})
 	currentRuntime := ""
 	if fp.RuntimeInputs != "" {
-		if st, err := runtimeinput.CurrentEnv(fp.RuntimeInputs, moduleDir, env); err != nil {
-			rows = append(rows, explainRow{"runtime", fp.RuntimeDigest, "(uncomputable: " + err.Error() + ")"})
+		if st, err := runtimeinput.Current(context.Background(), fp.RuntimeInputs, moduleDir, env); err != nil {
+			rows = append(rows, explainRow{name: "runtime", a: fp.RuntimeDigest, b: "(uncomputable: " + err.Error() + ")"})
 		} else {
 			currentRuntime = st.Digest
-			rows = append(rows, explainRow{"runtime", fp.RuntimeDigest, st.Digest})
+			rows = append(rows, explainRow{name: "runtime", a: fp.RuntimeDigest, b: st.Digest})
 		}
 	}
 	writeExplainRows(w, "recorded", "current", rows)
@@ -112,7 +131,7 @@ func explainRecordAgainstCurrent(w io.Writer, e *gofresh.Engine, moduleDir, impo
 // digest mismatch, best-effort: an attribution error or an empty result
 // yields no line, and the digest row stays the whole story.
 func movedInputsLine(ctx context.Context, manifest, moduleDir string, env []string) string {
-	moved, err := runtimeinput.MovedInputsContext(ctx, manifest, moduleDir, env)
+	moved, err := runtimeinput.MovedInputs(ctx, manifest, moduleDir, env)
 	if err != nil || len(moved) == 0 {
 		return ""
 	}

@@ -29,6 +29,7 @@ func TestFingerprintConfigRoundTrip(t *testing.T) {
 		SingleSubjectDischarges:  "s.example/dep.One",
 		PackageProcessDischarges: "p.example/dep.Two",
 		DynamicStateStrategy:     "gofresh/dynamic-state@34",
+		ClosureStrategy:          "gofresh/closure@1+canonical@2+ledger@1",
 		RuntimeInputs:            "manifest-encoded",
 		RuntimeDigest:            "manifest-digest",
 		ResultKind:               gofresh.Measurement,

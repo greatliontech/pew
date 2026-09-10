@@ -64,7 +64,7 @@ func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt, err := runtimeinput.Incomplete(tmp, "package-test-binary:grow", "testlog lacks operation outcome evidence")
+	rt, err := runtimeinput.Incomplete(tmp, "package-test-binary:grow", "testlog lacks operation outcome evidence", os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
