@@ -226,11 +226,11 @@ func TestPinnedRunGuardsItsPin(t *testing.T) {
 	}
 	// The unpinned environment reads the pinned recording stale on the
 	// runtime-configuration guard.
-	e, _, err := newEngineAt(dir, filepath.Join(dir, "a"), false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), dir, filepath.Join(dir, "a"), false, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, reason, _, _, err := checkOne(store.New(benchDir), e, "example.com/pinned/a", "a", dir, "BenchmarkA", "")
+	v, reason, _, _, err := checkOne(context.Background(), store.New(benchDir), e, "example.com/pinned/a", "a", dir, "BenchmarkA", "")
 	if err != nil {
 		t.Fatalf("checkOne: %v", err)
 	}
@@ -238,11 +238,11 @@ func TestPinnedRunGuardsItsPin(t *testing.T) {
 		t.Fatalf("unpinned verdict over the pinned recording = {%s %q}, want {stale runtimeconfig}", v, reason)
 	}
 	// The pinned environment reads it as its own.
-	pinned, _, err := newEngineAtProducer(dir, filepath.Join(dir, "a"), false, os.Environ(), pinEnvironment(os.Environ(), pin))
+	pinned, _, err := newEngineAtProducer(context.Background(), dir, filepath.Join(dir, "a"), false, os.Environ(), pinEnvironment(os.Environ(), pin))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v, reason, _, _, err = checkOne(store.New(benchDir), pinned, "example.com/pinned/a", "a", dir, "BenchmarkA", ""); err != nil || reason == "runtimeconfig" {
+	if v, reason, _, _, err = checkOne(context.Background(), store.New(benchDir), pinned, "example.com/pinned/a", "a", dir, "BenchmarkA", ""); err != nil || reason == "runtimeconfig" {
 		t.Fatalf("pinned verdict over the pinned recording = {%s %q}, %v; want the guard to hold", v, reason, err)
 	}
 }

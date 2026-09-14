@@ -47,8 +47,8 @@ func TestArgs(pkg string, o Options) []string {
 	}
 }
 
-// Execute runs the benchmark command (optionally pinned via `taskset -c <pin>`)
-// in dir and returns stdout (the benchmark-format output).
+// Execute runs the benchmark command in dir under a background context
+// and returns stdout; the ctx form ExecuteContext is the measured seam.
 func Execute(dir, pin string, env, args []string) ([]byte, error) {
 	return ExecuteContext(context.Background(), dir, pin, env, args)
 }
@@ -408,12 +408,8 @@ func BenchName(resultName string) string {
 // moduleDir under env — `go env` folds the process variable and the go env
 // file (`go env -w`) with go's own precedence, so a profile configured through
 // either channel is seen. Scanning the process env alone misses the env file.
-func EffectiveGoflags(moduleDir string, env []string) (string, error) {
-	cmd := exec.Command("go", "env", "GOFLAGS")
-	resolved := gotool.CommandDir(moduleDir)
-	cmd.Dir = resolved
-	cmd.Env = gotool.CommandEnvironment(env, resolved)
-	out, err := cmd.Output()
+func EffectiveGoflags(ctx context.Context, moduleDir string, env []string) (string, error) {
+	out, err := gotool.Command(ctx, moduleDir, env, "env", "GOFLAGS").Output()
 	if err != nil {
 		return "", fmt.Errorf("run: go env GOFLAGS: %w", err)
 	}
@@ -775,12 +771,8 @@ func VerifyToolchainConfig(results []*benchfmt.Result, truth ToolchainTruth) err
 // ReadTargetPlatform reads the build target (GOOS, GOARCH) from the same
 // toolchain and environment the measurement runs under - the out-of-band
 // truth VerifyToolchainConfig judges the stream against.
-func ReadTargetPlatform(moduleDir string, env []string) (goos, goarch string, err error) {
-	cmd := exec.Command("go", "env", "-json", "GOOS", "GOARCH")
-	resolved := gotool.CommandDir(moduleDir)
-	cmd.Dir = resolved
-	cmd.Env = gotool.CommandEnvironment(env, resolved)
-	out, err := cmd.Output()
+func ReadTargetPlatform(ctx context.Context, moduleDir string, env []string) (goos, goarch string, err error) {
+	out, err := gotool.Command(ctx, moduleDir, env, "env", "-json", "GOOS", "GOARCH").Output()
 	if err != nil {
 		return "", "", fmt.Errorf("go env: %w", err)
 	}

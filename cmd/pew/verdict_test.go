@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
@@ -61,7 +62,7 @@ func TestUnversionedRecordingIsStale(t *testing.T) {
 	if err := st.Write("", "BenchmarkNoIO", "", recs); err != nil {
 		t.Fatal(err)
 	}
-	v, reason, _, _, err := checkOne(st, nil, "example.com/old", "", "", "BenchmarkNoIO", "")
+	v, reason, _, _, err := checkOne(context.Background(), st, nil, "example.com/old", "", "", "BenchmarkNoIO", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +79,7 @@ func TestUnversionedRecordingIsStale(t *testing.T) {
 	if err := st.Write("", "BenchmarkNoIO", "incomplete", incomplete); err != nil {
 		t.Fatal(err)
 	}
-	v, reason, _, _, err = checkOne(st, nil, "example.com/old", "", "", "BenchmarkNoIO", "incomplete")
+	v, reason, _, _, err = checkOne(context.Background(), st, nil, "example.com/old", "", "", "BenchmarkNoIO", "incomplete")
 	if err != nil {
 		t.Fatal(err)
 	}

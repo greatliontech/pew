@@ -107,7 +107,7 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 	}
 	const pkg = "example.com/extstatus"
 	const bench = "BenchmarkExternal"
-	e, _, err := newEngineAt(dir, dir, false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), dir, dir, false, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestStatusExplainNamesTheMovingGuard(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
-	e, _, err := newEngineAt(".", ".", false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), ".", ".", false, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestStatusExplainNamesMovedInputs(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
-	e, _, err := newEngineAt(".", ".", false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), ".", ".", false, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestStatusExplainNamesMovedInputs(t *testing.T) {
 	env := append(os.Environ(), "PEW_EXPLAIN_PROBE=probe-secret-value")
 
 	var out strings.Builder
-	explainRecordAgainstCurrent(&out, e, ".", pkg, bench, fp, env)
+	explainRecordAgainstCurrent(context.Background(), &out, e, ".", pkg, bench, fp, env)
 	got := out.String()
 	if !strings.Contains(got, "moved inputs:") ||
 		!strings.Contains(got, "env PEW_EXPLAIN_PROBE") || !strings.Contains(got, watched) {
@@ -283,7 +283,7 @@ func TestStatusExplainNamesMovedInputs(t *testing.T) {
 // TestStatusJSONRows pins spec §12's status -json shape: one JSON object per
 // row with stable field names, the same verdicts the text view reports.
 func TestStatusJSONRows(t *testing.T) {
-	e, _, err := newEngineAt(".", ".", false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), ".", ".", false, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func TestStatusJSONRows(t *testing.T) {
 // unlabeled rows never mention it), and a package whose benchmark
 // declarations cannot be read emits a {package, error} object.
 func TestStatusJSONLabelAndErrorRows(t *testing.T) {
-	e, _, err := newEngineAt(".", ".", false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), ".", ".", false, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,7 +524,7 @@ func TestExplainNamesAClosureDerivationMove(t *testing.T) {
 	}
 	e, pkg, bench, fp := explainFixture(t)
 	var same strings.Builder
-	explainRecordAgainstCurrent(&same, e, ".", pkg, bench, fp, os.Environ())
+	explainRecordAgainstCurrent(context.Background(), &same, e, ".", pkg, bench, fp, os.Environ())
 	if strings.Contains(same.String(), "closure strategy") {
 		t.Fatalf("a recording under the current derivation shows a strategy row:\n%s", same.String())
 	}
@@ -537,7 +537,7 @@ func TestExplainNamesAClosureDerivationMove(t *testing.T) {
 		t.Fatalf("fixture: the moved derivation must share the current one's prefix and differ later: %q vs %q", moved.ClosureStrategy, gofresh.ClosureStrategy)
 	}
 	var out strings.Builder
-	explainRecordAgainstCurrent(&out, e, ".", pkg, bench, moved, os.Environ())
+	explainRecordAgainstCurrent(context.Background(), &out, e, ".", pkg, bench, moved, os.Environ())
 	got := out.String()
 	var row string
 	for _, line := range strings.Split(got, "\n") {
@@ -561,7 +561,7 @@ func TestExplainNamesAClosureDerivationMove(t *testing.T) {
 // bench fixture with the benchmark's current fingerprint.
 func explainFixture(t *testing.T) (*gofresh.Engine, string, string, gofresh.Fingerprint) {
 	t.Helper()
-	e, _, err := newEngineAt(".", ".", false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), ".", ".", false, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,7 @@
 package run
 
 import (
+	"context"
 	"encoding/base64"
 	"os"
 	"path/filepath"
@@ -293,7 +294,7 @@ func TestEffectiveGoflags(t *testing.T) {
 			env = append(env, entry)
 		}
 	}
-	fromFile, err := EffectiveGoflags(dir, append(env, "GOENV="+goenv))
+	fromFile, err := EffectiveGoflags(context.Background(), dir, append(env, "GOENV="+goenv))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +302,7 @@ func TestEffectiveGoflags(t *testing.T) {
 		t.Fatalf("EffectiveGoflags = %q, want the env-file value", fromFile)
 	}
 	// The process variable wins over the file, per the go command.
-	fromEnv, err := EffectiveGoflags(dir, append(env, "GOENV="+goenv, "GOFLAGS=-pgo=proc.pgo"))
+	fromEnv, err := EffectiveGoflags(context.Background(), dir, append(env, "GOENV="+goenv, "GOFLAGS=-pgo=proc.pgo"))
 	if err != nil {
 		t.Fatal(err)
 	}

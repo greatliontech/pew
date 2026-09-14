@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -27,7 +28,7 @@ func TestLanguageShapeCanaries(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			e, _, err := newEngineAt(dir, dir, false, os.Environ())
+			e, _, err := newEngineAt(context.Background(), dir, dir, false, os.Environ())
 			if err != nil {
 				t.Errorf("canary engine: %v", err)
 				return

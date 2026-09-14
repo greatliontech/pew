@@ -1,6 +1,7 @@
 package gotool
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -57,7 +58,7 @@ func TestCommandEnvironmentPinsPWD(t *testing.T) {
 }
 
 func TestRunOK(t *testing.T) {
-	out, err := Run("env", "GOMODCACHE")
+	out, err := Run(context.Background(), "env", "GOMODCACHE")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,9 +68,54 @@ func TestRunOK(t *testing.T) {
 }
 
 func TestRunError(t *testing.T) {
-	if _, err := Run("this-is-not-a-go-subcommand"); err == nil {
+	if _, err := Run(context.Background(), "this-is-not-a-go-subcommand"); err == nil {
 		t.Fatal("expected error")
 	} else if !strings.Contains(err.Error(), "go this-is-not-a-go-subcommand") {
 		t.Errorf("error not wrapped with command: %v", err)
+	}
+}
+
+// Command is the one go-command constructor: it resolves the directory
+// symlink-free and pins PWD to it, so every go invocation pew makes
+// shares the environment policy (spec §9).
+func TestCommandAppliesTheEnvironmentPolicy(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	resolved := CommandDir(link)
+	cmd := Command(context.Background(), link, []string{"A=1", "PWD=/elsewhere"}, "env", "GOVERSION")
+	if cmd.Dir != resolved {
+		t.Fatalf("cmd.Dir = %q, want %q", cmd.Dir, resolved)
+	}
+	var pwd string
+	for _, kv := range cmd.Env {
+		if v, ok := strings.CutPrefix(kv, "PWD="); ok {
+			pwd = v
+		}
+	}
+	if pwd != resolved {
+		t.Fatalf("PWD = %q, want %q", pwd, resolved)
+	}
+	if cmd.Args[0] != "go" || cmd.Args[len(cmd.Args)-1] != "GOVERSION" {
+		t.Fatalf("cmd.Args = %v", cmd.Args)
+	}
+	// The constructor binds ctx: a cancelled context refuses the
+	// invocation rather than running an unkillable go process.
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := Command(cancelled, real, nil, "env", "GOVERSION").Run(); err == nil {
+		t.Fatal("a cancelled context did not stop the go invocation")
+	}
+	// A nil env inherits the process environment (then PWD is pinned):
+	// a nil-env go invocation must not run with PWD alone, or a module
+	// with a toolchain directive fails to resolve without GOMODCACHE.
+	nilEnv := Command(context.Background(), real, nil, "env", "GOVERSION").Env
+	if len(nilEnv) <= 1 {
+		t.Fatalf("nil env ran go with %d vars; want the inherited environment plus PWD", len(nilEnv))
+	}
+	if !slices.ContainsFunc(nilEnv, func(kv string) bool { return strings.HasPrefix(kv, "PWD=") }) {
+		t.Fatalf("nil env did not pin PWD: %v", nilEnv)
 	}
 }

@@ -246,8 +246,11 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 	if err != nil {
 		return err
 	}
-	pkgs, err := statPackages(bl, errw)
+	pkgs, err := statPackages(ctx, bl, errw)
 	if err != nil {
+		if ctx.Err() != nil {
+			return interrupted("stat: interrupted while listing packages")
+		}
 		return err
 	}
 	repo, err := gitblob.Open(".")
@@ -389,7 +392,7 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 					// guarantees a decodable fingerprint on this side.
 					goflags, ok := goflagsByModule[cur.moduleDir]
 					if !ok {
-						goflags, err = runpkg.EffectiveGoflags(cur.moduleDir, os.Environ())
+						goflags, err = runpkg.EffectiveGoflags(ctx, cur.moduleDir, os.Environ())
 						if err != nil {
 							fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, err)
 							baseAll = append(baseAll, baseRecs...)
@@ -411,7 +414,7 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 						if err := resolveVouches(); err != nil {
 							return err
 						}
-						engine, err = buildEngine(cur.moduleDir, os.Environ(), nil, pgo)
+						engine, err = buildEngine(ctx, cur.moduleDir, os.Environ(), nil, pgo)
 						if err != nil {
 							return err
 						}
@@ -431,7 +434,7 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 						}
 						fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is %s; comparison may not reflect HEAD — re-run `pew run`\n", cur.importPath, key.bench, msg)
 						if sc.explain {
-							explainRecordAgainstCurrent(errw, engine, cur.moduleDir, cur.importPath, key.bench, fp, os.Environ())
+							explainRecordAgainstCurrent(ctx, errw, engine, cur.moduleDir, cur.importPath, key.bench, fp, os.Environ())
 						}
 					}
 				}
@@ -479,10 +482,10 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 	return nil
 }
 
-func statPackages(bl baseline, errw io.Writer) ([]pkgMeta, error) {
-	pkgs, err := resolvePackages([]string{"./..."})
+func statPackages(ctx context.Context, bl baseline, errw io.Writer) ([]pkgMeta, error) {
+	pkgs, err := resolvePackages(ctx, []string{"./..."})
 	if err != nil {
-		fallback, fallbackErr := fallbackStatPackages()
+		fallback, fallbackErr := fallbackStatPackages(ctx)
 		if fallbackErr != nil {
 			if bl.newRef != "" {
 				fmt.Fprintf(errw, "pew: warning: current package inventory unavailable: %v\n", err)
@@ -496,7 +499,7 @@ func statPackages(bl baseline, errw io.Writer) ([]pkgMeta, error) {
 	if len(pkgs) != 0 {
 		return pkgs, nil
 	}
-	fallback, err := fallbackStatPackages()
+	fallback, err := fallbackStatPackages(ctx)
 	if err != nil {
 		if bl.newRef != "" {
 			return nil, nil
@@ -649,16 +652,16 @@ func dedupeStatModules(mods []*statModule) []*statModule {
 	return out
 }
 
-func fallbackStatPackages() ([]pkgMeta, error) {
-	p, err := currentModulePackage()
+func fallbackStatPackages(ctx context.Context) ([]pkgMeta, error) {
+	p, err := currentModulePackage(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return []pkgMeta{p}, nil
 }
 
-func currentModulePackage() (pkgMeta, error) {
-	out, err := gotool.Run("list", "-m", "-json")
+func currentModulePackage(ctx context.Context) (pkgMeta, error) {
+	out, err := gotool.Run(ctx, "list", "-m", "-json")
 	if err != nil {
 		return pkgMeta{}, err
 	}

@@ -341,7 +341,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 		t.Fatal(err)
 	}
 	withWorkingDir(t, dir)
-	e, _, err := newEngineAt(dir, dir, false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), dir, dir, false, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,7 +431,7 @@ func TestStatRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 		t.Fatal(err)
 	}
 	withWorkingDir(t, dir)
-	e, _, err := newEngineAt(dir, dir, false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), dir, dir, false, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1108,7 +1108,7 @@ func TestRunConditionsDoNotAffectValidity(t *testing.T) {
 	write("unknown", "governor=unknown turbo=unknown load1=unknown throttled=unknown battery=unknown")
 
 	for _, label := range []string{"quiet", "noisy", "unknown"} {
-		v, reason, _, _, err := checkOne(st, e, pkg, "", ".", bench, label)
+		v, reason, _, _, err := checkOne(context.Background(), st, e, pkg, "", ".", bench, label)
 		if err != nil {
 			t.Fatalf("checkOne(%s): %v", label, err)
 		}
@@ -1193,7 +1193,7 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 	if err := st.Write("", bench, "", recs); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	v, reason, _, _, err := checkOne(st, e, pkg, "", ".", bench, "")
+	v, reason, _, _, err := checkOne(context.Background(), st, e, pkg, "", ".", bench, "")
 	if err != nil {
 		t.Fatalf("checkOne: %v", err)
 	}

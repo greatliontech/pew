@@ -7,6 +7,7 @@
 package gotool
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -56,21 +57,40 @@ func equalEnvKey(left, right string) bool {
 	return left == right
 }
 
-// Run executes `go <args>` in the current directory. See RunIn.
-func Run(args ...string) ([]byte, error) { return RunIn("", args...) }
-
-// RunIn executes `go <args>` in dir ("" = current directory) and returns stdout.
-// On failure the error includes the command and go's stderr. The directory
-// matters: a go.mod `toolchain` directive / GOTOOLCHAIN is resolved relative to
-// it, so provenance capture and `go test` must run in the same dir to describe
-// the same toolchain. The directory is resolved and PWD pinned per the
-// package policy above.
-func RunIn(dir string, args ...string) ([]byte, error) {
+// Command is the one go-command constructor: `go <args>` under ctx, in
+// dir ("" = current directory) with the environment policy applied —
+// the directory resolved symlink-free and PWD pinned to it. Every go
+// invocation pew makes is built here, so §9's resolved-directory
+// premise holds for all of them by construction, the toolchain-
+// provenance sample (§7) included. Cancelling ctx kills the go
+// process; a caller that must also kill a grandchild (the test binary
+// go test spawns) runs its own process group over the same policy.
+func Command(ctx context.Context, dir string, env []string, args ...string) *exec.Cmd {
+	if env == nil {
+		// A nil env inherits the process environment, as an unset
+		// exec.Cmd.Env would — then PWD is pinned over it. A caller
+		// passing the empty non-nil slice deliberately runs go with
+		// PWD alone.
+		env = os.Environ()
+	}
 	resolved := CommandDir(dir)
-	cmd := exec.Command("go", args...)
+	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = resolved
-	cmd.Env = CommandEnvironment(os.Environ(), resolved)
-	out, err := cmd.Output()
+	cmd.Env = CommandEnvironment(env, resolved)
+	return cmd
+}
+
+// Run executes `go <args>` in the current directory under ctx. See RunIn.
+func Run(ctx context.Context, args ...string) ([]byte, error) { return RunIn(ctx, "", args...) }
+
+// RunIn executes `go <args>` in dir ("" = current directory) under ctx and
+// returns stdout, over the ambient process environment. On failure the error
+// includes the command and go's stderr. The directory matters: a go.mod
+// `toolchain` directive / GOTOOLCHAIN is resolved relative to it, so
+// provenance capture and `go test` must run in the same dir to describe the
+// same toolchain — the directory is resolved and PWD pinned per Command.
+func RunIn(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	out, err := Command(ctx, dir, os.Environ(), args...).Output()
 	if err != nil {
 		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 			return nil, fmt.Errorf("go %s: %w: %s",

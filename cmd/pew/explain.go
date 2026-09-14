@@ -75,8 +75,7 @@ func guardRows(a, b guard.Guards) []explainRow {
 // engine's own capture, so they are digested exactly as the recorded ones were
 // (the engine folds build inputs with its own framing; a parallel capture
 // would diverge under PGO).
-func explainRecordAgainstCurrent(w io.Writer, e *gofresh.Engine, moduleDir, importPath, bench string, fp gofresh.Fingerprint, env []string) {
-	ctx := context.Background()
+func explainRecordAgainstCurrent(ctx context.Context, w io.Writer, e *gofresh.Engine, moduleDir, importPath, bench string, fp gofresh.Fingerprint, env []string) {
 	curFP, err := e.CaptureFor(ctx, gofresh.Subject{Package: importPath, Symbol: bench}, moduleDir, gofresh.Measurement)
 	if err != nil {
 		fmt.Fprintf(w, "    cannot compute the current state: %v\n", err)
@@ -92,7 +91,7 @@ func explainRecordAgainstCurrent(w io.Writer, e *gofresh.Engine, moduleDir, impo
 	rows = append(rows, explainRow{name: "test-variants", a: fp.TestVariantClosure, b: curFP.TestVariantClosure})
 	currentRuntime := ""
 	if fp.RuntimeInputs != "" {
-		if st, err := runtimeinput.Current(context.Background(), fp.RuntimeInputs, moduleDir, env); err != nil {
+		if st, err := runtimeinput.Current(ctx, fp.RuntimeInputs, moduleDir, env); err != nil {
 			rows = append(rows, explainRow{name: "runtime", a: fp.RuntimeDigest, b: "(uncomputable: " + err.Error() + ")"})
 		} else {
 			currentRuntime = st.Digest

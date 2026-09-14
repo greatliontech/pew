@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -8,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/greatliontech/gofresh"
+	"github.com/greatliontech/pew/internal/gotool"
 )
 
 // toolchainProvenanceError marks the refusal class of the engine's
@@ -25,23 +27,31 @@ func (e *toolchainProvenanceError) Unwrap() error { return e.err }
 // half. Swapped only by tests. The default samples each distinct
 // (dir, env) once per process: `go env` exec cost stays constant in
 // package count, and within one invocation the sample cannot move
-// (the module directive and environment are fixed inputs).
+// (the module directive and environment are fixed inputs); a
+// cancelled sample is not memoized, so it never poisons a later call.
 var goVersionSampler = memoizedSampler(sampleGoVersion)
 
-func memoizedSampler(sample func(dir string, env []string) (string, error)) func(dir string, env []string) (string, error) {
+func memoizedSampler(sample func(ctx context.Context, dir string, env []string) (string, error)) func(ctx context.Context, dir string, env []string) (string, error) {
 	type result struct {
 		version string
 		err     error
 	}
 	var mu sync.Mutex
 	memo := map[string]result{}
-	return func(dir string, env []string) (string, error) {
+	return func(ctx context.Context, dir string, env []string) (string, error) {
 		key := dir + "\x00" + strings.Join(env, "\x00")
 		mu.Lock()
 		got, ok := memo[key]
 		mu.Unlock()
 		if !ok {
-			got.version, got.err = sample(dir, env)
+			got.version, got.err = sample(ctx, dir, env)
+			// A cancellation is not a fact about (dir, env): memoizing
+			// it would answer a later live call with a stale
+			// "context canceled". Leave the key unset so the next call
+			// re-samples.
+			if got.err != nil && ctx.Err() != nil {
+				return got.version, got.err
+			}
 			mu.Lock()
 			memo[key] = got
 			mu.Unlock()
@@ -50,8 +60,8 @@ func memoizedSampler(sample func(dir string, env []string) (string, error)) func
 	}
 }
 
-func sampleGoVersion(dir string, env []string) (string, error) {
-	out, err := goVersionCmd(dir, env).Output()
+func sampleGoVersion(ctx context.Context, dir string, env []string) (string, error) {
+	out, err := goVersionCmd(ctx, dir, env).Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
 			return "", fmt.Errorf("go env GOVERSION: %v: %s", err, strings.TrimSpace(string(ee.Stderr)))
@@ -65,13 +75,8 @@ func sampleGoVersion(dir string, env []string) (string, error) {
 // unit-pinnable: the sample must resolve exactly as the engine's own
 // loads do — the target module's directory (its go.mod toolchain
 // directive included) under the effective environment.
-func goVersionCmd(dir string, env []string) *exec.Cmd {
-	cmd := exec.Command("go", "env", "GOVERSION")
-	cmd.Dir = dir
-	if len(env) > 0 {
-		cmd.Env = env
-	}
-	return cmd
+func goVersionCmd(ctx context.Context, dir string, env []string) *exec.Cmd {
+	return gotool.Command(ctx, dir, env, "env", "GOVERSION")
 }
 
 // checkToolchainProvenance refuses the judged-run states where this
@@ -80,8 +85,8 @@ func goVersionCmd(dir string, env []string) *exec.Cmd {
 // within a major, total across majors) — the guard every engine
 // construction inherits, so no verdict is computed over a tree the
 // binary misparses (the go1.27 stale-binary episode's structural fix).
-func checkToolchainProvenance(dir string, env []string) error {
-	ambient, err := goVersionSampler(dir, env)
+func checkToolchainProvenance(ctx context.Context, dir string, env []string) error {
+	ambient, err := goVersionSampler(ctx, dir, env)
 	if err != nil {
 		// A failed sample leaves the ambient side unidentifiable —
 		// gofresh's contract refuses that, so the sampling failure is

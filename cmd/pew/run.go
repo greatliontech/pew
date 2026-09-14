@@ -32,7 +32,7 @@ type runConfig struct {
 	// run.SnapshotThrottle. A seam so tests control the observed delta
 	// deterministically.
 	throttle func() run.ThrottleSnapshot
-	// execute runs one go-test invocation; nil means run.Execute. A seam so
+	// execute runs one go-test invocation; nil means run.ExecuteContext. A seam so
 	// tests can observe invocation order against the throttle bracket.
 	execute func(moduleDir, pin string, env, args []string) ([]byte, error)
 	// beforePersist runs after an arm measured and before its write gate
@@ -108,8 +108,11 @@ func newRunCmd() *cobra.Command {
 
 func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []string) error {
 	reportPhase("listing")
-	pkgs, err := resolvePackages(patterns)
+	pkgs, err := resolvePackages(ctx, patterns)
 	if err != nil {
+		if ctx.Err() != nil {
+			return interrupted("interrupted while listing packages; nothing measured")
+		}
 		return err
 	}
 	// One pre-run observation both drives the quiesce gate and is recorded as
@@ -160,7 +163,7 @@ func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []str
 			return interrupted("interrupted while preparing %s (package %d/%d); nothing measured", p.ImportPath, i+1, len(pkgs))
 		}
 		reportPhase(fmt.Sprintf("preparing %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
-		prep, err := preparePackage(rc, p, envs)
+		prep, err := preparePackage(ctx, rc, p, envs)
 		if err != nil {
 			var pe *toolchainProvenanceError
 			if errors.As(err, &pe) {
@@ -357,18 +360,18 @@ type packagePreparation struct {
 // digest), so the cheapest refusal fires first. A refused package
 // still returns the record it got as far as — its scratch directives
 // drive the entry sweep whether or not it runs — beside the error.
-func preparePackage(rc runConfig, p pkgMeta, envs environments) (*packagePreparation, error) {
+func preparePackage(ctx context.Context, rc runConfig, p pkgMeta, envs environments) (*packagePreparation, error) {
 	// A pinned run's engine judges and captures the runtime-configuration
 	// guard under the measured process's environment (its producer
 	// environment), while loads and builds stay on the analysis one.
-	return preparePackageWith(rc, p, func() (*gofresh.Engine, string, error) {
-		return newEngineForPkgProducer(p, envs.analysis, envs.runtime)
+	return preparePackageWith(ctx, rc, p, func() (*gofresh.Engine, string, error) {
+		return newEngineForPkgProducer(ctx, p, envs.analysis, envs.runtime)
 	})
 }
 
 // preparePackageWith is preparePackage over a caller-supplied engine
 // constructor — the seam tests inject a prebuilt engine through.
-func preparePackageWith(rc runConfig, p pkgMeta, newEngine func() (*gofresh.Engine, string, error)) (*packagePreparation, error) {
+func preparePackageWith(ctx context.Context, rc runConfig, p pkgMeta, newEngine func() (*gofresh.Engine, string, error)) (*packagePreparation, error) {
 	scratch, err := scratchPatterns(p)
 	if err != nil {
 		return nil, err
@@ -524,7 +527,7 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 	// The target platform is a per-package truth: it comes from the same
 	// toolchain and environment every per-benchmark invocation runs
 	// under.
-	goos, goarch, err := run.ReadTargetPlatform(p.Module.Dir, env)
+	goos, goarch, err := run.ReadTargetPlatform(ctx, p.Module.Dir, env)
 	if err != nil {
 		return err
 	}
@@ -667,7 +670,7 @@ func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitSta
 	// snapshots, so it gets its own pre-write revalidation: the recorded
 	// buildconfig must describe the exact bytes the measured compile
 	// consumed.
-	goflagsAtWrite, err := run.EffectiveGoflags(p.Module.Dir, env)
+	goflagsAtWrite, err := run.EffectiveGoflags(ctx, p.Module.Dir, env)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -17,7 +18,7 @@ func TestNewEngineHonorsDirectives(t *testing.T) {
 	}
 	const pkg = "github.com/greatliontech/pew/internal/fixtures/purebench"
 	const bench = "BenchmarkPureRead"
-	e, _, err := newEngineAt(".", ".", false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), ".", ".", false, os.Environ())
 	if err != nil {
 		t.Fatalf("newEngineAt: %v", err)
 	}

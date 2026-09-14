@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/pew/internal/gotool"
 	runpkg "github.com/greatliontech/pew/internal/run"
 )
 
@@ -26,14 +28,14 @@ func TestBuildEngineRefusesToolchainSkew(t *testing.T) {
 
 	var sampledDir string
 	var sampledEnv []string
-	goVersionSampler = func(dir string, env []string) (string, error) {
+	goVersionSampler = func(_ context.Context, dir string, env []string) (string, error) {
 		sampledDir = dir
 		sampledEnv = env
 		return "go99.1.0", nil
 	}
 	dir := t.TempDir()
 	env := append(os.Environ(), "PEW_PROVENANCE_PROBE=1")
-	if _, err := buildEngine(dir, env, nil, ""); err == nil {
+	if _, err := buildEngine(context.Background(), dir, env, nil, ""); err == nil {
 		t.Fatal("buildEngine accepted an ambient toolchain a whole major ahead of the binary")
 	} else if !strings.Contains(err.Error(), "cross-major") {
 		t.Fatalf("skew refusal = %v, want the cross-major class named", err)
@@ -56,28 +58,44 @@ func TestBuildEngineRefusesToolchainSkew(t *testing.T) {
 func TestBuildEngineRefusesUnidentifiableToolchain(t *testing.T) {
 	orig := goVersionSampler
 	t.Cleanup(func() { goVersionSampler = orig })
-	goVersionSampler = func(dir string, env []string) (string, error) {
+	goVersionSampler = func(_ context.Context, dir string, env []string) (string, error) {
 		return "devel +abc123", nil
 	}
-	if _, err := buildEngine(t.TempDir(), os.Environ(), nil, ""); err == nil {
+	if _, err := buildEngine(context.Background(), t.TempDir(), os.Environ(), nil, ""); err == nil {
 		t.Fatal("buildEngine accepted an unidentifiable ambient toolchain")
 	} else if !strings.Contains(err.Error(), "unidentifiable") {
 		t.Fatalf("refusal = %v, want the unidentifiable class named", err)
 	}
 }
 
-// goVersionCmd wires the module dir and effective env into the sample.
-func TestGoVersionCmdWiresDirAndEnv(t *testing.T) {
-	env := []string{"A=1", "B=2"}
-	cmd := goVersionCmd("/target/module", env)
-	if cmd.Dir != "/target/module" {
-		t.Fatalf("cmd.Dir = %q", cmd.Dir)
+// goVersionCmd wires the module dir and effective env into the sample
+// through the one go-command constructor, so the provenance probe
+// resolves the directory and pins PWD exactly as every other go
+// invocation does — a symlinked checkout samples the toolchain the
+// engine's own loads read (spec §9's environment policy).
+func TestGoVersionCmdRunsUnderTheEnvironmentPolicy(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
 	}
-	if len(cmd.Env) != 2 || cmd.Env[0] != "A=1" {
-		t.Fatalf("cmd.Env = %v", cmd.Env)
+	resolved := gotool.CommandDir(link)
+	env := []string{"A=1", "B=2", "PWD=/somewhere/else"}
+	cmd := goVersionCmd(context.Background(), link, env)
+	if cmd.Dir != resolved {
+		t.Fatalf("cmd.Dir = %q, want the resolved dir %q", cmd.Dir, resolved)
 	}
-	if empty := goVersionCmd("/target/module", nil); empty.Env != nil {
-		t.Fatalf("nil env must inherit the process environment, got %v", empty.Env)
+	var pwd string
+	for _, kv := range cmd.Env {
+		if v, ok := strings.CutPrefix(kv, "PWD="); ok {
+			pwd = v
+		}
+	}
+	if pwd != resolved {
+		t.Fatalf("PWD = %q, want it pinned to the resolved dir %q", pwd, resolved)
+	}
+	if !slices.Contains(cmd.Env, "A=1") || !slices.Contains(cmd.Env, "B=2") {
+		t.Fatalf("cmd.Env dropped the caller's entries: %v", cmd.Env)
 	}
 }
 
@@ -90,19 +108,19 @@ func TestToolchainProvenanceErrorClassifies(t *testing.T) {
 	orig := goVersionSampler
 	t.Cleanup(func() { goVersionSampler = orig })
 
-	goVersionSampler = func(dir string, env []string) (string, error) {
+	goVersionSampler = func(_ context.Context, dir string, env []string) (string, error) {
 		return "go99.1.0", nil
 	}
 	var pe *toolchainProvenanceError
-	if err := checkToolchainProvenance(t.TempDir(), os.Environ()); !errors.As(err, &pe) {
+	if err := checkToolchainProvenance(context.Background(), t.TempDir(), os.Environ()); !errors.As(err, &pe) {
 		t.Fatalf("skew refusal %v is not a *toolchainProvenanceError", err)
 	}
 
-	goVersionSampler = func(dir string, env []string) (string, error) {
+	goVersionSampler = func(_ context.Context, dir string, env []string) (string, error) {
 		return "", fmt.Errorf("boom")
 	}
 	pe = nil
-	if err := checkToolchainProvenance(t.TempDir(), os.Environ()); !errors.As(err, &pe) {
+	if err := checkToolchainProvenance(context.Background(), t.TempDir(), os.Environ()); !errors.As(err, &pe) {
 		t.Fatalf("sample-failure refusal %v is not a *toolchainProvenanceError", err)
 	}
 }
@@ -112,7 +130,7 @@ func TestToolchainProvenanceErrorClassifies(t *testing.T) {
 // in package count.
 func TestMemoizedSamplerSamplesOncePerKey(t *testing.T) {
 	calls := map[string]int{}
-	sampler := memoizedSampler(func(dir string, env []string) (string, error) {
+	sampler := memoizedSampler(func(_ context.Context, dir string, env []string) (string, error) {
 		calls[dir]++
 		if dir == "/bad" {
 			return "", fmt.Errorf("boom")
@@ -120,18 +138,39 @@ func TestMemoizedSamplerSamplesOncePerKey(t *testing.T) {
 		return "go1.27.0", nil
 	})
 	for range 3 {
-		if v, err := sampler("/a", []string{"K=1"}); err != nil || v != "go1.27.0" {
+		if v, err := sampler(context.Background(), "/a", []string{"K=1"}); err != nil || v != "go1.27.0" {
 			t.Fatalf("sampler(/a) = %q, %v", v, err)
 		}
-		if _, err := sampler("/bad", []string{"K=1"}); err == nil {
+		if _, err := sampler(context.Background(), "/bad", []string{"K=1"}); err == nil {
 			t.Fatal("memoized failure did not stay a failure")
 		}
 	}
-	if _, err := sampler("/a", []string{"K=2"}); err != nil {
+	if _, err := sampler(context.Background(), "/a", []string{"K=2"}); err != nil {
 		t.Fatal(err)
 	}
 	if calls["/a"] != 2 || calls["/bad"] != 1 {
 		t.Fatalf("underlying sample calls = %v, want /a:2 (two env keys), /bad:1", calls)
+	}
+	// A cancellation is not memoized: it must not answer a later live
+	// call for the same key with a stale "context canceled".
+	ctxCalls := 0
+	poison := memoizedSampler(func(ctx context.Context, dir string, env []string) (string, error) {
+		ctxCalls++
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		return "go1.27.0", nil
+	})
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := poison(cancelled, "/c", nil); err == nil {
+		t.Fatal("a cancelled sample returned no error")
+	}
+	if v, err := poison(context.Background(), "/c", nil); err != nil || v != "go1.27.0" {
+		t.Fatalf("a live call after a cancelled one = %q, %v; want the fresh sample (the cancellation poisoned the memo)", v, err)
+	}
+	if ctxCalls != 2 {
+		t.Fatalf("underlying calls after cancel+live = %d, want 2 (the cancelled sample was not memoized)", ctxCalls)
 	}
 }
 
@@ -139,7 +178,7 @@ func TestMemoizedSamplerSamplesOncePerKey(t *testing.T) {
 // smoke check that the exec path (command, dir, trimming) works
 // outside the swapped-sampler tests.
 func TestSampleGoVersionSmoke(t *testing.T) {
-	v, err := sampleGoVersion(".", nil)
+	v, err := sampleGoVersion(context.Background(), ".", nil)
 	if err != nil {
 		t.Fatalf("sampleGoVersion: %v", err)
 	}
@@ -153,7 +192,7 @@ func TestSampleGoVersionSmoke(t *testing.T) {
 func TestRunAndStatusFailFastOnToolchainSkew(t *testing.T) {
 	orig := goVersionSampler
 	t.Cleanup(func() { goVersionSampler = orig })
-	goVersionSampler = func(dir string, env []string) (string, error) {
+	goVersionSampler = func(_ context.Context, dir string, env []string) (string, error) {
 		return "go99.1.0", nil
 	}
 	dir := t.TempDir()

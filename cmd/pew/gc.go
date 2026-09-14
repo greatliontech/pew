@@ -38,8 +38,11 @@ func newGCCmd() *cobra.Command {
 
 func runGC(ctx context.Context, w io.Writer, benchDir string) error {
 	reportPhase("listing")
-	pkgs, err := resolvePackages([]string{"./..."})
+	pkgs, err := resolvePackages(ctx, []string{"./..."})
 	if err != nil {
+		if ctx.Err() != nil {
+			return interrupted("gc: interrupted while listing packages")
+		}
 		return err
 	}
 	type gcGroup struct {
@@ -75,7 +78,7 @@ func runGC(ctx context.Context, w io.Writer, benchDir string) error {
 		}
 	}
 	if len(groups) == 0 {
-		moduleDir, err := currentModuleDir()
+		moduleDir, err := currentModuleDir(ctx)
 		if err != nil {
 			return err
 		}
@@ -202,8 +205,8 @@ func addStoreOnlySourceBenchmarks(w io.Writer, st *store.Store, moduleDir string
 	return reported, nil
 }
 
-func currentModuleDir() (string, error) {
-	out, err := gotool.Run("env", "GOMOD")
+func currentModuleDir(ctx context.Context) (string, error) {
+	out, err := gotool.Run(ctx, "env", "GOMOD")
 	if err != nil {
 		return "", err
 	}

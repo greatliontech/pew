@@ -89,27 +89,27 @@ type pkgMeta struct {
 // merely when the flag string does (spec §5/§9); a profile the compile will
 // consume but pew cannot read fails closed here. The resolved input is
 // returned beside the engine so the producer can revalidate it before writing.
-func newEngineForPkg(p pkgMeta, env []string) (*gofresh.Engine, string, error) {
-	return newEngineAt(p.Module.Dir, p.Dir, p.Name == "main", env)
+func newEngineForPkg(ctx context.Context, p pkgMeta, env []string) (*gofresh.Engine, string, error) {
+	return newEngineAt(ctx, p.Module.Dir, p.Dir, p.Name == "main", env)
 }
 
 // newEngineForPkgProducer is newEngineForPkg with the environment the
 // measured processes run under when it differs from the analysis one
 // (a pinned run's GOMAXPROCS): the runtime-configuration guard and
 // runtime-input revalidation take it, loads and builds keep env.
-func newEngineForPkgProducer(p pkgMeta, env, producerEnv []string) (*gofresh.Engine, string, error) {
-	return newEngineAtProducer(p.Module.Dir, p.Dir, p.Name == "main", env, producerEnv)
+func newEngineForPkgProducer(ctx context.Context, p pkgMeta, env, producerEnv []string) (*gofresh.Engine, string, error) {
+	return newEngineAtProducer(ctx, p.Module.Dir, p.Dir, p.Name == "main", env, producerEnv)
 }
 
-func newEngineAt(moduleDir, pkgDir string, mainPkg bool, env []string) (*gofresh.Engine, string, error) {
-	return newEngineAtProducer(moduleDir, pkgDir, mainPkg, env, nil)
+func newEngineAt(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (*gofresh.Engine, string, error) {
+	return newEngineAtProducer(ctx, moduleDir, pkgDir, mainPkg, env, nil)
 }
 
-func newEngineAtProducer(moduleDir, pkgDir string, mainPkg bool, env, producerEnv []string) (*gofresh.Engine, string, error) {
+func newEngineAtProducer(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env, producerEnv []string) (*gofresh.Engine, string, error) {
 	if err := resolveVouches(); err != nil {
 		return nil, "", err
 	}
-	goflags, err := runpkg.EffectiveGoflags(moduleDir, env)
+	goflags, err := runpkg.EffectiveGoflags(ctx, moduleDir, env)
 	if err != nil {
 		return nil, "", err
 	}
@@ -117,7 +117,7 @@ func newEngineAtProducer(moduleDir, pkgDir string, mainPkg bool, env, producerEn
 	if err != nil {
 		return nil, "", err
 	}
-	e, err := buildEngine(moduleDir, env, producerEnv, pgo)
+	e, err := buildEngine(ctx, moduleDir, env, producerEnv, pgo)
 	return e, pgo, err
 }
 
@@ -187,14 +187,14 @@ func emitEngineDiagnostic(p gofresh.Progress) {
 	reportPhase(fmt.Sprintf("analysis %s %s", p.Phase, p.Package))
 }
 
-func buildEngine(moduleDir string, env, producerEnv []string, pgo string) (*gofresh.Engine, error) {
+func buildEngine(ctx context.Context, moduleDir string, env, producerEnv []string, pgo string) (*gofresh.Engine, error) {
 	// Every pew engine attests single-subject execution: `pew run`
 	// measures each benchmark in a process of its own (spec §9), and
 	// status/stat must judge recordings under the same premise they
 	// were produced under — the attestation arms gofresh's audited
 	// pooling discharge and rides the fact identity, so a split here
 	// would make verdict surfaces disagree with the producer.
-	if err := checkToolchainProvenance(moduleDir, env); err != nil {
+	if err := checkToolchainProvenance(ctx, moduleDir, env); err != nil {
 		return nil, err
 	}
 	// The reviewed vouch set has one home, the store's root
@@ -221,8 +221,11 @@ func buildEngine(moduleDir string, env, producerEnv []string, pgo string) (*gofr
 
 func runStatus(ctx context.Context, w io.Writer, benchDir, label string, staleOnly, explain, jsonOut bool, patterns []string) error {
 	reportPhase("listing")
-	pkgs, err := resolvePackages(patterns)
+	pkgs, err := resolvePackages(ctx, patterns)
 	if err != nil {
+		if ctx.Err() != nil {
+			return interrupted("status: interrupted while listing packages")
+		}
 		return err
 	}
 	for i, p := range pkgs {
@@ -254,7 +257,7 @@ func runStatus(ctx context.Context, w io.Writer, benchDir, label string, staleOn
 		if len(benches) == 0 {
 			continue
 		}
-		e, _, err := newEngineForPkg(p, os.Environ())
+		e, _, err := newEngineForPkg(ctx, p, os.Environ())
 		if err != nil {
 			var pe *toolchainProvenanceError
 			if errors.As(err, &pe) {
@@ -327,7 +330,7 @@ func statusPackage(ctx context.Context, w, errw io.Writer, e *gofresh.Engine, be
 		// decodable to tabulate — a strategy-refused recording decoded and
 		// explains like any stale one.
 		if explain && v != verdictValid && v != verdictUnrecorded && fp.MaximalClosure != "" {
-			explainRecordAgainstCurrent(w, e, p.Module.Dir, p.ImportPath, b, fp, os.Environ())
+			explainRecordAgainstCurrent(ctx, w, e, p.Module.Dir, p.ImportPath, b, fp, os.Environ())
 		}
 	}
 	return nil
@@ -343,7 +346,7 @@ func statusPackage(ctx context.Context, w, errw io.Writer, e *gofresh.Engine, be
 // (spec §7.9): the returned fingerprint then carries the refreshed
 // compartment pin, and the run path rewrites the recording so later
 // verdicts read plainly valid.
-func checkOne(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, bench, label string) (verdict, string, gofresh.Fingerprint, string, error) {
+func checkOne(ctx context.Context, st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, bench, label string) (verdict, string, gofresh.Fingerprint, string, error) {
 	recs, err := st.Read(pkgRel, bench, label)
 	switch {
 	case errors.Is(err, store.ErrNotRecorded):
@@ -351,9 +354,7 @@ func checkOne(st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, be
 	case err != nil:
 		return "", "", gofresh.Fingerprint{}, "", err
 	}
-	// The per-record form is test-facing; the verbs judge in batches
-	// under their own context.
-	return verdictForRecs(context.Background(), e, pkgPath, moduleDir, bench, recs)
+	return verdictForRecs(ctx, e, pkgPath, moduleDir, bench, recs)
 }
 
 // newViewFor builds a package's typed view; a variable so a test can
@@ -595,8 +596,8 @@ func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, 
 	}, m["pew-test-variant-ledger"], true
 }
 
-func resolvePackages(patterns []string) ([]pkgMeta, error) {
-	out, err := gotool.Run(append([]string{"list", "-json"}, patterns...)...)
+func resolvePackages(ctx context.Context, patterns []string) ([]pkgMeta, error) {
+	out, err := gotool.Run(ctx, append([]string{"list", "-json"}, patterns...)...)
 	if err != nil {
 		return nil, err
 	}

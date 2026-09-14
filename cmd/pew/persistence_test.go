@@ -177,7 +177,7 @@ func TestABArtifactHoldsEachCompletedIteration(t *testing.T) {
 			}
 			return []byte("goos: linux\ngoarch: amd64\npkg: example.com/abfix/p\ncpu: T\nBenchmarkWork-8 1 5 ns/op\nPASS\n"), nil
 		},
-		guards: func(string, string, bool, []string) (guard.Guards, error) {
+		guards: func(context.Context, string, string, bool, []string) (guard.Guards, error) {
 			return guard.Guards{Toolchain: "go1", BuildConfig: "b", Machine: "m", RuntimeConfig: "r"}, nil
 		},
 	}

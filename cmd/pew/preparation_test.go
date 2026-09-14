@@ -238,7 +238,7 @@ func TestABPreparesEveryPackageBeforeAnyIteration(t *testing.T) {
 			iterations++
 			return nil, nil
 		},
-		guards: func(string, string, bool, []string) (guard.Guards, error) {
+		guards: func(context.Context, string, string, bool, []string) (guard.Guards, error) {
 			return guard.Guards{Toolchain: "go1", BuildConfig: "b", Machine: "m", RuntimeConfig: "r"}, nil
 		},
 	}

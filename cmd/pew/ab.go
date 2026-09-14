@@ -36,7 +36,7 @@ type abConfig struct {
 	throttle    func() run.ThrottleSnapshot
 	execute     func(dir, pin string, env []string, bin string, args []string) ([]byte, error)
 	build       func(dir string, env []string, args []string) error
-	guards      func(moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error)
+	guards      func(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error)
 }
 
 // sideGuards captures one side's comparison-guard values in that side's own
@@ -46,11 +46,11 @@ type abConfig struct {
 // machine and runtime-config guards are process facts the two sides share by
 // construction. The PGO profile rides in as a content digest exactly as the
 // recording path's engine takes it.
-func (ac abConfig) sideGuards(moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
+func (ac abConfig) sideGuards(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
 	if ac.guards != nil {
-		return ac.guards(moduleDir, pkgDir, mainPkg, env)
+		return ac.guards(ctx, moduleDir, pkgDir, mainPkg, env)
 	}
-	goflags, err := run.EffectiveGoflags(moduleDir, env)
+	goflags, err := run.EffectiveGoflags(ctx, moduleDir, env)
 	if err != nil {
 		return guard.Guards{}, err
 	}
@@ -66,17 +66,13 @@ func (ac abConfig) sideGuards(moduleDir, pkgDir string, mainPkg bool, env []stri
 	// guards are compared between the two sides and never recorded, and
 	// both sides measure under the same pin, so the comparative capture
 	// reads the shared analysis env for the runtime guard as well.
-	return guard.Capture(context.Background(), moduleDir, env, env, guard.Measurement, nil, buildInputs...)
+	return guard.Capture(ctx, moduleDir, env, env, guard.Measurement, nil, buildInputs...)
 }
 
 // abPackageName resolves a package directory's package name with the same
 // toolchain environment the builds use.
-func abPackageName(dir string, env []string) (string, error) {
-	cmd := exec.Command("go", "list", "-f", "{{.Name}}", ".")
-	resolved := gotool.CommandDir(dir)
-	cmd.Dir = resolved
-	cmd.Env = gotool.CommandEnvironment(env, resolved)
-	out, err := cmd.Output()
+func abPackageName(ctx context.Context, dir string, env []string) (string, error) {
+	out, err := gotool.Command(ctx, dir, env, "list", "-f", "{{.Name}}", ".").Output()
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
@@ -157,8 +153,11 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 		return fmt.Errorf("ab: count must be at least 1")
 	}
 	reportPhase("listing")
-	pkgs, err := resolvePackages(patterns)
+	pkgs, err := resolvePackages(ctx, patterns)
 	if err != nil {
+		if ctx.Err() != nil {
+			return interrupted("ab: interrupted while listing packages; no pair measured")
+		}
 		return err
 	}
 	if len(pkgs) == 0 {
@@ -310,15 +309,15 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 	// measurement spend, not after it. Side B's package kind comes from
 	// the ref's own tree: a package that is main at the ref resolves its
 	// default.pgo there regardless of what the working tree renamed.
-	nameB, err := abPackageName(sideBPkgDir, env)
+	nameB, err := abPackageName(ctx, sideBPkgDir, env)
 	if err != nil {
 		return prep, fmt.Errorf("ab: resolving side B package at %s: %w", ac.ref, err)
 	}
-	prep.guardsA, err = ac.sideGuards(p.Module.Dir, p.Dir, p.Name == "main", env)
+	prep.guardsA, err = ac.sideGuards(ctx, p.Module.Dir, p.Dir, p.Name == "main", env)
 	if err != nil {
 		return prep, fmt.Errorf("ab: capturing side A guards: %w", err)
 	}
-	prep.guardsB, err = ac.sideGuards(sideBModule, sideBPkgDir, nameB == "main", env)
+	prep.guardsB, err = ac.sideGuards(ctx, sideBModule, sideBPkgDir, nameB == "main", env)
 	if err != nil {
 		return prep, fmt.Errorf("ab: capturing side B guards: %w", err)
 	}
