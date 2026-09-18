@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/pew/internal/gitblob"
@@ -110,7 +111,7 @@ func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []str
 	reportPhase("listing")
 	pkgs, err := resolvePackages(ctx, patterns)
 	if err != nil {
-		if ctx.Err() != nil {
+		if cancelledBy(ctx, err) {
 			return interrupted("interrupted while listing packages; nothing measured")
 		}
 		return err
@@ -159,12 +160,21 @@ func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []str
 		if p.Module.Dir == "" {
 			continue
 		}
-		if err := ctx.Err(); err != nil {
+		preparing := func() error {
 			return interrupted("interrupted while preparing %s (package %d/%d); nothing measured", p.ImportPath, i+1, len(pkgs))
+		}
+		if ctx.Err() != nil {
+			return preparing()
 		}
 		reportPhase(fmt.Sprintf("preparing %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
 		prep, err := preparePackage(ctx, rc, p, envs)
 		if err != nil {
+			// The interruption outranks a provenance refusal raised in
+			// the same window: both end the verb, and the signal is the
+			// operator's own fact.
+			if cancelledBy(ctx, err) {
+				return preparing()
+			}
 			var pe *toolchainProvenanceError
 			if errors.As(err, &pe) {
 				return err
@@ -212,9 +222,19 @@ func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []str
 				// still named.
 				return interrupted("%s%s", runErr.Error(), failedSoFar(failures))
 			}
+			// A cancellation observed by any of the package's stages
+			// before its arms — the view, the capture, the warm-up
+			// build — is the interruption, never the package's failure:
+			// nothing of it was measured, and the report says so.
+			if cancelledBy(ctx, runErr) {
+				return interrupted("interrupted while measuring %s (package %d/%d): %v%s", prep.pkg.ImportPath, i+1, len(prepared), runErr, failedSoFar(failures))
+			}
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", prep.pkg.ImportPath, runErr)
 			failures = append(failures, prep.pkg.ImportPath)
 		}
+	}
+	if err := interruptedAfterLastUnit(ctx, "interrupted after the last package; every recorded arm is kept%s", failedSoFar(failures)); err != nil {
+		return err
 	}
 	if len(failures) > 0 {
 		return fmt.Errorf("run: %d package(s) failed: %s", len(failures), strings.Join(failures, ", "))
@@ -273,10 +293,6 @@ func moduleBenchDir(configured, moduleDir string) (string, error) {
 	}
 }
 
-// newGitStateCache pins repository state with the invocation-wide union of
-// recording stores excluded: in a multi-module repository, one module's
-// recordings must not taint a sibling module's provenance either
-// (spec §5).
 // rejectStoreCoveredSources enforces the exclusion's precondition: no
 // measured source may live under the recording store, because the store's
 // subtree is excluded from the worktree-state-drift guard wholesale — a
@@ -301,6 +317,10 @@ func rejectStoreCoveredSources(sourceFiles []string, benchDirs ...string) error 
 	return nil
 }
 
+// newGitStateCache pins repository state with the invocation-wide union of
+// recording stores excluded: in a multi-module repository, one module's
+// recordings must not taint a sibling module's provenance either
+// (spec §5).
 func newGitStateCache(excludeDirs []string) *gitStateCache {
 	return &gitStateCache{
 		entries: map[string]gitStateResult{},
@@ -364,14 +384,15 @@ func preparePackage(ctx context.Context, rc runConfig, p pkgMeta, envs environme
 	// A pinned run's engine judges and captures the runtime-configuration
 	// guard under the measured process's environment (its producer
 	// environment), while loads and builds stay on the analysis one.
-	return preparePackageWith(ctx, rc, p, func() (*gofresh.Engine, string, error) {
+	return preparePackageWith(rc, p, func() (*gofresh.Engine, string, error) {
 		return newEngineForPkgProducer(ctx, p, envs.analysis, envs.runtime)
 	})
 }
 
 // preparePackageWith is preparePackage over a caller-supplied engine
-// constructor — the seam tests inject a prebuilt engine through.
-func preparePackageWith(ctx context.Context, rc runConfig, p pkgMeta, newEngine func() (*gofresh.Engine, string, error)) (*packagePreparation, error) {
+// constructor — the seam tests inject a prebuilt engine through; the
+// constructor carries the verb's context, nothing else here waits.
+func preparePackageWith(rc runConfig, p pkgMeta, newEngine func() (*gofresh.Engine, string, error)) (*packagePreparation, error) {
 	scratch, err := scratchPatterns(p)
 	if err != nil {
 		return nil, err
@@ -553,8 +574,10 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 		// the arm's own preparation (its scratch sweep, state snapshot,
 		// observation frame), which an arm that will not run must not
 		// pay; a cancellation that lands inside an arm is that arm's own
-		// error, and one inside the persist window fails its gate, so
-		// this check bites only in the instant between two iterations.
+		// error, and one inside the persist window never reaches the gate
+		// (it runs detached, bounded — the measured arm is kept), so this
+		// check bites between two iterations and after a gated write
+		// under an ended context.
 		if ctx.Err() != nil {
 			stoppedAt = i
 			break
@@ -630,6 +653,14 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 	return nil
 }
 
+// armWriteGateBound bounds a measured arm's write gate — the view
+// re-validation and the `go env` re-derivation it runs detached from
+// the verb's context, so an interruption cannot discard a measurement
+// that completed (REQ-pew-unit-persistence) and cannot hang on one
+// either. A variable only so a test can pin the expiry's attribution;
+// production never writes it.
+var armWriteGateBound = 2 * time.Minute
+
 // persistArm installs one measured arm's recording behind the write
 // gate re-derived for this arm: the view still validates (the source
 // closures unchanged across the arm's span), the source inputs'
@@ -640,8 +671,24 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 // evidence is this arm's own digest and manifest.
 func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, prep *packagePreparation, view *gofresh.View, commit string, initialDirty bool, encodedLedger, name string, fp gofresh.Fingerprint, m armMeasurement, env []string) error {
 	st, pkgRel, pgoInput := prep.st, prep.pkgRel, prep.pgoInput
-	if err := view.Validate(ctx); err != nil {
+	// The gate runs detached from the verb's context under its own
+	// bound: the arm is measured, and a measured unit is kept (spec
+	// REQ-pew-unit-persistence; an interruption loses the unit in
+	// flight, never one whose measurement completed), so the gate's
+	// own evidence — the view still valid, the inputs' dirtiness, the
+	// PGO input, HEAD — decides the write, not a signal landing during it.
+	gate, cancel := context.WithTimeout(context.WithoutCancel(ctx), armWriteGateBound)
+	defer cancel()
+	// gated attributes the bound's expiry: a measured arm discarded by
+	// the gate's own deadline names the gate, never a bare deadline.
+	gated := func(err error) error {
+		if err != nil && gate.Err() != nil {
+			return fmt.Errorf("the arm's write gate exceeded %s: %w", armWriteGateBound, err)
+		}
 		return err
+	}
+	if err := view.Validate(gate); err != nil {
+		return gated(err)
 	}
 	dirty := initialDirty
 	if !dirty {
@@ -670,9 +717,9 @@ func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitSta
 	// snapshots, so it gets its own pre-write revalidation: the recorded
 	// buildconfig must describe the exact bytes the measured compile
 	// consumed.
-	goflagsAtWrite, err := run.EffectiveGoflags(ctx, p.Module.Dir, env)
+	goflagsAtWrite, err := run.EffectiveGoflags(gate, p.Module.Dir, env)
 	if err != nil {
-		return err
+		return gated(err)
 	}
 	pgoAtWrite, err := run.PGOInput(p.Module.Dir, p.Dir, p.Name == "main", goflagsAtWrite)
 	if err != nil {
@@ -763,7 +810,7 @@ func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStat
 	testlogPath := testlog.Name()
 	_ = testlog.Close()
 	defer os.Remove(testlogPath)
-	// run.Execute resolves the working directory and pins PWD to it by
+	// run.ExecuteContext resolves the working directory and pins PWD to it by
 	// construction, so the go driver hands the test binary the same
 	// resolved package directory the ingest pins — byte-faithful even
 	// through a symlinked checkout, with no per-site bridging.

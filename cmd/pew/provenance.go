@@ -27,8 +27,10 @@ func (e *toolchainProvenanceError) Unwrap() error { return e.err }
 // half. Swapped only by tests. The default samples each distinct
 // (dir, env) once per process: `go env` exec cost stays constant in
 // package count, and within one invocation the sample cannot move
-// (the module directive and environment are fixed inputs); a
-// cancelled sample is not memoized, so it never poisons a later call.
+// (the module directive and environment are fixed inputs) — keyed by
+// the directory the command resolves to, so an alias and its target
+// are one key; a cancelled sample is not memoized, so it never poisons
+// a later call.
 var goVersionSampler = memoizedSampler(sampleGoVersion)
 
 func memoizedSampler(sample func(ctx context.Context, dir string, env []string) (string, error)) func(ctx context.Context, dir string, env []string) (string, error) {
@@ -39,7 +41,7 @@ func memoizedSampler(sample func(ctx context.Context, dir string, env []string) 
 	var mu sync.Mutex
 	memo := map[string]result{}
 	return func(ctx context.Context, dir string, env []string) (string, error) {
-		key := dir + "\x00" + strings.Join(env, "\x00")
+		key := gotool.CommandDir(dir) + "\x00" + strings.Join(env, "\x00")
 		mu.Lock()
 		got, ok := memo[key]
 		mu.Unlock()

@@ -308,7 +308,10 @@ func TestRunPerArmGateRefusesTheArmAlone(t *testing.T) {
 			}
 			var out bytes.Buffer
 			err := runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"."})
-			if err == nil || !strings.Contains(out.String(), "BenchmarkSecond:") || !strings.Contains(out.String(), "(1 recorded)") {
+			// The gate's own refusal names the moved evidence, never the
+			// bound's expiry: an operator re-runs for a timeout and looks
+			// at the tree for a moved one.
+			if err == nil || !strings.Contains(out.String(), "BenchmarkSecond:") || !strings.Contains(out.String(), "(1 recorded)") || strings.Contains(out.String(), "write gate exceeded") {
 				t.Fatalf("runRun = %v; want the second arm refused at its own gate with the first kept\n%s", err, out.String())
 			}
 			st := store.New(benchDir)

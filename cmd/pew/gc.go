@@ -40,7 +40,7 @@ func runGC(ctx context.Context, w io.Writer, benchDir string) error {
 	reportPhase("listing")
 	pkgs, err := resolvePackages(ctx, []string{"./..."})
 	if err != nil {
-		if ctx.Err() != nil {
+		if cancelledBy(ctx, err) {
 			return interrupted("gc: interrupted while listing packages")
 		}
 		return err
@@ -78,7 +78,11 @@ func runGC(ctx context.Context, w io.Writer, benchDir string) error {
 		}
 	}
 	if len(groups) == 0 {
+		reportPhase("resolving the module")
 		moduleDir, err := currentModuleDir(ctx)
+		if cancelledBy(ctx, err) {
+			return interrupted("gc: interrupted while resolving the module")
+		}
 		if err != nil {
 			return err
 		}
@@ -128,7 +132,7 @@ func runGC(ctx context.Context, w io.Writer, benchDir string) error {
 	if len(removed) == 0 && len(kept) == 0 && reported == 0 {
 		fmt.Fprintln(w, "gc: no stale recordings")
 	}
-	return nil
+	return interruptedAfterLastUnit(ctx, "gc: interrupted after the last store; every removal reported landed")
 }
 
 func gcStore(w io.Writer, st *store.Store, live map[string]map[string]bool, protected map[string]bool) (removed, kept []string, err error) {

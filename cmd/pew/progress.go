@@ -40,6 +40,31 @@ type interruptedError struct{ msg string }
 
 func (e *interruptedError) Error() string { return e.msg }
 
+// cancelledBy reports whether err is the verb's own cancellation: an
+// error raised after the verb's context ended — by a go invocation,
+// an engine construction, a guard capture, any stage on the verb's
+// path — is the interruption, whatever the tool spelled it, never that
+// stage's own failure (REQ-pew-interruption). A genuine failure racing
+// the signal reads as the interruption too: the verb ends either way,
+// and the unit is reported as not measured, which it was not.
+func cancelledBy(ctx context.Context, err error) bool {
+	return err != nil && ctx.Err() != nil
+}
+
+// interruptedAfterLastUnit is a verb's ending under a context that
+// ended after its last unit completed: nothing was cut short and every
+// unit is kept, and the verb still reports the interruption it received
+// and exits by it (REQ-pew-interruption) instead of answering as if no
+// signal had come — the operator who interrupted learns the work
+// finished, not that the signal was lost. The format names the verb
+// and what is kept.
+func interruptedAfterLastUnit(ctx context.Context, format string, args ...any) error {
+	if ctx.Err() == nil {
+		return nil
+	}
+	return interrupted(format, args...)
+}
+
 func interrupted(format string, args ...any) error {
 	return &interruptedError{fmt.Sprintf(format, args...)}
 }
@@ -50,10 +75,14 @@ func interrupted(format string, args ...any) error {
 // are sequential — and the engine's keep-alives name the stretch too
 // (emitEngineDiagnostic).
 type reporter struct {
-	mu      sync.Mutex
-	out     io.Writer
-	start   time.Time
-	phase   string
+	mu    sync.Mutex
+	out   io.Writer
+	start time.Time
+	phase string
+	// onPhase observes each phase as it is reported — nil outside tests,
+	// which install their own reporter and land a cancellation on a
+	// named stretch through it.
+	onPhase func(string)
 	stop    chan struct{}
 	done    chan struct{}
 	stopped sync.Once
@@ -120,5 +149,9 @@ func reportPhase(phase string) {
 	}
 	r.mu.Lock()
 	r.phase = phase
+	observe := r.onPhase
 	r.mu.Unlock()
+	if observe != nil {
+		observe(phase)
+	}
 }

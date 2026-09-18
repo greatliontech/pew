@@ -2080,7 +2080,7 @@ func TestRunPerArmScratchSweepIsolation(t *testing.T) {
 // preparation-time refusal they exercise fires where the command fires
 // it.
 func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig, p pkgMeta, env []string, conditions runpkg.Conditions, pgoInput string) error {
-	prep, err := preparePackageWith(context.Background(), rc, p, func() (*gofresh.Engine, string, error) { return e, pgoInput, nil })
+	prep, err := preparePackageWith(rc, p, func() (*gofresh.Engine, string, error) { return e, pgoInput, nil })
 	if err != nil {
 		return err
 	}

@@ -172,6 +172,21 @@ func TestMemoizedSamplerSamplesOncePerKey(t *testing.T) {
 	if ctxCalls != 2 {
 		t.Fatalf("underlying calls after cancel+live = %d, want 2 (the cancelled sample was not memoized)", ctxCalls)
 	}
+	// An alias and its target are one key: the command resolves the
+	// directory, so the memo keys by the resolved one.
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	for _, d := range []string{link, real, link} {
+		if _, err := sampler(context.Background(), d, []string{"K=1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls[link]+calls[real] != 1 {
+		t.Fatalf("alias and target sampled %d+%d times; want one sample for the one resolved key", calls[link], calls[real])
+	}
 }
 
 // The real sampler resolves an actual GOVERSION in this repo — the

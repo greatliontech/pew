@@ -155,7 +155,7 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 	reportPhase("listing")
 	pkgs, err := resolvePackages(ctx, patterns)
 	if err != nil {
-		if ctx.Err() != nil {
+		if cancelledBy(ctx, err) {
 			return interrupted("ab: interrupted while listing packages; no pair measured")
 		}
 		return err
@@ -212,13 +212,19 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 	// iteration.
 	var preps []*abPreparation
 	for i, p := range pkgs {
-		if err := ctx.Err(); err != nil {
+		preparing := func() error {
 			return interrupted("ab: interrupted while preparing %s (package %d/%d); nothing compared", p.ImportPath, i+1, len(pkgs))
+		}
+		if ctx.Err() != nil {
+			return preparing()
 		}
 		reportPhase(fmt.Sprintf("preparing %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
 		prep, err := prepareABPackage(ctx, ac, p, repoRoot, worktree, placement, env)
 		if prep != nil && prep.tmp != "" {
 			defer os.RemoveAll(prep.tmp)
+		}
+		if cancelledBy(ctx, err) {
+			return preparing()
 		}
 		if err != nil {
 			return err
@@ -233,7 +239,7 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 			return err
 		}
 	}
-	return nil
+	return interruptedAfterLastUnit(ctx, "ab: interrupted after the last package; every completed pair is in its artifact")
 }
 
 // abPreparation is one package's A/B preparation record: both sides
@@ -403,16 +409,28 @@ func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPrep
 	for i := 0; i < ac.count; i++ {
 		// Interruption stops before the next pair; the artifact written
 		// so far stands (spec REQ-pew-interruption).
-		if ctx.Err() != nil {
+		stopped := func() error {
 			return interrupted("ab: %s: interrupted after %d of %d iterations (the artifact holds them)", p.ImportPath, i, ac.count)
 		}
+		if ctx.Err() != nil {
+			return stopped()
+		}
 		reportPhase(fmt.Sprintf("comparing %s (%d/%d) iteration %d/%d", p.ImportPath, index, total, i+1, ac.count))
+		// A cancellation landing inside a side's process is the
+		// interruption too: the process under measurement is killed and
+		// the pair in flight is lost, the artifact holding the rest.
 		a, err := ac.executeBinary(ctx, p.Dir, ac.pin.List(), runtimeEnv, binA, args)
+		if cancelledBy(ctx, err) {
+			return stopped()
+		}
 		if err != nil {
 			return fmt.Errorf("ab: side A iteration %d: %w", i+1, err)
 		}
 		outA = append(outA, a...)
 		b, err := ac.executeBinary(ctx, sideBPkgDir, ac.pin.List(), runtimeEnv, binB, args)
+		if cancelledBy(ctx, err) {
+			return stopped()
+		}
 		if err != nil {
 			return fmt.Errorf("ab: side B iteration %d: %w", i+1, err)
 		}
@@ -683,18 +701,18 @@ func gitCommonDir(repoRoot string) (string, error) {
 	return dir, nil
 }
 
-// worktreeOwnedBy reports whether the directory is a linked worktree of
-// the repository whose common directory is commonDir: its `.git` file
-// names a gitdir under that directory. A directory with no readable
-// `.git` file (a crash before `git worktree add` wrote it) is nobody's
-// and counts as owned by no repository — never swept on ownership
-// grounds alone.
 // emptyDir reports whether dir holds no entries at all.
 func emptyDir(dir string) bool {
 	entries, err := os.ReadDir(dir)
 	return err == nil && len(entries) == 0
 }
 
+// worktreeOwnedBy reports whether the directory is a linked worktree of
+// the repository whose common directory is commonDir: its `.git` file
+// names a gitdir under that directory. A directory with no readable
+// `.git` file (a crash before `git worktree add` wrote it) is nobody's
+// and counts as owned by no repository — never swept on ownership
+// grounds alone.
 func worktreeOwnedBy(dir, commonDir string) bool {
 	data, err := os.ReadFile(filepath.Join(dir, ".git"))
 	if err != nil {

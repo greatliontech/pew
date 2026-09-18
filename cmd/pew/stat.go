@@ -248,7 +248,7 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 	}
 	pkgs, err := statPackages(ctx, bl, errw)
 	if err != nil {
-		if ctx.Err() != nil {
+		if cancelledBy(ctx, err) {
 			return interrupted("stat: interrupted while listing packages")
 		}
 		return err
@@ -305,8 +305,11 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 
 		keys := sortedStatKeys(m.keys)
 		for ki, key := range keys {
-			if err := ctx.Err(); err != nil {
+			stoppedAt := func() error {
 				return interrupted("stat: interrupted at %s.%s (%d/%d in %s); nothing compared — the comparison is one shot over the whole corpus", key.pkgRel, key.bench, ki+1, len(keys), m.modulePath)
+			}
+			if ctx.Err() != nil {
+				return stoppedAt()
 			}
 			reportPhase(fmt.Sprintf("judging %s.%s (%d/%d in %s)", key.pkgRel, key.bench, ki+1, len(keys), m.modulePath))
 			baseRecs, baseOK, err := m.readSide(bl.baseRef, key.pkgRel, key.bench, key.label)
@@ -393,6 +396,9 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 					goflags, ok := goflagsByModule[cur.moduleDir]
 					if !ok {
 						goflags, err = runpkg.EffectiveGoflags(ctx, cur.moduleDir, os.Environ())
+						if cancelledBy(ctx, err) {
+							return stoppedAt()
+						}
 						if err != nil {
 							fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, err)
 							baseAll = append(baseAll, baseRecs...)
@@ -415,6 +421,9 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 							return err
 						}
 						engine, err = buildEngine(ctx, cur.moduleDir, os.Environ(), nil, pgo)
+						if cancelledBy(ctx, err) {
+							return stoppedAt()
+						}
 						if err != nil {
 							return err
 						}
@@ -425,7 +434,9 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 					// stays read-only, so the returned ledger is dropped and
 					// no recording is rewritten here.
 					warnForeignKeys(errw, cur.importPath, key.bench, store.ForeignConfigKeys(newRecs))
-					if v, reason, fp, _, e := verdictForRecs(ctx, engine, cur.importPath, cur.moduleDir, key.bench, newRecs); e != nil {
+					if v, reason, fp, _, e := verdictForRecs(ctx, engine, cur.importPath, cur.moduleDir, key.bench, newRecs); cancelledBy(ctx, e) {
+						return stoppedAt()
+					} else if e != nil {
 						fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, e)
 					} else if v != verdictValid {
 						msg := string(v)
@@ -464,6 +475,9 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 	} else if len(res.Tables) == 0 && len(res.Notes) == 0 {
 		fmt.Fprintln(w, "no recorded benchmarks to compare:", tally.emptyReason(res, sc.opts.GateUnits))
 	} else if err := res.WriteText(w); err != nil {
+		return err
+	}
+	if err := interruptedAfterLastUnit(ctx, "stat: interrupted after the last comparison; the comparison shown is complete"); err != nil {
 		return err
 	}
 	if !sc.failOnRegression {

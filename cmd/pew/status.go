@@ -223,7 +223,7 @@ func runStatus(ctx context.Context, w io.Writer, benchDir, label string, staleOn
 	reportPhase("listing")
 	pkgs, err := resolvePackages(ctx, patterns)
 	if err != nil {
-		if ctx.Err() != nil {
+		if cancelledBy(ctx, err) {
 			return interrupted("status: interrupted while listing packages")
 		}
 		return err
@@ -257,8 +257,17 @@ func runStatus(ctx context.Context, w io.Writer, benchDir, label string, staleOn
 		if len(benches) == 0 {
 			continue
 		}
+		judging := func() error {
+			return interrupted("status: interrupted while judging %s (package %d/%d)", p.ImportPath, i+1, len(pkgs))
+		}
 		e, _, err := newEngineForPkg(ctx, p, os.Environ())
 		if err != nil {
+			// The interruption outranks a provenance refusal raised in
+			// the same window: both end the verb, and the signal is the
+			// operator's own fact.
+			if cancelledBy(ctx, err) {
+				return judging()
+			}
 			var pe *toolchainProvenanceError
 			if errors.As(err, &pe) {
 				return err
@@ -267,10 +276,13 @@ func runStatus(ctx context.Context, w io.Writer, benchDir, label string, staleOn
 			continue
 		}
 		if err := statusPackage(ctx, w, os.Stderr, e, benchDir, label, staleOnly, explain, jsonOut, p, benches); err != nil {
+			if cancelledBy(ctx, err) {
+				return judging()
+			}
 			reportErr(err)
 		}
 	}
-	return nil
+	return interruptedAfterLastUnit(ctx, "status: interrupted after the last package; every verdict shown stands")
 }
 
 // warnForeignKeys surfaces read-time foreign-key detection on every
