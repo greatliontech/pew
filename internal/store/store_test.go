@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -94,7 +95,7 @@ func TestIsRecordingRequiresCurrentFormat(t *testing.T) {
 // TestRawFormatRejectsDuplicateRecordingKeys: §5's duplicate rejection covers
 // every recording key, not only the format discriminator.
 func TestRawFormatRejectsDuplicateRecordingKeys(t *testing.T) {
-	base := "toolchain: go1\npew-format: 2\nBenchmarkRun-8 1000000 1234 ns/op\n"
+	base := "toolchain: go1\npew-format: 3\nBenchmarkRun-8 1000000 1234 ns/op\n"
 	if !rawFormatValid([]byte(base)) {
 		t.Fatal("well-formed recording rejected")
 	}
@@ -509,11 +510,11 @@ func TestParseFromContent(t *testing.T) {
 }
 
 // TestRawFormatRequiresLFTermination: §5 requires the byte-exact LF-terminated
-// line "pew-format: 2"; a recording whose final bytes are the discriminator with
+// line "pew-format: 3"; a recording whose final bytes are the discriminator with
 // no terminating newline is format-stale, and the same bytes plus the newline
 // are accepted (the termination is the only difference under test).
 func TestRawFormatRequiresLFTermination(t *testing.T) {
-	unterminated := "BenchmarkRun-8 1000000 1234 ns/op\npew-format: 2"
+	unterminated := "BenchmarkRun-8 1000000 1234 ns/op\npew-format: 3"
 	if rawFormatValid([]byte(unterminated)) {
 		t.Error("unterminated pew-format discriminator accepted")
 	}
@@ -629,40 +630,104 @@ func TestRemoveRecordingPrunesEmptyDirs(t *testing.T) {
 	}
 }
 
-// TestParseLiftsOversizedConfigLine: a recording whose header carries a
-// config line beyond benchfmt's scanner bound (the field shape: a large
-// package's runtime-input manifest) must still read back — the store
-// reads what pew run writes — with the oversized value intact on every
-// result. An oversized line that is NOT a recognized recording config
-// key keeps failing loudly.
-func TestParseLiftsOversizedConfigLine(t *testing.T) {
-	huge := strings.Repeat("A", 1<<20)
-	raw := strings.Replace(sample, "pew-runtime-inputs: eyJ2IjoxfQ", "pew-runtime-inputs: "+huge, 1)
-	recs, err := Parse(strings.NewReader(raw), "oversized")
-	if err != nil {
-		t.Fatalf("Parse of oversized recording config: %v", err)
-	}
-	if len(recs) != 3 {
-		t.Fatalf("results: got %d, want 3", len(recs))
-	}
-	for i, rec := range recs {
-		got := ""
+// TestWriteBoundsEveryLineAndPlainBenchfmtReads: a recording whose
+// runtime-input manifest and ledger run past benchfmt's scanner bound
+// (the field shape: a large package) is written as continuation lines,
+// every stored line under the bound, so a bare benchfmt reader — plain
+// benchstat's — parses the file, and the store's own reader rejoins
+// the values exactly (REQ-pew-artifact-format, spec §5). An oversized
+// line that is NOT a chunked recording row fails loudly.
+func TestWriteBoundsEveryLineAndPlainBenchfmtReads(t *testing.T) {
+	manifest := strings.Repeat("A", 1<<20) + "END"
+	ledger := strings.Repeat("b", run.ChunkBound*3+7)
+	// The in-memory form: one value per row, as pew run hands the store
+	// its results — the split is the writer's, never the caller's.
+	recs := recordingtest.Results("BenchmarkRun", []float64{1234, 1240},
+		recordingtest.Set(run.KeyRuntimeInputs, manifest),
+		recordingtest.Set(run.KeyTestVariantLedger, ledger),
+	)
+	for _, rec := range recs {
 		for _, c := range rec.Config {
-			if c.Key == "pew-runtime-inputs" {
-				got = string(c.Value)
+			if strings.Contains(c.Key, ".") {
+				t.Fatalf("the fixture is pre-split: %q", c.Key)
 			}
 		}
-		if got != huge {
-			t.Fatalf("result %d: pew-runtime-inputs not carried (len %d, want %d)", i, len(got), len(huge))
+	}
+	s := New(t.TempDir())
+	if err := s.Write("p", "BenchmarkRun", "", recs); err != nil {
+		t.Fatal(err)
+	}
+	path, err := s.Path("p", "BenchmarkRun", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuations := 0
+	for _, line := range bytes.Split(data, []byte{'\n'}) {
+		if len(line) > 64<<10 {
+			t.Fatalf("a stored line exceeds benchfmt's scanner bound: %d bytes", len(line))
+		}
+		if bytes.HasPrefix(line, []byte(run.KeyRuntimeInputs.Name+".")) {
+			continuations++
 		}
 	}
-	if !IsRecording(recs) {
-		t.Fatal("oversized-but-canonical recording not recognized as a recording")
+	if continuations != 32 {
+		t.Fatalf("manifest continuation lines = %d, want 32 (1 MiB + 3 bytes over 32 KiB parts)", continuations)
+	}
+	// Plain benchfmt — no lift, no join — reads every line.
+	plain := benchfmt.NewReader(bytes.NewReader(data), "plain")
+	for plain.Scan() {
+		if se, ok := plain.Result().(*benchfmt.SyntaxError); ok {
+			t.Fatalf("plain benchfmt refuses the stored file: %v", se)
+		}
+	}
+	if err := plain.Err(); err != nil {
+		t.Fatalf("plain benchfmt refuses the stored file: %v", err)
+	}
+	// The store's reader rejoins the values exactly on every result.
+	read, err := s.Read("p", "BenchmarkRun", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(read) != 2 {
+		t.Fatalf("results: got %d, want 2", len(read))
+	}
+	for i, rec := range read {
+		got := map[string]string{}
+		for _, c := range rec.Config {
+			got[c.Key] = string(c.Value)
+		}
+		if got[run.KeyRuntimeInputs.Name] != manifest || got[run.KeyTestVariantLedger.Name] != ledger {
+			t.Fatalf("result %d: chunked rows not rejoined (manifest %d bytes, ledger %d bytes)", i, len(got[run.KeyRuntimeInputs.Name]), len(got[run.KeyTestVariantLedger.Name]))
+		}
+		for key := range got {
+			if strings.HasPrefix(key, run.KeyRuntimeInputs.Name+".") || strings.HasPrefix(key, run.KeyTestVariantLedger.Name+".") {
+				t.Fatalf("result %d: continuation key %q survived the join", i, key)
+			}
+		}
+	}
+	if !IsRecording(read) {
+		t.Fatal("chunked recording not recognized as a recording")
+	}
+	// The shape moved with the encoding: a format-2 recording is not a
+	// current recording — stale (format), regenerated, never read as
+	// an earlier shape whose lines the reader would have to lift.
+	if IsRecording(parse(t, strings.Replace(sample, "pew-format: "+run.RecordingFormat, "pew-format: 2", 1))) {
+		t.Fatal("a format-2 recording read as current")
 	}
 
+	huge := strings.Repeat("A", 1<<20)
 	foreign := strings.Replace(sample, "pew-runtime-inputs: eyJ2IjoxfQ", "not-a-recording-key: "+huge, 1)
 	if _, err := Parse(strings.NewReader(foreign), "foreign-oversized"); err == nil {
 		t.Fatal("oversized non-recording line: want loud failure, got success")
+	}
+	// A torn chunk set is corruption, never a shorter value.
+	torn := strings.Replace(sample, "pew-runtime-inputs: eyJ2IjoxfQ", "pew-runtime-inputs: eyJ2\npew-runtime-inputs.3: IjoxfQ", 1)
+	if _, err := Parse(strings.NewReader(torn), "torn"); err == nil || !strings.Contains(err.Error(), "pew-runtime-inputs.2 missing") {
+		t.Fatalf("torn chunk set: err = %v, want the missing continuation named", err)
 	}
 }
 
@@ -676,8 +741,89 @@ func TestForeignConfigKeysDetectsHistoricalJunk(t *testing.T) {
 	if len(got) != 1 || got[0] != "injected" {
 		t.Fatalf("foreign keys = %v, want [injected]", got)
 	}
-	clean := parse(t, "goos: linux\npkg: example.com/p\npew-format: 2\ncommit: abc\nBenchmarkA-8 1 10 ns/op\n")
+	clean := parse(t, "goos: linux\npkg: example.com/p\n"+run.KeyFormat.Name+": "+run.RecordingFormat+"\ncommit: abc\nBenchmarkA-8 1 10 ns/op\n")
 	if got := ForeignConfigKeys(clean); len(got) != 0 {
 		t.Fatalf("clean recording flagged: %v", got)
+	}
+}
+
+// TestParseOwnsItsConfigValues: the reader's config values alias its
+// buffers, which a later config line overwrites in place; Parse hands
+// the caller owned copies, so a mid-file config line never rewrites an
+// earlier result's guard value (REQ-pew-artifact-format's anchor: the
+// values return whole).
+func TestParseOwnsItsConfigValues(t *testing.T) {
+	raw := "commit: aaa\n" + run.KeyFormat.Name + ": " + run.RecordingFormat + "\nBenchmarkA-8 1 10 ns/op\n\ncommit: bbb\nBenchmarkA-8 1 20 ns/op\n"
+	recs, err := Parse(strings.NewReader(raw), "aliasing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit := func(r *benchfmt.Result) string {
+		for _, c := range r.Config {
+			if c.Key == "commit" {
+				return string(c.Value)
+			}
+		}
+		return ""
+	}
+	if len(recs) != 2 || commit(recs[0]) != "aaa" || commit(recs[1]) != "bbb" {
+		t.Fatalf("commits = %q, %q; want aaa, bbb (the first result's value rewritten by the second block)", commit(recs[0]), commit(recs[1]))
+	}
+}
+
+// TestWriteRefusesAnUnboundedRowAndAWhitespaceEdgedPart: the one
+// serializer enforces the clause — a non-chunked row past benchfmt's
+// scanner bound refuses naming the row, and a chunked part that would
+// begin or end in whitespace refuses rather than rejoin shorter — and
+// the store's raw format check reads a repeated continuation as a
+// repeated recording key, stale (format), while an earlier-format file
+// past the bound is refused with the regenerating operation named.
+func TestWriteRefusesAnUnboundedRowAndAWhitespaceEdgedPart(t *testing.T) {
+	s := New(t.TempDir())
+	recs := recordingtest.Results("BenchmarkRun", []float64{1}, recordingtest.Set(run.KeyVouches, strings.Repeat("v", 70<<10)))
+	if err := s.Write("p", "BenchmarkRun", "", recs); err == nil || !strings.Contains(err.Error(), "row "+run.KeyVouches.Name+" is") {
+		t.Fatalf("unbounded row: err = %v, want the refusal naming the row", err)
+	}
+	// The cliff itself: benchfmt reads a 65535-byte line and refuses
+	// a 65536-byte one, so the writer's bound is pinned one byte each
+	// side (key 11 + ": " 2 + value).
+	atCliff := recordingtest.Results("BenchmarkRun", []float64{1}, recordingtest.Set(run.KeyVouches, strings.Repeat("v", 65523)))
+	if err := s.Write("p", "BenchmarkRun", "", atCliff); err == nil || !strings.Contains(err.Error(), "row "+run.KeyVouches.Name+" is 65536 bytes") {
+		t.Fatalf("65536-byte line: err = %v, want the refusal", err)
+	}
+	underCliff := recordingtest.Results("BenchmarkRun", []float64{1}, recordingtest.Set(run.KeyVouches, strings.Repeat("v", 65522)))
+	if err := s.Write("p", "BenchmarkRun", "", underCliff); err != nil {
+		t.Fatalf("65535-byte line refused: %v", err)
+	}
+	if back, err := s.Read("p", "BenchmarkRun", ""); err != nil || len(back) != 1 {
+		t.Fatalf("65535-byte line did not read back: %v", err)
+	}
+	edged := recordingtest.Results("BenchmarkRun", []float64{1}, recordingtest.Set(run.KeyRuntimeInputs, strings.Repeat("a", run.ChunkBound-1)+" "+"tail"))
+	if err := s.Write("p", "BenchmarkRun", "", edged); err == nil || !strings.Contains(err.Error(), "begins or ends in whitespace") {
+		t.Fatalf("whitespace-edged part: err = %v, want the refusal", err)
+	}
+	// Any row's leading whitespace reads back shorter: refused too.
+	leading := recordingtest.Results("BenchmarkRun", []float64{1}, recordingtest.Set(run.KeyVouches, " leading"))
+	if err := s.Write("p", "BenchmarkRun", "", leading); err == nil || !strings.Contains(err.Error(), "the value of "+run.KeyVouches.Name+" begins in whitespace") {
+		t.Fatalf("leading-whitespace value: err = %v, want the refusal naming the row", err)
+	}
+	repeated := strings.Replace(sample, "pew-runtime-inputs: eyJ2IjoxfQ", "pew-runtime-inputs: eyJ2\npew-runtime-inputs.2: IjoxfQ\npew-runtime-inputs.2: IjoxfQ", 1)
+	if rawFormatValid([]byte(repeated)) {
+		t.Fatal("a repeated continuation passed the raw format check")
+	}
+	earlier := strings.Replace(sample, run.KeyFormat.Name+": "+run.RecordingFormat, run.KeyFormat.Name+": 2", 1)
+	earlier = strings.Replace(earlier, "pew-runtime-inputs: eyJ2IjoxfQ", "pew-runtime-inputs: "+strings.Repeat("A", 100<<10), 1)
+	if _, err := Parse(strings.NewReader(earlier), "earlier"); err == nil || !strings.Contains(err.Error(), "regenerate it with pew run") {
+		t.Fatalf("earlier-format oversized file: err = %v, want the repair named", err)
+	}
+	current := strings.Replace(sample, "pew-runtime-inputs: eyJ2IjoxfQ", "pew-runtime-inputs: "+strings.Repeat("A", 100<<10), 1)
+	if _, err := Parse(strings.NewReader(current), "current"); err == nil || strings.Contains(err.Error(), "regenerate") {
+		t.Fatalf("current-format oversized file: err = %v, want the plain read error (pew never writes one)", err)
+	}
+	// A foreign benchmark file (no pew key at all) past the bound is
+	// not an earlier pew recording: the plain read error, no repair.
+	foreignLong := "goos: linux\nnot-a-key: " + strings.Repeat("A", 70<<10) + "\nBenchmarkA-8 1 1 ns/op\n"
+	if _, err := Parse(strings.NewReader(foreignLong), "foreign-long"); err == nil || strings.Contains(err.Error(), "regenerate") {
+		t.Fatalf("foreign oversized file: err = %v, want the plain read error", err)
 	}
 }

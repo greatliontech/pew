@@ -383,7 +383,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	unversioned := bytes.Replace(recording, []byte("pew-format: 2\n"), nil, 1)
+	unversioned := bytes.Replace(recording, []byte(runpkg.KeyFormat.Name+": "+runpkg.RecordingFormat+"\n"), nil, 1)
 	if bytes.Equal(unversioned, recording) {
 		t.Fatal("recording format line not found")
 	}

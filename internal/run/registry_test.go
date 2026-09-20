@@ -17,6 +17,7 @@ import (
 type specKeyRow struct {
 	name, class, display string
 	audit, guard         bool
+	chunked              bool
 }
 
 // specKeyTable parses spec §5's key table — the header row naming the
@@ -27,13 +28,13 @@ func specKeyTable(t *testing.T, spec string) []specKeyRow {
 	lines := strings.Split(spec, "\n")
 	start := -1
 	for i, l := range lines {
-		if strings.HasPrefix(l, "| key ") && strings.Contains(l, "| class") && strings.Contains(l, "| audit? ") && strings.Contains(l, "| guard? ") && strings.Contains(l, "| display") {
+		if strings.HasPrefix(l, "| key ") && strings.Contains(l, "| class") && strings.Contains(l, "| audit? ") && strings.Contains(l, "| guard? ") && strings.Contains(l, "| chunked? ") && strings.Contains(l, "| display") {
 			start = i
 			break
 		}
 	}
 	if start < 0 || !strings.HasPrefix(lines[start+1], "|---") {
-		t.Fatal("spec §5 key table with class, audit?, guard?, and display columns not found")
+		t.Fatal("spec §5 key table with class, audit?, guard?, chunked?, and display columns not found")
 	}
 	var rows []specKeyRow
 	for _, l := range lines[start+2:] {
@@ -41,8 +42,8 @@ func specKeyTable(t *testing.T, spec string) []specKeyRow {
 			break
 		}
 		cells := strings.Split(strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(l), "|"), "|"), "|")
-		if len(cells) != 7 {
-			t.Fatalf("spec §5 row has %d cells, want 7 (key, meaning, source, class, audit?, guard?, display): %q", len(cells), l)
+		if len(cells) != 8 {
+			t.Fatalf("spec §5 row has %d cells, want 8 (key, meaning, source, class, audit?, guard?, chunked?, display): %q", len(cells), l)
 		}
 		name := strings.Trim(strings.TrimSpace(cells[0]), "`")
 		yesNo := func(column string, cell string) bool {
@@ -56,7 +57,7 @@ func specKeyTable(t *testing.T, spec string) []specKeyRow {
 				return false
 			}
 		}
-		rows = append(rows, specKeyRow{name: name, class: strings.TrimSpace(cells[3]), audit: yesNo("audit?", cells[4]), guard: yesNo("guard?", cells[5]), display: strings.TrimSpace(cells[6])})
+		rows = append(rows, specKeyRow{name: name, class: strings.TrimSpace(cells[3]), audit: yesNo("audit?", cells[4]), guard: yesNo("guard?", cells[5]), chunked: yesNo("chunked?", cells[6]), display: strings.TrimSpace(cells[7])})
 	}
 	return rows
 }
@@ -116,6 +117,9 @@ func TestRecordingKeysMirrorSpec(t *testing.T) {
 		}
 		if k.Guard != row.guard {
 			t.Errorf("%s: spec guard %v, registry %v", k.Name, row.guard, k.Guard)
+		}
+		if k.Chunked != row.chunked {
+			t.Errorf("%s: spec chunked %v, registry %v", k.Name, row.chunked, k.Chunked)
 		}
 		if k.Display != row.display {
 			t.Errorf("%s: spec display %q, registry %q", k.Name, row.display, k.Display)

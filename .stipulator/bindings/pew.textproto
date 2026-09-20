@@ -43,8 +43,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-artifact-format"
-  content_hash: "e2bdccbc8c8344a4137861543e15afe005924ac0d01d5fd56b6e6163a4e5be63"
-  source_hash: "57c079c451b199b37da546b46ddc5dd99634032e9e5468dabbb956d007fd9edf"
+  content_hash: "e9ba4d8cda80df34934ae45b734ce415fd3946871b673fb15f2ad0b34b0c60e5"
+  source_hash: "4e29f6ef7865cbfb5849f9912b0a22541d5fda13c186e128036fb365252e86a0"
   backend: "go"
   symbol: "github.com/greatliontech/pew/internal/store.TestRoundTrip"
   role: BINDING_ROLE_TESTS
@@ -253,8 +253,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-artifact-format"
-  content_hash: "e2bdccbc8c8344a4137861543e15afe005924ac0d01d5fd56b6e6163a4e5be63"
-  source_hash: "57c079c451b199b37da546b46ddc5dd99634032e9e5468dabbb956d007fd9edf"
+  content_hash: "e9ba4d8cda80df34934ae45b734ce415fd3946871b673fb15f2ad0b34b0c60e5"
+  source_hash: "4e29f6ef7865cbfb5849f9912b0a22541d5fda13c186e128036fb365252e86a0"
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.TestUnversionedRecordingIsStale"
   role: BINDING_ROLE_TESTS
@@ -809,4 +809,44 @@ bindings {
   symbol: "github.com/greatliontech/pew/internal/run.TestKeySpellingWalkSeesEachArm"
   role: BINDING_ROLE_TESTS
   shape_hash: "37a363b2a07c253eddb1199199f301a0899716b9ba56b7f5513c41245347d796"
+}
+
+bindings {
+  requirement_id: "REQ-pew-artifact-format"
+  content_hash: "e9ba4d8cda80df34934ae45b734ce415fd3946871b673fb15f2ad0b34b0c60e5"
+  source_hash: "4e29f6ef7865cbfb5849f9912b0a22541d5fda13c186e128036fb365252e86a0"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/internal/run.TestChunkedRowsSplitAndJoin"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d057cd7c2657f62a63c84b405a915042ee27a567d4e706baa6ee4540331e18d2"
+}
+
+bindings {
+  requirement_id: "REQ-pew-artifact-format"
+  content_hash: "e9ba4d8cda80df34934ae45b734ce415fd3946871b673fb15f2ad0b34b0c60e5"
+  source_hash: "4e29f6ef7865cbfb5849f9912b0a22541d5fda13c186e128036fb365252e86a0"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/internal/store.TestWriteBoundsEveryLineAndPlainBenchfmtReads"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4d391eda3d5f8434b87a9ddeb42e5b8baf011663e1e42c35802ca89698960ab6"
+}
+
+bindings {
+  requirement_id: "REQ-pew-artifact-format"
+  content_hash: "e9ba4d8cda80df34934ae45b734ce415fd3946871b673fb15f2ad0b34b0c60e5"
+  source_hash: "4e29f6ef7865cbfb5849f9912b0a22541d5fda13c186e128036fb365252e86a0"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/internal/store.TestParseOwnsItsConfigValues"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "871d11896c10494c5b68a4c5dc28cd331ea4778d13bd91d320b47bf2926e55fc"
+}
+
+bindings {
+  requirement_id: "REQ-pew-artifact-format"
+  content_hash: "e9ba4d8cda80df34934ae45b734ce415fd3946871b673fb15f2ad0b34b0c60e5"
+  source_hash: "4e29f6ef7865cbfb5849f9912b0a22541d5fda13c186e128036fb365252e86a0"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/internal/store.TestWriteRefusesAnUnboundedRowAndAWhitespaceEdgedPart"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5d8c018dc8fed0c8dce6c4eadaf0e3337c8c6b28059a26a8e5cadae9b5788cdf"
 }

@@ -201,10 +201,11 @@ func Results(bench string, values []float64, opts ...Option) []*benchfmt.Result 
 }
 
 // Text renders Config(opts...) as the recording file's `key: value`
-// lines, one per row, for fixtures written as raw bytes.
+// lines for fixtures written as raw bytes — in the file encoding the
+// store writes, a chunked row as its continuation lines.
 func Text(opts ...Option) string {
 	var b strings.Builder
-	for _, c := range Config(opts...) {
+	for _, c := range run.SplitChunked(Config(opts...)) {
 		b.WriteString(c.Key)
 		b.WriteString(": ")
 		b.Write(c.Value)

@@ -56,7 +56,7 @@ observation completeness. pew completes each benchmark invocation's observation 
 bracket and a completed-process ingest, so a benchmark whose closure reaches no unverifiable
 runtime input verifies, while a file-reading benchmark is refused on its own closure reason; an
 observation that cannot complete records explicit incomplete evidence with its reason. An
-explicit `//gofresh:pure` directive on the declaration is the documented full-trust override. Current recordings carry `pew-format: 2`; unversioned or unknown formats are
+explicit `//gofresh:pure` directive on the declaration is the documented full-trust override. Current recordings carry `pew-format: 3`; unversioned or unknown formats are
 rejected and must be regenerated.
 
 By default recordings live under `<module>/benchmarks`. Use `--bench-dir` on the

@@ -13,3 +13,5 @@ one home; `fingerprintFromConfig` keeps only the fingerprint restoration.
 
 Lands: cross-tool train chunk 275 (pew's bump behind gofresh 274, whose published fingerprint
 wire form collapses the reader — moved from 252 at audit 264 so the work is done once).
+
+The chunk grammar (§5's continuation lines) has the same two readers: `rawFormatValid` derives key membership from raw bytes (a continuation spelling counted once under the duplicate rule) while `run.JoinChunked` derives it from parsed config — one grammar, two derivations, folding together with the format rung.

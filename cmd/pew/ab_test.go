@@ -443,7 +443,7 @@ func TestABArtifactIsDirtyMarked(t *testing.T) {
 func TestWarnNewVariantLineage(t *testing.T) {
 	dir := t.TempDir()
 	st := store.New(dir)
-	prior := parseBench(t, "pew-format: 2\nBenchmarkWork-24 1000 100 ns/op\n")
+	prior := parseBench(t, "pew-format: 3\nBenchmarkWork-24 1000 100 ns/op\n")
 	if err := st.Write("p", "BenchmarkWork", "", prior); err != nil {
 		t.Fatal(err)
 	}

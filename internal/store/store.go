@@ -9,6 +9,7 @@
 package store
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -120,12 +121,9 @@ func (s *Store) Write(pkgRel, bench, label string, results []*benchfmt.Result) e
 	if err := s.ensureDir(dir); err != nil {
 		return err
 	}
-	var buf bytes.Buffer
-	w := benchfmt.NewWriter(&buf)
-	for _, result := range results {
-		if err := w.Write(result); err != nil {
-			return fmt.Errorf("store: encode %s: %w", bench, err)
-		}
+	encoded, err := encodeRecording(bench, results)
+	if err != nil {
+		return err
 	}
 	temp, err := os.CreateTemp(dir, ".pew-*.tmp")
 	if err != nil {
@@ -133,7 +131,7 @@ func (s *Store) Write(pkgRel, bench, label string, results []*benchfmt.Result) e
 	}
 	tempName := temp.Name()
 	defer os.Remove(tempName)
-	if _, err := temp.Write(buf.Bytes()); err != nil {
+	if _, err := temp.Write(encoded); err != nil {
 		temp.Close()
 		return err
 	}
@@ -240,13 +238,10 @@ func (s *Store) writeBatch(requests []WriteRequest, beforeInstall func()) error 
 			cleanupTemps()
 			return err
 		}
-		var buf bytes.Buffer
-		writer := benchfmt.NewWriter(&buf)
-		for _, result := range request.Results {
-			if err := writer.Write(result); err != nil {
-				cleanupTemps()
-				return fmt.Errorf("store: encode %s: %w", request.Bench, err)
-			}
+		encoded, err := encodeRecording(request.Bench, request.Results)
+		if err != nil {
+			cleanupTemps()
+			return err
 		}
 		temp, err := os.CreateTemp(dir, ".pew-*.tmp")
 		if err != nil {
@@ -254,7 +249,7 @@ func (s *Store) writeBatch(requests []WriteRequest, beforeInstall func()) error 
 			return err
 		}
 		name := temp.Name()
-		if _, err := temp.Write(buf.Bytes()); err != nil {
+		if _, err := temp.Write(encoded); err != nil {
 			temp.Close()
 			_ = os.Remove(name)
 			cleanupTemps()
@@ -701,6 +696,53 @@ func checkRegularFile(path string) error {
 	return nil
 }
 
+// encodeRecording is the one file encoding of a recording, read by
+// every write path: each result's config in its chunked file form (a
+// chunked row's value as continuation lines of at most run.ChunkBound
+// bytes — spec §5), then benchfmt's writer, so no stored line exceeds
+// benchfmt's scanner bound and plain benchstat reads what pew wrote
+// (REQ-pew-artifact-format). The results themselves are untouched:
+// the in-memory config stays one value per row.
+func encodeRecording(bench string, results []*benchfmt.Result) ([]byte, error) {
+	var buf bytes.Buffer
+	w := benchfmt.NewWriter(&buf)
+	for _, result := range results {
+		split := result.Clone()
+		split.Config = run.SplitChunked(result.Config)
+		for _, c := range split.Config {
+			// The clause is enforced here, not argued row by row: a
+			// line past benchfmt's scanner bound is never written —
+			// an unbounded non-chunked row (an operator-supplied
+			// vouch list) is a producer fault the write refuses
+			// (REQ-pew-artifact-format).
+			if n := len(c.Key) + len(": ") + len(c.Value); n >= bufio.MaxScanTokenSize {
+				return nil, fmt.Errorf("store: encode %s: row %s is %d bytes, past benchfmt's scanner bound", bench, c.Key, n)
+			}
+			// benchfmt's reader strips a value's LEADING spaces and tabs,
+			// so a value written with one reads back shorter — any row,
+			// not only a chunked part; a chunked part is refused on
+			// either edge, the symmetric rule being the one §5 states
+			// (the chunked values are base64, so it never fires there).
+			v := c.Value
+			_, i, chunk := run.ChunkOf(c.Key)
+			edged := len(v) > 0 && (v[0] == ' ' || v[0] == '\t')
+			if chunk || run.IsChunkedRow(c.Key) {
+				edged = edged || (len(v) > 0 && (v[len(v)-1] == ' ' || v[len(v)-1] == '\t'))
+			}
+			if edged && (chunk || run.IsChunkedRow(c.Key)) {
+				return nil, fmt.Errorf("store: encode %s: part %d of %s begins or ends in whitespace", bench, max(i, 1), c.Key)
+			}
+			if edged {
+				return nil, fmt.Errorf("store: encode %s: the value of %s begins in whitespace", bench, c.Key)
+			}
+		}
+		if err := w.Write(split); err != nil {
+			return nil, fmt.Errorf("store: encode %s: %w", bench, err)
+		}
+	}
+	return buf.Bytes(), nil
+}
+
 // Parse reads canonical benchmark-format content into results, cloned and owned
 // by the caller. name is purely diagnostic (used in error messages and the
 // benchfmt position). It is used both for on-disk recordings (Read) and for blob
@@ -713,13 +755,24 @@ func Parse(r io.Reader, name string) ([]*benchfmt.Result, error) {
 		return nil, fmt.Errorf("store: read recording %s: %w", name, err)
 	}
 	formatValid := rawFormatValid(data)
-	stream, lifted := liftOversizedConfig(data)
-	rd := benchfmt.NewReader(bytes.NewReader(stream), name)
+	rd := benchfmt.NewReader(bytes.NewReader(data), name)
 	var out []*benchfmt.Result
 	for rd.Scan() {
 		switch rec := rd.Result().(type) {
 		case *benchfmt.Result:
-			out = append(out, rec.Clone())
+			// The clone first: the reader's config values alias its own
+			// buffers, which a later config line overwrites in place —
+			// the caller owns what Parse returns. Then the chunked rows
+			// rejoin on the clone, the one reader every consumer of a
+			// result's config sits behind (spec §5); a torn chunk set is
+			// a corrupt recording, never a shorter value.
+			cloned := rec.Clone()
+			joined, err := run.JoinChunked(cloned.Config)
+			if err != nil {
+				return nil, fmt.Errorf("store: corrupt recording %s: %w", name, err)
+			}
+			cloned.Config = joined
+			out = append(out, cloned)
 		case *benchfmt.SyntaxError:
 			return nil, fmt.Errorf("store: corrupt recording %s: %w", name, rec)
 		default:
@@ -732,15 +785,19 @@ func Parse(r io.Reader, name string) ([]*benchfmt.Result, error) {
 		}
 	}
 	if err := rd.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) && !formatValid && pewMarked(data) {
+			// A recording of an earlier format carrying a line past
+			// benchfmt's bound: written by a pew that lifted such lines
+			// on read, unreadable by this one and by plain benchstat.
+			// The current format never writes one, so the file is not
+			// interpreted — the refusal names the regenerating
+			// operation (spec §5).
+			return nil, fmt.Errorf("store: recording %s carries a line past benchfmt's scanner bound, written under an earlier format — regenerate it with pew run", name)
+		}
 		return nil, fmt.Errorf("store: read %s: %w", name, err)
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("store: empty recording %s", name)
-	}
-	if len(lifted) > 0 {
-		for _, result := range out {
-			result.Config = append(result.Config, lifted...)
-		}
 	}
 	if !formatValid {
 		for _, result := range out {
@@ -750,65 +807,16 @@ func Parse(r io.Reader, name string) ([]*benchfmt.Result, error) {
 	return out, nil
 }
 
-// liftOversizedConfig removes recording-config lines too long for
-// benchfmt's reader — a bufio.Scanner at its default token bound, which
-// refuses the whole file on one oversized line — and returns them as
-// parsed file config for reattachment after the scan. Pew's own header
-// blobs (the runtime-input manifest, the test-variant ledger) grow with
-// the package and have exceeded the bound in the field, so the store
-// must read back what pew run wrote. Reattachment to every result is
-// exact for the canonical layout, where all config precedes the first
-// result (rawFormatValid flags the rest); only recognized recording
-// config keys are lifted, so an oversized line of any other shape still
-// fails loudly in benchfmt instead of being silently interpreted. The
-// threshold sits well under the scanner's cliff rather than at it —
-// lifting a line the scanner could still have read is harmless, riding
-// the cliff's exact off-by-one is not.
-func liftOversizedConfig(data []byte) ([]byte, []benchfmt.Config) {
-	const bound = 48 << 10
-	if len(data) <= bound {
-		return data, nil
-	}
-	long := false
-	for rest := data; ; {
-		nl := bytes.IndexByte(rest, '\n')
-		if nl < 0 {
-			long = long || len(rest) > bound
-			break
+// pewMarked reports whether the raw bytes carry any line keyed in
+// pew's namespace — the mark of a file pew wrote under some format, as
+// opposed to a foreign benchmark file the read arm contemplates.
+func pewMarked(data []byte) bool {
+	for _, line := range bytes.Split(data, []byte{'\n'}) {
+		if bytes.HasPrefix(line, []byte(run.RecordingKeyNamespace)) {
+			return true
 		}
-		if nl > bound {
-			long = true
-			break
-		}
-		rest = rest[nl+1:]
 	}
-	if !long {
-		return data, nil
-	}
-	var lifted []benchfmt.Config
-	kept := make([]byte, 0, len(data))
-	for rest := data; len(rest) > 0; {
-		var line []byte
-		if nl := bytes.IndexByte(rest, '\n'); nl < 0 {
-			line, rest = rest, nil
-		} else {
-			line, rest = rest[:nl], rest[nl+1:]
-		}
-		if len(line) > bound {
-			if colon := bytes.IndexByte(line, ':'); colon > 0 && run.IsRecordingKey(string(line[:colon])) {
-				value := bytes.TrimSpace(line[colon+1:])
-				lifted = append(lifted, benchfmt.Config{
-					Key:   string(line[:colon]),
-					Value: append([]byte(nil), value...),
-					File:  true,
-				})
-				continue
-			}
-		}
-		kept = append(kept, line...)
-		kept = append(kept, '\n')
-	}
-	return kept, lifted
+	return false
 }
 
 func rawFormatValid(data []byte) bool {

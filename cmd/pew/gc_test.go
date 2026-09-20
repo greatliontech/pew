@@ -55,7 +55,7 @@ func TestGCStoreRemovesOnlyMissingBenchmarks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadPkgData = bytes.Replace(deadPkgData, []byte("pew-format: 2\n"), nil, 1)
+	deadPkgData = bytes.Replace(deadPkgData, []byte(runpkg.KeyFormat.Name+": "+runpkg.RecordingFormat+"\n"), nil, 1)
 	if err := os.WriteFile(deadPkg, deadPkgData, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestGCStoreSurfacesShapeFailingRecordings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(unreadable, []byte("pew-format: 2\n"), 0o644); err != nil {
+	if err := os.WriteFile(unreadable, []byte(runpkg.KeyFormat.Name+": "+runpkg.RecordingFormat+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// Foreign: parseable benchmark file with no pew-owned key, benchmark gone.

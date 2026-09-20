@@ -32,12 +32,13 @@ type Options struct {
 	Bench     string // -bench pattern (default ".")
 }
 
-// RecordingFormat is the current in-band Pew recording format. Format 2
-// adds the test-variant compartment pin and its declaration ledger
-// (pew-test-variants, pew-test-variant-ledger); format-1 recordings read
-// stale (format) and regenerate, exactly as spec §5 prescribes for any
-// earlier shape.
-const RecordingFormat = "2"
+// RecordingFormat is the current in-band Pew recording format. Format 3
+// bounds the two blob rows (pew-runtime-inputs, pew-test-variant-ledger)
+// as chunked continuation lines, so every stored line is one benchfmt
+// and plain benchstat read; format 2 added the test-variant compartment
+// pin and its ledger. Earlier-format recordings read stale (format) and
+// regenerate, exactly as spec §5 prescribes for any earlier shape.
+const RecordingFormat = "3"
 
 // TestArgs builds the `go test` argument list for benchmarking pkg.
 func TestArgs(pkg string, o Options) []string {

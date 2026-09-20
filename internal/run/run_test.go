@@ -586,7 +586,7 @@ func TestAuditStreamSampleFloor(t *testing.T) {
 
 func TestParseRejectsReservedFormatConfig(t *testing.T) {
 	for name, line := range map[string]string{
-		"format-space":  "pew-format: 2",
+		"format-space":  "pew-format: 3",
 		"format-tab":    "pew-format:\t2",
 		"format-delete": "pew-format:",
 		"purity":        "pew-purity: forged",
