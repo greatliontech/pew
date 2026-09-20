@@ -363,9 +363,10 @@ func abPatternSelects(p pkgMeta, sideBPkgDir string, ac abConfig) error {
 }
 
 // abGuardsAgree refuses a B side whose build identity differs from A's
-// on any comparison guard — the four keys the measurement comparison
-// judges (run.GuardConfig's order: toolchain, buildconfig, machine,
-// runtimeconfig) — naming the first differing guard and both values.
+// on any comparison guard — the four rows spec §5's `guard?` column
+// marks, judged in table order (run.GuardConfig's order, the order the
+// comparison names its guards in too) — naming the first differing
+// guard and both values.
 // Two live captures compare by value alone: a stored recording's
 // completeness rule (an empty recorded guard is a mismatch) is not
 // theirs, and no guard's emptiness may shadow a later guard's

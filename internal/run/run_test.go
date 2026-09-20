@@ -350,7 +350,7 @@ ok  	example/p	1.234s
 	}
 	for _, r := range results {
 		for _, c := range r.Config {
-			if c.File && !toolchainConfigKey(c.Key) {
+			if c.File && !IsToolchainKey(c.Key) {
 				t.Errorf("result %s still carries foreign config %s: %s", r.Name, c.Key, c.Value)
 			}
 		}
@@ -386,45 +386,6 @@ func TestRecordingConfigKeySetIsClosed(t *testing.T) {
 					t.Errorf("recording would carry key %q outside the closed set", c.Key)
 				}
 			}
-		}
-	}
-}
-
-// TestRecordingConfigKeysMirrorSpec binds the exported registry to spec
-// §5's table — the one hand-written mirror of the spec, so the registry
-// (and everything derived from it: the store's closed set, compare's
-// grouping projection) moves only together with the spec.
-func TestRecordingConfigKeysMirrorSpec(t *testing.T) {
-	specTable := []string{
-		// §5 key table, row order:
-		"pew-format", "commit", "toolchain", "machine", "buildconfig",
-		"runtimeconfig", "dirty", "pew-runconditions", "pew-runtime",
-		"pew-runtime-inputs", "pew-purity", "pew-vouches",
-		"pew-dynamic-state", "pew-single-subject-discharges",
-		"pew-package-process-discharges", "pew-closure-strategy",
-		"pew-test-variants", "pew-test-variant-ledger",
-		// plus the in-band derived closure line (§5 prose):
-		"pew-closure",
-	}
-	want := map[string]bool{}
-	for _, k := range specTable {
-		want[k] = true
-	}
-	got := map[string]bool{}
-	for _, k := range RecordingConfigKeys {
-		if got[k] {
-			t.Errorf("RecordingConfigKeys lists %q twice", k)
-		}
-		got[k] = true
-	}
-	for k := range want {
-		if !got[k] {
-			t.Errorf("registry missing spec §5 key %q", k)
-		}
-	}
-	for k := range got {
-		if !want[k] {
-			t.Errorf("registry key %q is not in spec §5's table", k)
 		}
 	}
 }

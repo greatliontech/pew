@@ -10,6 +10,7 @@ import (
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/runtimeinput"
+	runpkg "github.com/greatliontech/pew/internal/run"
 	"golang.org/x/perf/benchfmt"
 )
 
@@ -61,10 +62,10 @@ func writeExplainRows(w io.Writer, aLabel, bLabel string, rows []explainRow) {
 
 func guardRows(a, b guard.Guards) []explainRow {
 	return []explainRow{
-		{name: "toolchain", a: a.Toolchain, b: b.Toolchain},
-		{name: "machine", a: a.Machine, b: b.Machine},
-		{name: "buildconfig", a: a.BuildConfig, b: b.BuildConfig},
-		{name: "runtimeconfig", a: a.RuntimeConfig, b: b.RuntimeConfig},
+		{name: runpkg.KeyToolchain.Display, a: a.Toolchain, b: b.Toolchain},
+		{name: runpkg.KeyMachine.Display, a: a.Machine, b: b.Machine},
+		{name: runpkg.KeyBuildConfig.Display, a: a.BuildConfig, b: b.BuildConfig},
+		{name: runpkg.KeyRuntimeConfig.Display, a: a.RuntimeConfig, b: b.RuntimeConfig},
 	}
 }
 
@@ -82,20 +83,20 @@ func explainRecordAgainstCurrent(ctx context.Context, w io.Writer, e *gofresh.En
 		return
 	}
 	rows := guardRows(fp.Guards, curFP.Guards)
-	rows = append(rows, explainRow{name: "closure", a: fp.MaximalClosure, b: curFP.MaximalClosure})
+	rows = append(rows, explainRow{name: runpkg.KeyClosure.Display, a: fp.MaximalClosure, b: curFP.MaximalClosure})
 	if fp.ClosureStrategy != curFP.ClosureStrategy {
 		// A derivation move: the two closure hashes were folded by
 		// different strategies and say nothing about each other's source.
-		rows = append(rows, explainRow{name: "closure strategy", a: fp.ClosureStrategy, b: curFP.ClosureStrategy, verbatim: true})
+		rows = append(rows, explainRow{name: runpkg.KeyClosureStrategy.Display, a: fp.ClosureStrategy, b: curFP.ClosureStrategy, verbatim: true})
 	}
-	rows = append(rows, explainRow{name: "test-variants", a: fp.TestVariantClosure, b: curFP.TestVariantClosure})
+	rows = append(rows, explainRow{name: runpkg.KeyTestVariants.Display, a: fp.TestVariantClosure, b: curFP.TestVariantClosure})
 	currentRuntime := ""
 	if fp.RuntimeInputs != "" {
 		if st, err := runtimeinput.Current(ctx, fp.RuntimeInputs, moduleDir, env); err != nil {
-			rows = append(rows, explainRow{name: "runtime", a: fp.RuntimeDigest, b: "(uncomputable: " + err.Error() + ")"})
+			rows = append(rows, explainRow{name: runpkg.KeyRuntime.Display, a: fp.RuntimeDigest, b: "(uncomputable: " + err.Error() + ")"})
 		} else {
 			currentRuntime = st.Digest
-			rows = append(rows, explainRow{name: "runtime", a: fp.RuntimeDigest, b: st.Digest})
+			rows = append(rows, explainRow{name: runpkg.KeyRuntime.Display, a: fp.RuntimeDigest, b: st.Digest})
 		}
 	}
 	writeExplainRows(w, "recorded", "current", rows)

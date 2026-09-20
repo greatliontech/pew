@@ -581,32 +581,32 @@ func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, 
 	formatCount := 0
 	for _, c := range cfg {
 		m[c.Key] = string(c.Value)
-		if c.Key == "pew-format" {
+		if c.Key == runpkg.KeyFormat.Name {
 			formatCount++
 		}
 	}
-	if m["pew-format-invalid"] == "true" || formatCount != 1 || m["pew-format"] != runpkg.RecordingFormat {
+	if m[runpkg.FormatInvalidAnnotation] == "true" || formatCount != 1 || m[runpkg.KeyFormat.Name] != runpkg.RecordingFormat {
 		return gofresh.Fingerprint{}, "", false
 	}
 	return gofresh.Fingerprint{
-		MaximalClosure:     m["pew-closure"],
-		ClosureStrategy:    m["pew-closure-strategy"],
-		TestVariantClosure: m["pew-test-variants"],
+		MaximalClosure:     m[runpkg.KeyClosure.Name],
+		ClosureStrategy:    m[runpkg.KeyClosureStrategy.Name],
+		TestVariantClosure: m[runpkg.KeyTestVariants.Name],
 		Guards: guard.Guards{
-			Toolchain:     m["toolchain"],
-			BuildConfig:   m["buildconfig"],
-			Machine:       m["machine"],
-			RuntimeConfig: m["runtimeconfig"],
+			Toolchain:     m[runpkg.KeyToolchain.Name],
+			BuildConfig:   m[runpkg.KeyBuildConfig.Name],
+			Machine:       m[runpkg.KeyMachine.Name],
+			RuntimeConfig: m[runpkg.KeyRuntimeConfig.Name],
 		},
-		PurityAssertion:          m["pew-purity"],
-		DynamicStateVouches:      m["pew-vouches"],
-		SingleSubjectDischarges:  m["pew-single-subject-discharges"],
-		PackageProcessDischarges: m["pew-package-process-discharges"],
-		DynamicStateStrategy:     m["pew-dynamic-state"],
-		RuntimeInputs:            m["pew-runtime-inputs"],
-		RuntimeDigest:            m["pew-runtime"],
+		PurityAssertion:          m[runpkg.KeyPurity.Name],
+		DynamicStateVouches:      m[runpkg.KeyVouches.Name],
+		SingleSubjectDischarges:  m[runpkg.KeySingleSubjectDischarges.Name],
+		PackageProcessDischarges: m[runpkg.KeyPackageProcessDischarges.Name],
+		DynamicStateStrategy:     m[runpkg.KeyDynamicState.Name],
+		RuntimeInputs:            m[runpkg.KeyRuntimeInputs.Name],
+		RuntimeDigest:            m[runpkg.KeyRuntime.Name],
 		ResultKind:               gofresh.Measurement,
-	}, m["pew-test-variant-ledger"], true
+	}, m[runpkg.KeyTestVariantLedger.Name], true
 }
 
 func resolvePackages(ctx context.Context, patterns []string) ([]pkgMeta, error) {

@@ -167,18 +167,6 @@ type DroppedConfig struct {
 	Value string // the first observed value, for the warning
 }
 
-// toolchainConfigKey reports whether key is one of the file-configuration
-// lines `go test` itself emits — the only stream-derived keys a recording may
-// carry (spec §5).
-func toolchainConfigKey(key string) bool {
-	switch key {
-	case "goos", "goarch", "pkg", "cpu":
-		return true
-	default:
-		return false
-	}
-}
-
 // Parse reads benchmark-format output into results, collecting rather than
 // failing on lines corrupted by interleaved foreign output (the parser treats
 // syntax errors as per-record, by design). Reserved provenance keys in the
@@ -192,7 +180,7 @@ func Parse(out []byte) ([]*benchfmt.Result, []CorruptLine, []DroppedConfig, erro
 			continue
 		}
 		key := string(line[:colon])
-		if strings.HasPrefix(key, "pew-") || reservedConfigKey(key) {
+		if strings.HasPrefix(key, RecordingKeyNamespace) || IsRecordingKey(key) {
 			return nil, nil, nil, fmt.Errorf("run: benchmark output uses reserved %s configuration", key)
 		}
 	}
@@ -225,7 +213,7 @@ func stripForeignConfig(results []*benchfmt.Result) []DroppedConfig {
 	for _, r := range results {
 		kept := r.Config[:0]
 		for _, c := range r.Config {
-			if c.File && !toolchainConfigKey(c.Key) {
+			if c.File && !IsToolchainKey(c.Key) {
 				if !seen[c.Key] {
 					seen[c.Key] = true
 					dropped = append(dropped, DroppedConfig{Key: c.Key, Value: string(c.Value)})
@@ -384,15 +372,6 @@ func AuditStream(results []*benchfmt.Result, corrupt []CorruptLine, count int, s
 	return audit
 }
 
-func reservedConfigKey(key string) bool {
-	switch key {
-	case "commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty":
-		return true
-	default:
-		return false
-	}
-}
-
 // BenchName derives the storage function name ("BenchmarkXxx") from a benchfmt
 // result name ("Xxx-8", "Xxx/sub-8"): benchfmt strips the "Benchmark" prefix, the
 // framework appends a "-<gomaxprocs>" suffix, and sub-benchmarks add "/...". The
@@ -484,21 +463,6 @@ func BuildArgs(importPath, out string) []string {
 	return []string{"test", "-c", "-o", out, importPath}
 }
 
-// RecordingConfigKeys is spec §5's closed key set: every provenance,
-// guard, derived, and purity line a pew recording may carry beyond the
-// toolchain benchmark keys (goos/goarch/pkg/cpu). This is the single
-// registry — every producer line is constructed in this package, the
-// store's closed-set enforcement and compare's grouping projection
-// derive from it, and TestRecordingConfigKeysMirrorSpec binds it to
-// the spec table, so a key added anywhere else is unrepresentable.
-var RecordingConfigKeys = []string{
-	"pew-format", "commit", "toolchain", "machine", "buildconfig",
-	"runtimeconfig", "dirty", "pew-runconditions", "pew-closure",
-	"pew-dynamic-state", "pew-closure-strategy", "pew-test-variants", "pew-test-variant-ledger",
-	"pew-runtime", "pew-runtime-inputs", "pew-purity", "pew-vouches",
-	"pew-single-subject-discharges", "pew-package-process-discharges",
-}
-
 // ProvenanceConfig returns the in-band provenance lines in spec §5 order: the
 // measured commit and dirty flag from pew's git layer, the gofresh guard
 // values, and the observed run conditions (§9 — provenance only, never a guard,
@@ -506,48 +470,55 @@ var RecordingConfigKeys = []string{
 // File==false config as internal).
 func ProvenanceConfig(commit string, dirty bool, g guard.Guards, conditions Conditions) []benchfmt.Config {
 	return []benchfmt.Config{
-		{Key: "pew-format", Value: []byte(RecordingFormat), File: true},
-		{Key: "commit", Value: []byte(commit), File: true},
-		{Key: "toolchain", Value: []byte(g.Toolchain), File: true},
-		{Key: "machine", Value: []byte(g.Machine), File: true},
-		{Key: "buildconfig", Value: []byte(g.BuildConfig), File: true},
-		{Key: "runtimeconfig", Value: []byte(g.RuntimeConfig), File: true},
-		{Key: "dirty", Value: []byte(strconv.FormatBool(dirty)), File: true},
-		{Key: "pew-runconditions", Value: []byte(conditions.String()), File: true},
+		KeyFormat.Config(RecordingFormat),
+		KeyCommit.Config(commit),
+		KeyToolchain.Config(g.Toolchain),
+		KeyMachine.Config(g.Machine),
+		KeyBuildConfig.Config(g.BuildConfig),
+		KeyRuntimeConfig.Config(g.RuntimeConfig),
+		KeyDirty.Config(strconv.FormatBool(dirty)),
+		KeyRunConditions.Config(conditions.String()),
 	}
 }
 
 // GuardConfig returns only the four comparison-guard lines (§10.1's guard
-// set), for a producer whose rows never reach the store — the ab derivation
+// set, derived from the registry's guard rows in table order — the
+// precedence every face names a differing guard by), for a producer whose rows never reach the store — the ab derivation
 // path, which must satisfy the comparator's guards without minting the
 // recording path's full §5 provenance (commit and dirty are per-side facts
 // the A/B report already names, and a store-shaped record here would
 // contradict the never-a-stat-baseline contract).
 func GuardConfig(g guard.Guards) []benchfmt.Config {
-	return []benchfmt.Config{
-		{Key: "toolchain", Value: []byte(g.Toolchain), File: true},
-		{Key: "machine", Value: []byte(g.Machine), File: true},
-		{Key: "buildconfig", Value: []byte(g.BuildConfig), File: true},
-		{Key: "runtimeconfig", Value: []byte(g.RuntimeConfig), File: true},
+	// The field mapping is by hand (guard.Guards is gofresh's struct);
+	// the order is the guard rows' — table order, never a literal here.
+	values := map[string]string{
+		KeyToolchain.Name:     g.Toolchain,
+		KeyMachine.Name:       g.Machine,
+		KeyBuildConfig.Name:   g.BuildConfig,
+		KeyRuntimeConfig.Name: g.RuntimeConfig,
 	}
+	cfgs := make([]benchfmt.Config, 0, len(GuardRecordingKeys))
+	for _, k := range GuardRecordingKeys {
+		cfgs = append(cfgs, k.Config(values[k.Name]))
+	}
+	return cfgs
 }
 
-// ClosureConfig is the recorded closure-hash line. File:true so benchfmt.Writer
-// emits it (it omits File==false config as internal).
+// ClosureConfig is the recorded closure-hash line.
 func ClosureConfig(hash string) benchfmt.Config {
-	return benchfmt.Config{Key: "pew-closure", Value: []byte(hash), File: true}
+	return KeyClosure.Config(hash)
 }
 
 // GofreshPurityConfig records the attributable purity evidence used by capture.
 func GofreshPurityConfig(attribution string) benchfmt.Config {
-	return benchfmt.Config{Key: "pew-purity", Value: []byte(attribution), File: true}
+	return KeyPurity.Config(attribution)
 }
 
 // GofreshVouchesConfig records the dynamic-state vouches that discharged
 // culprits for this fingerprint - audit riding the recording, never a
 // validity key.
 func GofreshVouchesConfig(vouches string) benchfmt.Config {
-	return benchfmt.Config{Key: "pew-vouches", Value: []byte(vouches), File: true}
+	return KeyVouches.Config(vouches)
 }
 
 // ClosureStrategyConfig is the recorded closure-derivation line: the
@@ -555,7 +526,7 @@ func GofreshVouchesConfig(vouches string) benchfmt.Config {
 // compares two recordings' closures within one derivation and names a
 // derivation move as such (gofresh's ClosureStrategy).
 func ClosureStrategyConfig(strategy string) benchfmt.Config {
-	return benchfmt.Config{Key: "pew-closure-strategy", Value: []byte(strategy), File: true}
+	return KeyClosureStrategy.Config(strategy)
 }
 
 // DynamicStateStrategyConfig records the shared-dynamic-state
@@ -566,7 +537,7 @@ func ClosureStrategyConfig(strategy string) benchfmt.Config {
 // ("dynamic-state strategy") — the clean-break shape, no back-fill
 // (the go1.27 toolchain move staled every lineage regardless).
 func DynamicStateStrategyConfig(strategy string) benchfmt.Config {
-	return benchfmt.Config{Key: "pew-dynamic-state", Value: []byte(strategy), File: true}
+	return KeyDynamicState.Config(strategy)
 }
 
 // GofreshEvidenceConfigs composes the attributable gofresh evidence
@@ -584,10 +555,10 @@ func GofreshEvidenceConfigs(purity, vouches, singleSubject, packageProcess strin
 		cfgs = append(cfgs, GofreshVouchesConfig(vouches))
 	}
 	if singleSubject != "" {
-		cfgs = append(cfgs, benchfmt.Config{Key: "pew-single-subject-discharges", Value: []byte(singleSubject), File: true})
+		cfgs = append(cfgs, KeySingleSubjectDischarges.Config(singleSubject))
 	}
 	if packageProcess != "" {
-		cfgs = append(cfgs, benchfmt.Config{Key: "pew-package-process-discharges", Value: []byte(packageProcess), File: true})
+		cfgs = append(cfgs, KeyPackageProcessDischarges.Config(packageProcess))
 	}
 	return cfgs
 }
@@ -596,20 +567,20 @@ func GofreshEvidenceConfigs(purity, vouches, singleSubject, packageProcess strin
 // like the closure hash, derived rather than provenance, and the pin the
 // inert-growth verdict rule refreshes (§7.9).
 func TestVariantConfig(hash string) benchfmt.Config {
-	return benchfmt.Config{Key: "pew-test-variants", Value: []byte(hash), File: true}
+	return KeyTestVariants.Config(hash)
 }
 
 // TestVariantLedgerConfig is the recorded compartment declaration ledger:
 // the inert-growth rule's diff base (§7.9), encoded by EncodeLedger.
 func TestVariantLedgerConfig(encoded string) benchfmt.Config {
-	return benchfmt.Config{Key: "pew-test-variant-ledger", Value: []byte(encoded), File: true}
+	return KeyTestVariantLedger.Config(encoded)
 }
 
 // RuntimeConfig records the runtime-input guard and its manifest (§7.8).
 func RuntimeConfig(digest, manifest string) []benchfmt.Config {
 	return []benchfmt.Config{
-		{Key: "pew-runtime", Value: []byte(digest), File: true},
-		{Key: "pew-runtime-inputs", Value: []byte(manifest), File: true},
+		KeyRuntime.Config(digest),
+		KeyRuntimeInputs.Config(manifest),
 	}
 }
 

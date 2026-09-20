@@ -488,11 +488,11 @@ func IsRecording(recs []*benchfmt.Result) bool {
 	formatCount := 0
 	for _, c := range recs[0].Config {
 		cfg[c.Key] = string(c.Value)
-		if c.Key == "pew-format" {
+		if c.Key == run.KeyFormat.Name {
 			formatCount++
 		}
 	}
-	return cfg["pew-format-invalid"] != "true" && formatCount == 1 && cfg["pew-format"] == run.RecordingFormat
+	return cfg[run.FormatInvalidAnnotation] != "true" && formatCount == 1 && cfg[run.KeyFormat.Name] == run.RecordingFormat
 }
 
 // IsPewMarked reports whether parsed results carry any pew-owned (`pew-`
@@ -508,7 +508,7 @@ func IsPewMarked(recs []*benchfmt.Result) bool {
 		// File:true only: Parse injects the reader-side pew-format-invalid
 		// annotation as internal (File:false) config, and an annotation about
 		// a file must never count as the file carrying a pew key itself.
-		if c.File && strings.HasPrefix(c.Key, "pew-") {
+		if c.File && strings.HasPrefix(c.Key, run.RecordingKeyNamespace) {
 			return true
 		}
 	}
@@ -531,12 +531,12 @@ func IsRecordingShape(recs []*benchfmt.Result) bool {
 		for _, c := range r.Config {
 			cfg[c.Key] = string(c.Value)
 		}
-		for _, key := range []string{"commit", "toolchain", "machine", "buildconfig", "runtimeconfig", "dirty", "pew-runconditions", "pew-closure", "pew-test-variants", "pew-test-variant-ledger", "pew-runtime", "pew-runtime-inputs"} {
+		for _, key := range run.MandatoryRecordingKeys {
 			if cfg[key] == "" {
 				return false
 			}
 		}
-		if cfg["dirty"] != "true" && cfg["dirty"] != "false" {
+		if cfg[run.KeyDirty.Name] != "true" && cfg[run.KeyDirty.Name] != "false" {
 			return false
 		}
 	}
@@ -744,7 +744,7 @@ func Parse(r io.Reader, name string) ([]*benchfmt.Result, error) {
 	}
 	if !formatValid {
 		for _, result := range out {
-			result.Config = append(result.Config, benchfmt.Config{Key: "pew-format-invalid", Value: []byte("true")})
+			result.Config = append(result.Config, benchfmt.Config{Key: run.FormatInvalidAnnotation, Value: []byte("true")})
 		}
 	}
 	return out, nil
@@ -795,7 +795,7 @@ func liftOversizedConfig(data []byte) ([]byte, []benchfmt.Config) {
 			line, rest = rest[:nl], rest[nl+1:]
 		}
 		if len(line) > bound {
-			if colon := bytes.IndexByte(line, ':'); colon > 0 && recordingConfigKey(string(line[:colon])) {
+			if colon := bytes.IndexByte(line, ':'); colon > 0 && run.IsRecordingKey(string(line[:colon])) {
 				value := bytes.TrimSpace(line[colon+1:])
 				lifted = append(lifted, benchfmt.Config{
 					Key:   string(line[:colon]),
@@ -821,38 +821,23 @@ func rawFormatValid(data []byte) bool {
 			continue
 		}
 		key := string(line[:colon])
-		if !recordingConfigKey(key) {
-			if strings.HasPrefix(key, "pew-") {
+		if !run.IsRecordingKey(key) {
+			if strings.HasPrefix(key, run.RecordingKeyNamespace) {
 				valid = false
 			}
 			continue
 		}
 		counts[key]++
 		valid = valid && counts[key] == 1
-		if key == "pew-format" {
+		if key == run.KeyFormat.Name {
 			// §5: the discriminator is the byte-exact LF-terminated line
-			// "pew-format: " plus the current version. After splitting on
+			// `pew-format: ` plus the current version. After splitting on
 			// '\n', only the final element lacks a terminating LF, so a
 			// discriminator there is unterminated.
-			valid = valid && bytes.Equal(line, []byte("pew-format: "+run.RecordingFormat)) && i < len(lines)-1
+			valid = valid && bytes.Equal(line, []byte(run.KeyFormat.Name+": "+run.RecordingFormat)) && i < len(lines)-1
 		}
 	}
-	return counts["pew-format"] == 1 && valid
-}
-
-// recordingConfigKeys is derived from the producer's single registry
-// (run.RecordingConfigKeys) — the store enforces exactly the set the
-// producer can write, never a hand-mirrored copy of it.
-var recordingConfigKeys = func() map[string]bool {
-	m := make(map[string]bool, len(run.RecordingConfigKeys))
-	for _, k := range run.RecordingConfigKeys {
-		m[k] = true
-	}
-	return m
-}()
-
-func recordingConfigKey(key string) bool {
-	return recordingConfigKeys[key]
+	return counts[run.KeyFormat.Name] == 1 && valid
 }
 
 // ForeignConfigKeys lists the file-configuration keys a stored recording
@@ -869,7 +854,7 @@ func ForeignConfigKeys(recs []*benchfmt.Result) []string {
 			if !c.File || seen[c.Key] {
 				continue
 			}
-			if toolchainBenchKey(c.Key) || recordingConfigKey(c.Key) {
+			if run.IsToolchainKey(c.Key) || run.IsRecordingKey(c.Key) {
 				continue
 			}
 			seen[c.Key] = true
@@ -878,15 +863,4 @@ func ForeignConfigKeys(recs []*benchfmt.Result) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// toolchainBenchKey mirrors the run-side whitelist of stream-derived
-// keys a recording legitimately carries.
-func toolchainBenchKey(key string) bool {
-	switch key {
-	case "goos", "goarch", "pkg", "cpu":
-		return true
-	default:
-		return false
-	}
 }

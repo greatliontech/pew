@@ -525,7 +525,7 @@ func TestExplainNamesAClosureDerivationMove(t *testing.T) {
 	e, pkg, bench, fp := explainFixture(t)
 	var same strings.Builder
 	explainRecordAgainstCurrent(context.Background(), &same, e, ".", pkg, bench, fp, os.Environ())
-	if strings.Contains(same.String(), "closure strategy") {
+	if strings.Contains(same.String(), "closure derivations") {
 		t.Fatalf("a recording under the current derivation shows a strategy row:\n%s", same.String())
 	}
 	// A move in a late component — the shape gofresh's own bumps take —
@@ -541,7 +541,7 @@ func TestExplainNamesAClosureDerivationMove(t *testing.T) {
 	got := out.String()
 	var row string
 	for _, line := range strings.Split(got, "\n") {
-		if strings.Contains(line, "closure strategy") {
+		if strings.Contains(line, "closure derivations") {
 			row = line
 		}
 	}

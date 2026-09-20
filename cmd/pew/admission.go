@@ -66,21 +66,12 @@ func admitRecording(recs []*benchfmt.Result, workingTree bool) admission {
 	return first
 }
 
-// closedRecordingKeys is runpkg.RecordingConfigKeys as a set, built once.
-var closedRecordingKeys = func() map[string]bool {
-	m := make(map[string]bool, len(runpkg.RecordingConfigKeys))
-	for _, k := range runpkg.RecordingConfigKeys {
-		m[k] = true
-	}
-	return m
-}()
-
 // closedSetValues is a row's values over spec §5's closed key set — the
 // per-row agreement the whole-recording rung judges.
 func closedSetValues(cfg []benchfmt.Config) map[string]string {
 	values := map[string]string{}
 	for _, c := range cfg {
-		if closedRecordingKeys[c.Key] {
+		if runpkg.IsRecordingKey(c.Key) {
 			values[c.Key] = string(c.Value)
 		}
 	}

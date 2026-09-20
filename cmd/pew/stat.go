@@ -771,7 +771,7 @@ func sortedStatKeys(keys map[statKey]bool) []statKey {
 // any recording whose rows disagree on a closed key before this runs, so the
 // first row decides for the whole recording.
 func isDirty(recs []*benchfmt.Result) bool {
-	return len(recs) > 0 && recs[0].GetConfig("dirty") == "true"
+	return len(recs) > 0 && recs[0].GetConfig(runpkg.KeyDirty.Name) == "true"
 }
 
 // readSide loads one side's recording for a benchmark. ref == "" reads the

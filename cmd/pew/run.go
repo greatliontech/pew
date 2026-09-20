@@ -1124,9 +1124,9 @@ func refreshRecording(st *store.Store, pkgRel, bench, label, pin, ledger string)
 	for _, r := range recs {
 		for i := range r.Config {
 			switch r.Config[i].Key {
-			case "pew-test-variants":
+			case run.KeyTestVariants.Name:
 				r.Config[i].Value = []byte(pin)
-			case "pew-test-variant-ledger":
+			case run.KeyTestVariantLedger.Name:
 				r.Config[i].Value = []byte(ledger)
 			}
 		}

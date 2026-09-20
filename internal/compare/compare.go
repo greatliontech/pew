@@ -48,7 +48,13 @@ import (
 // omission here.
 var pewIgnore = strings.Join(run.RecordingConfigKeys, " ")
 
-var compareGuards = []string{"machine", "toolchain", "buildconfig", "runtimeconfig"}
+var compareGuards = func() []string {
+	var names []string
+	for _, k := range run.GuardRecordingKeys {
+		names = append(names, k.Name)
+	}
+	return names
+}()
 
 // Options configure the regression criterion (spec §10.1). Every field is a
 // configurable default; the criterion itself is not a knob.
@@ -251,20 +257,20 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 				guards[key] = recordGuard(guards[key], r.GetConfig(key))
 			}
 			if isBase {
-				g.baseConds = recordGuard(g.baseConds, r.GetConfig("pew-runconditions"))
+				g.baseConds = recordGuard(g.baseConds, r.GetConfig(run.KeyRunConditions.Name))
 				if g.baseAudit == nil {
 					g.baseAudit = map[string]guardValue{}
 				}
-				for _, key := range auditNoteKeys {
-					g.baseAudit[key] = recordGuard(g.baseAudit[key], r.GetConfig(key))
+				for _, k := range auditNoteKeys {
+					g.baseAudit[k.Name] = recordGuard(g.baseAudit[k.Name], r.GetConfig(k.Name))
 				}
 			} else {
-				g.newConds = recordGuard(g.newConds, r.GetConfig("pew-runconditions"))
+				g.newConds = recordGuard(g.newConds, r.GetConfig(run.KeyRunConditions.Name))
 				if g.newAudit == nil {
 					g.newAudit = map[string]guardValue{}
 				}
-				for _, key := range auditNoteKeys {
-					g.newAudit[key] = recordGuard(g.newAudit[key], r.GetConfig(key))
+				for _, k := range auditNoteKeys {
+					g.newAudit[k.Name] = recordGuard(g.newAudit[k.Name], r.GetConfig(k.Name))
 				}
 			}
 			for _, v := range r.Values {
@@ -437,7 +443,7 @@ func (g *group) conditionsNote() (string, bool) {
 		if !base.mixed {
 			side = "new"
 		}
-		return fmt.Sprintf("%s: mixed run conditions within the %s side", g.label(), side), true
+		return fmt.Sprintf("%s: mixed %s within the %s side", g.label(), run.KeyRunConditions.Display, side), true
 	}
 	baseHas := base.seen && !base.missing
 	newHas := newer.seen && !newer.missing
@@ -445,12 +451,12 @@ func (g *group) conditionsNote() (string, bool) {
 	case !baseHas && !newHas:
 		return "", false
 	case !baseHas:
-		return fmt.Sprintf("%s: run conditions unrecorded on base side (new: %s)", g.label(), newer.value), true
+		return fmt.Sprintf("%s: %s unrecorded on base side (new: %s)", g.label(), run.KeyRunConditions.Display, newer.value), true
 	case !newHas:
-		return fmt.Sprintf("%s: run conditions unrecorded on new side (base: %s)", g.label(), base.value), true
+		return fmt.Sprintf("%s: %s unrecorded on new side (base: %s)", g.label(), run.KeyRunConditions.Display, base.value), true
 	}
 	if conditionsDiffer(base.value, newer.value) {
-		return fmt.Sprintf("%s: run conditions differ (base: %s; new: %s)", g.label(), base.value, newer.value), true
+		return fmt.Sprintf("%s: %s differ (base: %s; new: %s)", g.label(), run.KeyRunConditions.Display, base.value, newer.value), true
 	}
 	return "", false
 }
@@ -461,20 +467,22 @@ func (g *group) conditionsNote() (string, bool) {
 // recorded context, never a trigger.
 var conditionCategoricalFields = []string{"governor", "turbo", "throttled", "battery"}
 
-// auditNoteKeys are the recorded gofresh provenance lines that surface
-// as comparison notes with their display names: audit provenance, so a
-// note, never a grouping key. A side where some samples carry a line
-// and some omit it is itself mixed provenance and reports as such, so
-// a partially-recorded side can never silently read as one value.
-var auditNoteKeys = []string{"pew-vouches", "pew-dynamic-state", "pew-closure-strategy", "pew-single-subject-discharges", "pew-package-process-discharges"}
-
-var auditNoteNames = map[string]string{
-	"pew-vouches":                    "dynamic-state vouches",
-	"pew-dynamic-state":              "dynamic-state strategies",
-	"pew-closure-strategy":           "closure derivations",
-	"pew-single-subject-discharges":  "single-subject discharges",
-	"pew-package-process-discharges": "package-process discharges",
-}
+// auditNoteKeys are the registry's audit-marked lines (spec §5's
+// `audit?` column) other than the run conditions, whose note reads
+// categorical fields (conditionsNote, §10.1): audit provenance, so a
+// note carrying the row's display name, never a grouping key. A side
+// where some samples carry a line and some omit it is itself mixed
+// provenance and reports as such, so a partially-recorded side can
+// never silently read as one value.
+var auditNoteKeys = func() []run.RecordingKey {
+	var keys []run.RecordingKey
+	for _, k := range run.AuditRecordingKeys {
+		if k.Name != run.KeyRunConditions.Name {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}()
 
 // auditNotes surfaces sides whose recorded gofresh provenance differs —
 // one mechanism for all five lines. For the dynamic-state strategy line
@@ -488,9 +496,9 @@ var auditNoteNames = map[string]string{
 // skip's row-0 gate cannot see.
 func (g *group) auditNotes() []string {
 	var notes []string
-	for _, key := range auditNoteKeys {
-		base, newer := g.baseAudit[key], g.newAudit[key]
-		name := auditNoteNames[key]
+	for _, k := range auditNoteKeys {
+		base, newer := g.baseAudit[k.Name], g.newAudit[k.Name]
+		name := k.Display
 		baseMixed := base.mixed || (base.seen && base.missing && base.value != "")
 		newMixed := newer.mixed || (newer.seen && newer.missing && newer.value != "")
 		if baseMixed || newMixed {
