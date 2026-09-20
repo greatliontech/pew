@@ -31,6 +31,6 @@ doc) go with it. Invariant preserved: REQ-pew-preparation's
 input-decidable refusals before the first measurement — true today by
 reachability, structural after.
 
-Lands: cross-tool train chunk 252 (the hygiene sweep, which already
-carries the `runCommand`/runner primitive collapse over the same two
-helpers).
+Lands: cross-tool train chunk 252 (the hygiene sweep), built over gofresh 265's environment
+setter once 275 has consumed it — so the typed environment is gofresh's, not a fourth spelling
+(re-slotted at audit 264).

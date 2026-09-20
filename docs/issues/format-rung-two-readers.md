@@ -11,4 +11,5 @@ Collapse: one format judgment in the store (a config-slice form beside the
 results form, or the fingerprint reader taking parsed results) so the rung has
 one home; `fingerprintFromConfig` keeps only the fingerprint restoration.
 
-Lands: cross-tool train chunk 252 (the hygiene sweep).
+Lands: cross-tool train chunk 275 (pew's bump behind gofresh 274, whose published fingerprint
+wire form collapses the reader — moved from 252 at audit 264 so the work is done once).
