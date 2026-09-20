@@ -20,6 +20,7 @@ import (
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/compare"
 	"github.com/greatliontech/pew/internal/gitblob"
+	"github.com/greatliontech/pew/internal/recordingtest"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
@@ -666,22 +667,9 @@ func TestAddRefInventoryReportsMalformedHistoricalRecording(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, badPath, strings.Join([]string{
-		"pew-format: 2",
-		"commit: c1",
-		"toolchain: go-test",
-		"machine: m1",
-		"buildconfig: b1",
-		"runtimeconfig: r1",
-		"dirty: false",
-		"pew-closure: cl1",
-		"pew-test-variants: tv1",
-		"pew-test-variant-ledger: ledger1",
-		"pew-runtime: rt1",
-		"pew-runtime-inputs: manifest1",
-		"BenchmarkBad-8 nope 100 sec/op",
-		"",
-	}, "\n"))
+	// Historical: a recording predating the run-conditions line, as the
+	// test's name states, with one corrupt result line.
+	writeFile(t, badPath, recordingtest.Text(recordingtest.Omit(runpkg.KeyRunConditions))+"BenchmarkBad-8 nope 100 sec/op\n")
 	ref := commitAll(t, repo, "bad")
 	reader, err := gitblob.Open(dir)
 	if err != nil {
@@ -896,64 +884,43 @@ func writeFile(t *testing.T, path, content string) {
 
 func writeStatRecording(t *testing.T, st *store.Store, pkgRel, bench string, value float64) {
 	t.Helper()
-	writeStatRecordingConditions(t, st, pkgRel, bench, value, "governor=performance turbo=off load1=0.03 throttled=false battery=false")
+	writeStatRecordingFull(t, st, pkgRel, bench, value, 8)
 }
 
 func writeStatRecordingConditions(t *testing.T, st *store.Store, pkgRel, bench string, value float64, conditions string) {
 	t.Helper()
-	writeStatRecordingSamplesConditions(t, st, pkgRel, bench, value, 8, conditions)
+	writeStatRecordingFull(t, st, pkgRel, bench, value, 8, recordingtest.Conditions(conditions))
 }
 
 // writeStatRecordingSamples writes a recording with an explicit sample count —
 // degenerate counts exercise benchmath's non-finite confidence intervals.
 func writeStatRecordingSamples(t *testing.T, st *store.Store, pkgRel, bench string, value float64, samples int) {
 	t.Helper()
-	writeStatRecordingSamplesConditions(t, st, pkgRel, bench, value, samples, "governor=performance turbo=off load1=0.03 throttled=false battery=false")
+	writeStatRecordingFull(t, st, pkgRel, bench, value, samples)
 }
 
 // writeStatRecordingStrategy writes a recording under an explicit
 // dynamic-state strategy value — the historical-recording shape.
 func writeStatRecordingStrategy(t *testing.T, st *store.Store, pkgRel, bench string, value float64, strategy string) {
 	t.Helper()
-	writeStatRecordingFull(t, st, pkgRel, bench, value, 8, "governor=performance turbo=off load1=0.03 throttled=false battery=false", strategy)
+	writeStatRecordingFull(t, st, pkgRel, bench, value, 8, recordingtest.Set(runpkg.KeyDynamicState, strategy))
 }
 
 func writeStatRecordingSamplesConditions(t *testing.T, st *store.Store, pkgRel, bench string, value float64, samples int, conditions string) {
 	t.Helper()
-	writeStatRecordingFull(t, st, pkgRel, bench, value, samples, conditions, gofresh.DynamicStateStrategy)
+	writeStatRecordingFull(t, st, pkgRel, bench, value, samples, recordingtest.Conditions(conditions))
 }
 
 // writeStatRecordingFull is the one recording writer every wrapper
-// fills defaults into — the next varied key extends this signature
-// instead of minting another copy of the config block.
-func writeStatRecordingFull(t *testing.T, st *store.Store, pkgRel, bench string, value float64, samples int, conditions, strategy string) {
+// reaches — samples rows of value, value+1, …, under the builder's
+// defaults and the options given.
+func writeStatRecordingFull(t *testing.T, st *store.Store, pkgRel, bench string, value float64, samples int, opts ...recordingtest.Option) {
 	t.Helper()
-	var recs []*benchfmt.Result
-	for i := range samples {
-		recs = append(recs, &benchfmt.Result{
-			Name:  benchfmt.Name(bench),
-			Iters: 1,
-			Values: []benchfmt.Value{
-				{Value: value + float64(i), Unit: "sec/op"},
-			},
-			Config: []benchfmt.Config{
-				{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
-				{Key: "commit", Value: []byte("c1"), File: true},
-				{Key: "toolchain", Value: []byte("go-test"), File: true},
-				{Key: "machine", Value: []byte("m1"), File: true},
-				{Key: "buildconfig", Value: []byte("b1"), File: true},
-				{Key: "runtimeconfig", Value: []byte("r1"), File: true},
-				{Key: "dirty", Value: []byte("false"), File: true},
-				{Key: "pew-runconditions", Value: []byte(conditions), File: true},
-				{Key: "pew-closure", Value: []byte("cl1"), File: true},
-				{Key: "pew-dynamic-state", Value: []byte(strategy), File: true},
-				{Key: "pew-test-variants", Value: []byte("tv1"), File: true},
-				{Key: "pew-test-variant-ledger", Value: []byte("ledger1"), File: true},
-				{Key: "pew-runtime", Value: []byte("rt1"), File: true},
-				{Key: "pew-runtime-inputs", Value: []byte("manifest1"), File: true},
-			},
-		})
+	values := make([]float64, samples)
+	for i := range values {
+		values[i] = value + float64(i)
 	}
+	recs := recordingtest.Results(bench, values, opts...)
 	if err := st.Write(pkgRel, bench, "", recs); err != nil {
 		t.Fatalf("Write(%q,%q): %v", pkgRel, bench, err)
 	}
@@ -1016,24 +983,7 @@ func TestNonValidUsesLabel(t *testing.T) {
 		t.Helper()
 		// The recorded guards must be the values the engine recomputes at check
 		// time, so the closure hash alone decides the verdict.
-		cfg := []benchfmt.Config{
-			{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
-			{Key: "commit", Value: []byte("c1"), File: true},
-			{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
-			{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
-			{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
-			{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
-			{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
-			{Key: "pew-closure", Value: []byte(hash), File: true},
-			{Key: "pew-dynamic-state", Value: []byte(gofresh.DynamicStateStrategy), File: true},
-			{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
-			{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
-			{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
-			{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
-			{Key: "pew-purity", Value: []byte(fp.PurityAssertion), File: true},
-			{Key: "dirty", Value: []byte("false"), File: true},
-		}
-		recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
+		recs := recordingtest.Results(bench, []float64{1}, recordingtest.Measured(fp, "ledger-placeholder", rt.Digest, rt.Manifest), recordingtest.Set(runpkg.KeyClosure, hash))
 		if err := st.Write("", bench, label, recs); err != nil {
 			t.Fatalf("Write(%q): %v", label, err)
 		}
@@ -1081,29 +1031,12 @@ func TestRunConditionsDoNotAffectValidity(t *testing.T) {
 	st := store.New(t.TempDir())
 	write := func(label, conditions string) {
 		t.Helper()
-		cfg := []benchfmt.Config{
-			{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
-			{Key: "commit", Value: []byte("c1"), File: true},
-			{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
-			{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
-			{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
-			{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
-			{Key: "pew-runconditions", Value: []byte(conditions), File: true},
-			{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
-			{Key: "pew-dynamic-state", Value: []byte(fp.DynamicStateStrategy), File: true},
-			{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
-			{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
-			{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
-			{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
-			{Key: "pew-purity", Value: []byte(fp.PurityAssertion), File: true},
-			{Key: "dirty", Value: []byte("false"), File: true},
-		}
-		recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
+		recs := recordingtest.Results(bench, []float64{1}, recordingtest.Measured(fp, "ledger-placeholder", rt.Digest, rt.Manifest), recordingtest.Conditions(conditions))
 		if err := st.Write("", bench, label, recs); err != nil {
 			t.Fatalf("Write(%q): %v", label, err)
 		}
 	}
-	write("quiet", "governor=performance turbo=off load1=0.03 throttled=false battery=false")
+	write("quiet", recordingtest.QuietConditions)
 	write("noisy", "governor=powersave turbo=on load1=7.50 throttled=true battery=true")
 	write("unknown", "governor=unknown turbo=unknown load1=unknown throttled=unknown battery=unknown")
 
@@ -1131,7 +1064,7 @@ func TestStatABNotesDifferingRunConditions(t *testing.T) {
 		t.Fatalf("git init: %v", err)
 	}
 	st := store.New(filepath.Join(dir, "benchmarks"))
-	writeStatRecordingConditions(t, st, "pkg", "BenchmarkConds", 100, "governor=performance turbo=off load1=0.03 throttled=false battery=false")
+	writeStatRecordingConditions(t, st, "pkg", "BenchmarkConds", 100, recordingtest.QuietConditions)
 	base := commitAll(t, repo, "base")
 	writeStatRecordingConditions(t, st, "pkg", "BenchmarkConds", 120, "governor=powersave turbo=on load1=6.41 throttled=false battery=false")
 	newer := commitAll(t, repo, "newer")
@@ -1173,23 +1106,7 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := store.New(t.TempDir())
-	cfg := []benchfmt.Config{
-		{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
-		{Key: "commit", Value: []byte("c1"), File: true},
-		{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
-		{Key: "machine", Value: []byte("some-other-machine"), File: true},
-		{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
-		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
-		{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
-		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
-		{Key: "pew-dynamic-state", Value: []byte(fp.DynamicStateStrategy), File: true},
-		{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
-		{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
-		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
-		{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
-		{Key: "dirty", Value: []byte("false"), File: true},
-	}
-	recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
+	recs := recordingtest.Results(bench, []float64{1}, recordingtest.Measured(fp, "ledger-placeholder", rt.Digest, rt.Manifest), recordingtest.Set(runpkg.KeyMachine, "some-other-machine"))
 	if err := st.Write("", bench, "", recs); err != nil {
 		t.Fatalf("Write: %v", err)
 	}

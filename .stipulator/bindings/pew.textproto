@@ -790,3 +790,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "63dea340f70360b8915c281f9b46e05f65f270b82291a0d75a6bbd2949d8929e"
 }
+
+bindings {
+  requirement_id: "REQ-pew-key-set"
+  content_hash: "adf6c5156d7688703419c26b5440f7e7fce2da893c35b5a65bf98c3e8146f10e"
+  source_hash: "1b1cfe4bec050dd33b57495935351f99027b77ae6a6209f07bd2bce2a657b49d"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestRecordingBuilderIsTheWritersShape"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "57f49754344523e73a312d838a45ea1b8777e2fc4ec8f8b53501aa840951ce99"
+}
+
+bindings {
+  requirement_id: "REQ-pew-key-set"
+  content_hash: "adf6c5156d7688703419c26b5440f7e7fce2da893c35b5a65bf98c3e8146f10e"
+  source_hash: "1b1cfe4bec050dd33b57495935351f99027b77ae6a6209f07bd2bce2a657b49d"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/internal/run.TestKeySpellingWalkSeesEachArm"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "37a363b2a07c253eddb1199199f301a0899716b9ba56b7f5513c41245347d796"
+}

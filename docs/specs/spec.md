@@ -119,7 +119,9 @@ is `stale (format)`. The `class` column is the one statement of the format's man
 (§10.1); the `guard?` column marks the four comparison guards two sides must agree on (§10.1's guard
 set), judged in table order — the first guard that is mixed within a side, missing, or differing is
 the one a comparison note or an A/B refusal names; `display` is the name every face renders the row
-by — a comparison note, an explanation row.
+by — a comparison note, an explanation row. The table's order is the display and precedence order;
+a recording file's line order is the writer's and unconstrained by the table — every reader keys a
+line by its name.
 Format governs interpretation rather than measurement identity and is projected from comparisons.
 
 **The recording key set is closed** (REQ-pew-key-set). Stream-derived configuration keys other than the four

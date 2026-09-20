@@ -154,14 +154,56 @@ var recordingPackages = []string{"internal/run", "internal/store", "internal/com
 // spelling elsewhere. Empty today.
 var spelledNotAsKey = map[string]map[string]string{}
 
+const builderImport = `"github.com/greatliontech/pew/internal/recordingtest"`
+
+// keySpellingOffenders judges one production file (rel its
+// module-relative path): a key-shaped literal in the `pew-` namespace
+// (the `pew-ab*` artifact keys of §12's other artifact class excepted;
+// a temp-file pattern or a line prefix is not key-shaped), a literal
+// equal to a row's name inside a recording package, and an import of
+// the test builder.
+func keySpellingOffenders(t *testing.T, fset *token.FileSet, f *ast.File, rel string) []string {
+	t.Helper()
+	inRecordingPackage := false
+	for _, p := range recordingPackages {
+		if filepath.ToSlash(filepath.Dir(rel)) == p {
+			inRecordingPackage = true
+		}
+	}
+	var offenders []string
+	for _, imp := range f.Imports {
+		if imp.Path.Value == builderImport {
+			offenders = append(offenders, fset.Position(imp.Pos()).String()+": production code imports the test builder")
+		}
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		lit, ok := n.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return true
+		}
+		v, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			return true
+		}
+		namespaced := keyShaped(v) && strings.HasPrefix(v, RecordingKeyNamespace) && !strings.HasPrefix(v, RecordingKeyNamespace+"ab")
+		reason, exempt := spelledNotAsKey[rel][v]
+		if exempt && reason == "" {
+			t.Fatalf("%s: %s is exempted without a reason", rel, lit.Value)
+		}
+		bare := inRecordingPackage && IsRecordingKey(v) && !exempt
+		if namespaced || bare {
+			offenders = append(offenders, fset.Position(lit.Pos()).String()+": "+lit.Value)
+		}
+		return true
+	})
+	return offenders
+}
+
 // TestRecordingKeySpellingsLiveInTheRegistry walks the module's
-// production sources and refuses any string literal spelling a
-// recording key outside the registry file — the one home of every
-// spelling (REQ-pew-key-set): a key-shaped literal in the `pew-`
-// namespace anywhere (the `pew-ab*` artifact keys of §12's other
-// artifact class excepted; a temp-file pattern or a line prefix is not
-// key-shaped), and a literal equal to a row's name inside the recording
-// packages.
+// production sources and refuses, outside the registry file — the one
+// home of every spelling (REQ-pew-key-set) — every offender
+// keySpellingOffenders names: a namespaced key spelling anywhere, a
+// bare row name in a recording package, an import of the test builder.
 func TestRecordingKeySpellingsLiveInTheRegistry(t *testing.T) {
 	moduleRoot := filepath.Join("..", "..")
 	registry := filepath.Join(moduleRoot, "internal", "run", "registry.go")
@@ -184,44 +226,51 @@ func TestRecordingKeySpellingsLiveInTheRegistry(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		rel = filepath.ToSlash(rel)
-		inRecordingPackage := false
-		for _, p := range recordingPackages {
-			if filepath.ToSlash(filepath.Dir(rel)) == p {
-				inRecordingPackage = true
-			}
-		}
 		f, err := parser.ParseFile(fset, path, nil, 0)
 		if err != nil {
 			return err
 		}
-		ast.Inspect(f, func(n ast.Node) bool {
-			lit, ok := n.(*ast.BasicLit)
-			if !ok || lit.Kind != token.STRING {
-				return true
-			}
-			v, err := strconv.Unquote(lit.Value)
-			if err != nil {
-				return true
-			}
-			namespaced := keyShaped(v) && strings.HasPrefix(v, RecordingKeyNamespace) && !strings.HasPrefix(v, RecordingKeyNamespace+"ab")
-			reason, exempt := spelledNotAsKey[rel][v]
-			if exempt && reason == "" {
-				t.Fatalf("%s: %s is exempted without a reason", rel, lit.Value)
-			}
-			bare := inRecordingPackage && IsRecordingKey(v) && !exempt
-			if namespaced || bare {
-				offenders = append(offenders, fset.Position(lit.Pos()).String()+": "+lit.Value)
-			}
-			return true
-		})
+		offenders = append(offenders, keySpellingOffenders(t, fset, f, filepath.ToSlash(rel))...)
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(offenders) > 0 {
-		t.Errorf("recording keys spelled outside the registry (read the row through run.Key*.Name; a bare word that is not the key goes in spelledNotAsKey under its file with its reason):\n  %s", strings.Join(offenders, "\n  "))
+		t.Errorf("recording keys spelled, or the test builder imported, outside the registry (read the row through run.Key*.Name; a bare word that is not the key goes in spelledNotAsKey under its file with its reason):\n  %s", strings.Join(offenders, "\n  "))
+	}
+}
+
+// TestKeySpellingWalkSeesEachArm pins the walk's judgment over
+// synthetic sources — the on-disk walk sees no probe (it reads the
+// tree, not an overlay), so each arm is witnessed here: the namespace
+// arm, the bare-word arm inside and outside a recording package, the
+// builder import, and what is not key-shaped.
+func TestKeySpellingWalkSeesEachArm(t *testing.T) {
+	fset := token.NewFileSet()
+	judge := func(rel, src string) []string {
+		t.Helper()
+		f, err := parser.ParseFile(fset, rel, "package p\n"+src, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return keySpellingOffenders(t, fset, f, rel)
+	}
+	cases := []struct {
+		name, rel, src string
+		want           int
+	}{
+		{"namespaced anywhere", "internal/other/x.go", `var k = "pew-thing"`, 1},
+		{"temp pattern is not a key", "internal/other/x.go", `var k = "pew-testbin-*"`, 0},
+		{"artifact key exempt", "cmd/pew/x.go", `var k = "pew-ab-ref"`, 0},
+		{"bare word in a recording package", "cmd/pew/x.go", `var k = "commit"`, 1},
+		{"bare word outside", "internal/other/x.go", `var k = "commit"`, 0},
+		{"builder import", "internal/other/x.go", "import " + builderImport, 1},
+	}
+	for _, c := range cases {
+		if got := judge(c.rel, c.src); len(got) != c.want {
+			t.Errorf("%s: %d offenders, want %d: %v", c.name, len(got), c.want, got)
+		}
 	}
 }
 

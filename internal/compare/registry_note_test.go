@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/pew/internal/recordingtest"
 	"github.com/greatliontech/pew/internal/run"
 )
 
@@ -22,7 +23,7 @@ func TestEveryAuditKeyIsNoted(t *testing.T) {
 		t.Run(k.Name, func(t *testing.T) {
 			baseVal, newVal := "side-a", "side-b"
 			if k.Name == run.KeyRunConditions.Name {
-				baseVal = "governor=performance turbo=off load1=0.03 throttled=false battery=false"
+				baseVal = recordingtest.QuietConditions
 				newVal = "governor=powersave turbo=off load1=0.03 throttled=false battery=false"
 			}
 			res := Compare(

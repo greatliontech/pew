@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/pew/internal/recordingtest"
 	"golang.org/x/perf/benchfmt"
 )
 
@@ -271,8 +272,6 @@ func TestPewRuntimeKeysDoNotFragmentComparison(t *testing.T) {
 	}
 }
 
-// TestMachineGuard encodes the §8/§10 invariant: differing machine fingerprints
-// are never compared silently — surfaced as a note, with no comparison row.
 // TestRuntimeConfigGuard: two recordings differing only in runtimeconfig (e.g.
 // GOGC=off vs default) must not be compared silently — §7 guard 6 / §10 add
 // runtimeconfig to the required-equal comparison guards.
@@ -296,6 +295,8 @@ func TestRuntimeConfigGuard(t *testing.T) {
 	}
 }
 
+// TestMachineGuard encodes the §8/§10 invariant: differing machine fingerprints
+// are never compared silently — surfaced as a note, with no comparison row.
 func TestMachineGuard(t *testing.T) {
 	base := sampleSet("BenchmarkX-8", "machineA", map[string][]float64{"sec/op": seq(1000, 8)})
 	newer := sampleSet("BenchmarkX-8", "machineB", map[string][]float64{"sec/op": seq(1100, 8)})
@@ -388,7 +389,7 @@ func condSet(name, conditions string, units map[string][]float64) []*benchfmt.Re
 	return benchResults(name, cfg, units)
 }
 
-const quietConds = "governor=performance turbo=off load1=0.03 throttled=false battery=false"
+const quietConds = recordingtest.QuietConditions
 
 // TestRunConditionsNoteStillCompares encodes the §10.1 / REQ-pew-runconditions-provenance contract: two
 // sides recorded under different run conditions get a differing-conditions note

@@ -702,7 +702,7 @@ func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitSta
 	for _, cfg := range run.ProvenanceConfig(commit, dirty, fp.Guards, m.conditions) {
 		recs = withConfig(recs, cfg)
 	}
-	for _, cfg := range fingerprintConfigs(fp, encodedLedger, m.digest, m.manifest) {
+	for _, cfg := range run.FingerprintConfigs(fp, encodedLedger, m.digest, m.manifest) {
 		recs = withConfig(recs, cfg)
 	}
 	// A new GOMAXPROCS variant lineage records loudly, not silently:
@@ -1056,25 +1056,6 @@ func benchmarkPatternSpace(r rune) bool {
 		return true
 	}
 	return false
-}
-
-// fingerprintConfigs is the writer-side enumeration of the recording
-// lines fingerprintFromConfig reads back into a gofresh.Fingerprint
-// (beyond ProvenanceConfig's guard lines). The two enumerations are a
-// matched pair pinned end-to-end by TestFingerprintConfigRoundTrip: a
-// line dropped on either side breaks the round trip instead of
-// silently narrowing the verdict evidence.
-func fingerprintConfigs(fp gofresh.Fingerprint, encodedLedger, runtimeDigest, runtimeManifest string) []benchfmt.Config {
-	cfgs := []benchfmt.Config{
-		run.ClosureConfig(fp.MaximalClosure),
-		run.ClosureStrategyConfig(fp.ClosureStrategy),
-		run.DynamicStateStrategyConfig(fp.DynamicStateStrategy),
-		run.TestVariantConfig(fp.TestVariantClosure),
-		run.TestVariantLedgerConfig(encodedLedger),
-	}
-	cfgs = append(cfgs, run.RuntimeConfig(runtimeDigest, runtimeManifest)...)
-	cfgs = append(cfgs, run.GofreshEvidenceConfigs(fp.PurityAssertion, fp.DynamicStateVouches, fp.SingleSubjectDischarges, fp.PackageProcessDischarges)...)
-	return cfgs
 }
 
 func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {

@@ -372,17 +372,19 @@ func TestRecordingConfigKeySetIsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	extra := ProvenanceConfig("c1", false, guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"}, Conditions{})
-	extra = append(extra, RuntimeConfig("rt", "manifest")...)
-	extra = append(extra, ClosureConfig("cl"), TestVariantConfig("tv"), TestVariantLedgerConfig("lg"), GofreshPurityConfig("d"))
-	closed := map[string]bool{"goos": true, "goarch": true, "pkg": true, "cpu": true}
-	for _, k := range RecordingConfigKeys {
-		closed[k] = true
+	// The writer's own composition, every row emitted (each evidence
+	// field non-empty) — never a hand list of it.
+	fp := gofresh.Fingerprint{
+		MaximalClosure: "cl", ClosureStrategy: "cs", DynamicStateStrategy: "ds", TestVariantClosure: "tv",
+		Guards:          guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"},
+		PurityAssertion: "d", DynamicStateVouches: "v", SingleSubjectDischarges: "s", PackageProcessDischarges: "p",
 	}
+	extra := append(ProvenanceConfig("c1", false, fp.Guards, Conditions{}), FingerprintConfigs(fp, "lg", "rt", "manifest")...)
+	closed := func(key string) bool { return IsToolchainKey(key) || IsRecordingKey(key) }
 	for _, group := range Demux(results, extra) {
 		for _, r := range group {
 			for _, c := range r.Config {
-				if c.File && !closed[c.Key] {
+				if c.File && !closed(c.Key) {
 					t.Errorf("recording would carry key %q outside the closed set", c.Key)
 				}
 			}

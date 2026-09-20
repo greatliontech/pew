@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
+	"github.com/greatliontech/pew/internal/recordingtest"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"golang.org/x/perf/benchfmt"
 )
@@ -11,22 +12,7 @@ import (
 // admissionConfig is a current-shape recording configuration recorded
 // under strategy.
 func admissionConfig(strategy string) []benchfmt.Config {
-	return []benchfmt.Config{
-		{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
-		{Key: "commit", Value: []byte("c1"), File: true},
-		{Key: "toolchain", Value: []byte("tc"), File: true},
-		{Key: "machine", Value: []byte("m"), File: true},
-		{Key: "buildconfig", Value: []byte("bc"), File: true},
-		{Key: "runtimeconfig", Value: []byte("rc"), File: true},
-		{Key: "pew-closure", Value: []byte("cl"), File: true},
-		{Key: "pew-dynamic-state", Value: []byte(strategy), File: true},
-		{Key: "pew-test-variants", Value: []byte("tv"), File: true},
-		{Key: "pew-test-variant-ledger", Value: []byte("lg"), File: true},
-		{Key: "pew-runtime", Value: []byte("rd"), File: true},
-		{Key: "pew-runtime-inputs", Value: []byte("manifest"), File: true},
-		{Key: "dirty", Value: []byte("false"), File: true},
-		{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
-	}
+	return recordingtest.Config(recordingtest.Set(runpkg.KeyDynamicState, strategy))
 }
 
 func admissionRow(cfg []benchfmt.Config) *benchfmt.Result {
@@ -40,7 +26,7 @@ func admissionRow(cfg []benchfmt.Config) *benchfmt.Result {
 // ref-resolved side compares under any strategy.
 func TestAdmitRecordingClimbsOneLadderOverTheWholeRecording(t *testing.T) {
 	current := admissionConfig(gofresh.DynamicStateStrategy)
-	if adm := admitRecording([]*benchfmt.Result{admissionRow(current)}, true); !adm.ok || adm.fp.MaximalClosure != "cl" || adm.ledger != "lg" {
+	if adm := admitRecording([]*benchfmt.Result{admissionRow(current)}, true); !adm.ok || adm.fp.MaximalClosure != "cl1" || adm.ledger != "ledger1" {
 		t.Fatalf("current recording refused: %+v", adm)
 	}
 	other := admissionConfig("another-strategy")
@@ -53,7 +39,7 @@ func TestAdmitRecordingClimbsOneLadderOverTheWholeRecording(t *testing.T) {
 	if adm := admitRecording(nil, true); adm.ok || adm.class != "format" {
 		t.Fatalf("empty recording = %+v, want format", adm)
 	}
-	unversioned := append([]benchfmt.Config(nil), current[1:]...)
+	unversioned := recordingtest.Config(recordingtest.Omit(runpkg.KeyFormat))
 	if adm := admitRecording([]*benchfmt.Result{admissionRow(unversioned)}, false); adm.ok || adm.class != "format" {
 		t.Fatalf("unversioned recording = %+v, want format", adm)
 	}

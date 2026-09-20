@@ -14,6 +14,7 @@ import (
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/pew/internal/recordingtest"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
@@ -43,24 +44,7 @@ func TestStatusPackageUsesLabel(t *testing.T) {
 	st := store.New(t.TempDir())
 	// The recorded guards are the values the engine recomputes at check time,
 	// so only the label decides whether a recording is found.
-	cfg := []benchfmt.Config{
-		{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
-		{Key: "commit", Value: []byte("c1"), File: true},
-		{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
-		{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
-		{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
-		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
-		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
-		{Key: "pew-dynamic-state", Value: []byte(fp.DynamicStateStrategy), File: true},
-		{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
-		{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
-		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
-		{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
-		{Key: "pew-purity", Value: []byte(fp.PurityAssertion), File: true},
-		{Key: "dirty", Value: []byte("false"), File: true},
-		{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
-	}
-	recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
+	recs := recordingtest.Results(bench, []float64{1}, recordingtest.Measured(fp, "ledger-placeholder", rt.Digest, rt.Manifest))
 	if err := st.Write("internal/fixtures/bench", bench, "x", recs); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -125,23 +109,7 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 	st := store.New(t.TempDir())
 	write := func() {
 		t.Helper()
-		cfg := []benchfmt.Config{
-			{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
-			{Key: "commit", Value: []byte("c1"), File: true},
-			{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
-			{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
-			{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
-			{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
-			{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
-			{Key: "pew-dynamic-state", Value: []byte(fp.DynamicStateStrategy), File: true},
-			{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
-			{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
-			{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
-			{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
-			{Key: "dirty", Value: []byte("false"), File: true},
-			{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
-		}
-		recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
+		recs := recordingtest.Results(bench, []float64{1}, recordingtest.Measured(fp, "ledger-placeholder", rt.Digest, rt.Manifest))
 		if err := st.Write("", bench, "", recs); err != nil {
 			t.Fatal(err)
 		}
@@ -183,25 +151,9 @@ func TestStatusExplainNamesTheMovingGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := store.New(t.TempDir())
-	cfg := []benchfmt.Config{
-		{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
-		{Key: "commit", Value: []byte("c1"), File: true},
-		{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
-		{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
-		// A buildconfig that provably is not current: the verdict must be
-		// stale (buildconfig) and the explanation must show the mismatch row.
-		{Key: "buildconfig", Value: []byte("recorded-elsewhere"), File: true},
-		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
-		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
-		{Key: "pew-dynamic-state", Value: []byte(fp.DynamicStateStrategy), File: true},
-		{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
-		{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
-		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
-		{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
-		{Key: "dirty", Value: []byte("false"), File: true},
-		{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
-	}
-	recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
+	// A buildconfig that provably is not current: the verdict must be
+	// stale (buildconfig) and the explanation must show the mismatch row.
+	recs := recordingtest.Results(bench, []float64{1}, recordingtest.Measured(fp, "ledger-placeholder", rt.Digest, rt.Manifest), recordingtest.Set(runpkg.KeyBuildConfig, "recorded-elsewhere"))
 	if err := st.Write("internal/fixtures/bench", bench, "", recs); err != nil {
 		t.Fatal(err)
 	}
@@ -402,25 +354,8 @@ func TestStatusWarnsOnForeignConfigKeys(t *testing.T) {
 		t.Fatalf("runtime inputs: %v", err)
 	}
 	st := store.New(t.TempDir())
-	cfg := []benchfmt.Config{
-		{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
-		{Key: "commit", Value: []byte("c1"), File: true},
-		{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
-		{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
-		{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
-		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
-		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
-		{Key: "pew-dynamic-state", Value: []byte(fp.DynamicStateStrategy), File: true},
-		{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
-		{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
-		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
-		{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
-		{Key: "pew-purity", Value: []byte(fp.PurityAssertion), File: true},
-		{Key: "dirty", Value: []byte("false"), File: true},
-		{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
-		{Key: "injected", Value: []byte("junk"), File: true},
-	}
-	recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
+	recs := recordingtest.Results(bench, []float64{1}, recordingtest.Measured(fp, "ledger-placeholder", rt.Digest, rt.Manifest))
+	recs[0].Config = append(recs[0].Config, benchfmt.Config{Key: "injected", Value: []byte("junk"), File: true})
 	if err := st.Write("internal/fixtures/bench", bench, "", recs); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -460,24 +395,8 @@ func TestStatusRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 		t.Fatalf("runtime inputs: %v", err)
 	}
 	st := store.New(t.TempDir())
-	cfg := []benchfmt.Config{
-		{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
-		{Key: "commit", Value: []byte("c1"), File: true},
-		{Key: "toolchain", Value: []byte(fp.Guards.Toolchain), File: true},
-		{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
-		{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
-		{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
-		// Deliberately NO pew-dynamic-state line: the predates-the-key shape.
-		{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
-		{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
-		{Key: "pew-test-variant-ledger", Value: []byte("ledger-placeholder"), File: true},
-		{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
-		{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
-		{Key: "pew-purity", Value: []byte(fp.PurityAssertion), File: true},
-		{Key: "dirty", Value: []byte("false"), File: true},
-		{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
-	}
-	recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
+	// Deliberately NO pew-dynamic-state line: the predates-the-key shape.
+	recs := recordingtest.Results(bench, []float64{1}, recordingtest.Measured(fp, "ledger-placeholder", rt.Digest, rt.Manifest), recordingtest.Omit(runpkg.KeyDynamicState))
 	if err := st.Write("internal/fixtures/bench", bench, "", recs); err != nil {
 		t.Fatalf("Write: %v", err)
 	}

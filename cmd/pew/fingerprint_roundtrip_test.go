@@ -9,7 +9,7 @@ import (
 	runpkg "github.com/greatliontech/pew/internal/run"
 )
 
-// The writer-side enumeration (fingerprintConfigs + ProvenanceConfig)
+// The writer-side enumeration (run.FingerprintConfigs + ProvenanceConfig)
 // and the reader-side map (fingerprintFromConfig) are a matched pair:
 // every recorded fingerprint field must survive the write→read round
 // trip, so a key dropped on either side fails here instead of silently
@@ -54,7 +54,7 @@ func TestFingerprintConfigRoundTrip(t *testing.T) {
 
 	cfg := append(
 		runpkg.ProvenanceConfig("c1", false, want.Guards, runpkg.Conditions{}),
-		fingerprintConfigs(want, "ledger-encoded", want.RuntimeDigest, want.RuntimeInputs)...,
+		runpkg.FingerprintConfigs(want, "ledger-encoded", want.RuntimeDigest, want.RuntimeInputs)...,
 	)
 	got, ledger, ok := fingerprintFromConfig(cfg)
 	if !ok {

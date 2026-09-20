@@ -11,8 +11,8 @@ import (
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
-	"golang.org/x/perf/benchfmt"
 
+	"github.com/greatliontech/pew/internal/recordingtest"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 )
@@ -71,24 +71,7 @@ func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
 	st := store.New(t.TempDir())
 	write := func(toolchain string) {
 		t.Helper()
-		cfg := []benchfmt.Config{
-			{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
-			{Key: "commit", Value: []byte("c1"), File: true},
-			{Key: "toolchain", Value: []byte(toolchain), File: true},
-			{Key: "machine", Value: []byte(fp.Guards.Machine), File: true},
-			{Key: "buildconfig", Value: []byte(fp.Guards.BuildConfig), File: true},
-			{Key: "runtimeconfig", Value: []byte(fp.Guards.RuntimeConfig), File: true},
-			{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
-			{Key: "pew-closure", Value: []byte(fp.MaximalClosure), File: true},
-			{Key: "pew-dynamic-state", Value: []byte(fp.DynamicStateStrategy), File: true},
-			{Key: "pew-test-variants", Value: []byte(fp.TestVariantClosure), File: true},
-			{Key: "pew-test-variant-ledger", Value: []byte(encoded), File: true},
-			{Key: "pew-runtime", Value: []byte(rt.Digest), File: true},
-			{Key: "pew-runtime-inputs", Value: []byte(rt.Manifest), File: true},
-			{Key: "pew-purity", Value: []byte(fp.PurityAssertion), File: true},
-			{Key: "dirty", Value: []byte("false"), File: true},
-		}
-		recs := []*benchfmt.Result{{Name: benchfmt.Name(bench), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
+		recs := recordingtest.Results(bench, []float64{1}, recordingtest.Measured(fp, encoded, rt.Digest, rt.Manifest), recordingtest.Set(runpkg.KeyToolchain, toolchain))
 		if err := st.Write("", bench, "", recs); err != nil {
 			t.Fatal(err)
 		}

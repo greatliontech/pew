@@ -11,33 +11,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/pew/internal/recordingtest"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
-	"golang.org/x/perf/benchfmt"
 )
 
 func writeRecording(t *testing.T, st *store.Store, pkgRel, bench, label string) string {
 	t.Helper()
-	recs := []*benchfmt.Result{{
-		Name:   benchfmt.Name(bench),
-		Iters:  1,
-		Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}},
-		Config: []benchfmt.Config{
-			{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
-			{Key: "commit", Value: []byte("c1"), File: true},
-			{Key: "toolchain", Value: []byte("go-test"), File: true},
-			{Key: "machine", Value: []byte("m1"), File: true},
-			{Key: "buildconfig", Value: []byte("b1"), File: true},
-			{Key: "runtimeconfig", Value: []byte("r1"), File: true},
-			{Key: "dirty", Value: []byte("false"), File: true},
-			{Key: "pew-runconditions", Value: []byte("governor=performance turbo=off load1=0.03 throttled=false battery=false"), File: true},
-			{Key: "pew-closure", Value: []byte("cl1"), File: true},
-			{Key: "pew-test-variants", Value: []byte("tv1"), File: true},
-			{Key: "pew-test-variant-ledger", Value: []byte("ledger1"), File: true},
-			{Key: "pew-runtime", Value: []byte("rt1"), File: true},
-			{Key: "pew-runtime-inputs", Value: []byte("manifest1"), File: true},
-		},
-	}}
+	recs := recordingtest.Results(bench, []float64{1})
 	if err := st.Write(pkgRel, bench, label, recs); err != nil {
 		t.Fatalf("Write(%q,%q,%q): %v", pkgRel, bench, label, err)
 	}
@@ -251,7 +232,7 @@ func TestRunGCKeepsOldShapeRecordingInStoreOnlyPackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(kept, bytes.ReplaceAll(data, []byte("pew-runconditions: governor=performance turbo=off load1=0.03 throttled=false battery=false\n"), nil), 0o644); err != nil {
+	if err := os.WriteFile(kept, bytes.ReplaceAll(data, []byte(runpkg.KeyRunConditions.Name+": "+recordingtest.QuietConditions+"\n"), nil), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)

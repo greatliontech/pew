@@ -576,6 +576,32 @@ func TestVariantLedgerConfig(encoded string) benchfmt.Config {
 	return KeyTestVariantLedger.Config(encoded)
 }
 
+// FingerprintConfigs is the writer-side enumeration of the recording
+// lines a reader restores into a gofresh.Fingerprint beyond
+// ProvenanceConfig's guard lines — the closure hash and its derivation,
+// the dynamic-state strategy, the test-variant hash and ledger, the
+// runtime-input evidence, and the attributable gofresh evidence. The
+// writer and cmd/pew's reader are a matched pair pinned end-to-end by
+// TestFingerprintConfigRoundTrip: a line dropped on either side breaks
+// the round trip instead of silently narrowing the verdict evidence.
+func FingerprintConfigs(fp gofresh.Fingerprint, encodedLedger, runtimeDigest, runtimeManifest string) []benchfmt.Config {
+	cfgs := []benchfmt.Config{ClosureConfig(fp.MaximalClosure)}
+	// The two derivation rows are omittable (spec §5's class column):
+	// emitted exactly when non-empty, as the evidence rows are — a
+	// capture always answers both, so a run never omits them; the
+	// rule is the row's, not this caller's.
+	if fp.ClosureStrategy != "" {
+		cfgs = append(cfgs, ClosureStrategyConfig(fp.ClosureStrategy))
+	}
+	if fp.DynamicStateStrategy != "" {
+		cfgs = append(cfgs, DynamicStateStrategyConfig(fp.DynamicStateStrategy))
+	}
+	cfgs = append(cfgs, TestVariantConfig(fp.TestVariantClosure), TestVariantLedgerConfig(encodedLedger))
+	cfgs = append(cfgs, RuntimeConfig(runtimeDigest, runtimeManifest)...)
+	cfgs = append(cfgs, GofreshEvidenceConfigs(fp.PurityAssertion, fp.DynamicStateVouches, fp.SingleSubjectDischarges, fp.PackageProcessDischarges)...)
+	return cfgs
+}
+
 // RuntimeConfig records the runtime-input guard and its manifest (§7.8).
 func RuntimeConfig(digest, manifest string) []benchfmt.Config {
 	return []benchfmt.Config{

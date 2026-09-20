@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
+	"github.com/greatliontech/pew/internal/recordingtest"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
@@ -69,13 +70,11 @@ func TestUnversionedRecordingIsStale(t *testing.T) {
 	if v != verdictStale || reason != "format" {
 		t.Fatalf("unversioned recording = {%s %q}, want stale format", v, reason)
 	}
-	incomplete := []*benchfmt.Result{{Name: benchfmt.Name("NoIO"), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: []benchfmt.Config{
-		{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
-		{Key: "toolchain", Value: []byte("go"), File: true}, {Key: "machine", Value: []byte("m"), File: true},
-		{Key: "buildconfig", Value: []byte("b"), File: true}, {Key: "runtimeconfig", Value: []byte("r"), File: true},
-		{Key: "dirty", Value: []byte("false"), File: true}, {Key: "pew-closure", Value: []byte("c"), File: true},
-		{Key: "pew-runtime", Value: []byte("d"), File: true}, {Key: "pew-runtime-inputs", Value: []byte("i"), File: true},
-	}}}
+	// A current-format recording missing mandatory rows: the commit, the
+	// run conditions, the test-variant hash and ledger.
+	incomplete := recordingtest.Results("NoIO", []float64{1},
+		recordingtest.Omit(runpkg.KeyCommit), recordingtest.Omit(runpkg.KeyRunConditions),
+		recordingtest.Omit(runpkg.KeyTestVariants), recordingtest.Omit(runpkg.KeyTestVariantLedger))
 	if err := st.Write("", "BenchmarkNoIO", "incomplete", incomplete); err != nil {
 		t.Fatal(err)
 	}

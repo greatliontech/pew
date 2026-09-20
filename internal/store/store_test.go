@@ -9,35 +9,34 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/pew/internal/recordingtest"
+	"github.com/greatliontech/pew/internal/run"
 	"golang.org/x/perf/benchfmt"
 )
 
-const sample = `goos: linux
-goarch: amd64
-pkg: example.com/x/internal/foo
-cpu: TestCPU
-pew-format: 2
-commit: abc123def
-toolchain: go1.26.4
-machine: m-deadbeef
-buildconfig: default
-runtimeconfig: default
-dirty: false
-pew-runconditions: governor=performance turbo=off load1=0.03 throttled=false battery=false
-pew-closure: 1234abcd5678
-pew-test-variants: 9abc0def1234
-pew-test-variant-ledger: dGVzdC1sZWRnZXI
-pew-runtime: abcdef1234567890
-pew-runtime-inputs: eyJ2IjoxfQ
-BenchmarkRun-8 1000000 1234 ns/op 456 B/op 7 allocs/op
+// sample is a current-shape recording through the one writer, its
+// values the ones the round-trip assertions below name.
+var sample = "goos: linux\ngoarch: amd64\npkg: example.com/x/internal/foo\ncpu: TestCPU\n" +
+	recordingtest.Text(
+		recordingtest.Commit("abc123def", false),
+		recordingtest.Set(run.KeyToolchain, "go1.26.4"),
+		recordingtest.Set(run.KeyMachine, "m-deadbeef"),
+		recordingtest.Set(run.KeyBuildConfig, "default"),
+		recordingtest.Set(run.KeyRuntimeConfig, "default"),
+		recordingtest.Set(run.KeyClosure, "1234abcd5678"),
+		recordingtest.Set(run.KeyTestVariants, "9abc0def1234"),
+		recordingtest.Set(run.KeyTestVariantLedger, "dGVzdC1sZWRnZXI"),
+		recordingtest.Set(run.KeyRuntime, "abcdef1234567890"),
+		recordingtest.Set(run.KeyRuntimeInputs, "eyJ2IjoxfQ"),
+	) + `BenchmarkRun-8 1000000 1234 ns/op 456 B/op 7 allocs/op
 BenchmarkRun-8 1000000 1240 ns/op 456 B/op 7 allocs/op
 BenchmarkRun/case=big-8 200000 6100 ns/op 2048 B/op 9 allocs/op
 `
 
 func parse(t *testing.T, raw string) []*benchfmt.Result {
 	t.Helper()
-	if !strings.Contains(raw, "pew-format:") {
-		raw = "pew-format: 2\n" + raw
+	if !strings.Contains(raw, run.KeyFormat.Name+":") {
+		raw = run.KeyFormat.Name + ": " + run.RecordingFormat + "\n" + raw
 	}
 	r := benchfmt.NewReader(strings.NewReader(raw), "test")
 	var out []*benchfmt.Result
@@ -102,7 +101,7 @@ func TestRawFormatRejectsDuplicateRecordingKeys(t *testing.T) {
 	if rawFormatValid([]byte("toolchain: go2\n" + base)) {
 		t.Error("duplicate toolchain key accepted")
 	}
-	if rawFormatValid([]byte("pew-runconditions: governor=performance turbo=off load1=0.03 throttled=false battery=false\npew-runconditions: governor=powersave turbo=on load1=9.00 throttled=true battery=true\n" + base)) {
+	if rawFormatValid([]byte("pew-runconditions: " + recordingtest.QuietConditions + "\npew-runconditions: governor=powersave turbo=on load1=9.00 throttled=true battery=true\n" + base)) {
 		t.Error("duplicate pew-runconditions key accepted")
 	}
 }
@@ -481,10 +480,11 @@ func TestParseFromContent(t *testing.T) {
 	if _, err := Parse(strings.NewReader("BenchmarkRun notAnInt ns/op\n"), "blob"); err == nil {
 		t.Error("Parse of corrupt content: want error")
 	}
+	formatLine := run.KeyFormat.Name + ": " + run.RecordingFormat
 	for name, raw := range map[string]string{
-		"missing":   strings.Replace(sample, "pew-format: 2\n", "", 1),
-		"unknown":   strings.Replace(sample, "pew-format: 2", "pew-format: 1", 1),
-		"duplicate": strings.Replace(sample, "pew-format: 2", "pew-format: 1\npew-format: 2", 1),
+		"missing":   strings.Replace(sample, formatLine+"\n", "", 1),
+		"unknown":   strings.Replace(sample, formatLine, "pew-format: 1", 1),
+		"duplicate": strings.Replace(sample, formatLine, "pew-format: 1\n"+formatLine, 1),
 		"tab-change": strings.Replace(sample,
 			"BenchmarkRun-8 1000000 1240 ns/op",
 			"pew-format:\t3\nBenchmarkRun-8 1000000 1240 ns/op", 1),
@@ -494,7 +494,7 @@ func TestParseFromContent(t *testing.T) {
 		"crlf": strings.ReplaceAll(sample, "\n", "\r\n"),
 		"changed": strings.Replace(sample,
 			"BenchmarkRun-8 1000000 1240 ns/op",
-			"pew-format: 2\nBenchmarkRun-8 1000000 1240 ns/op", 1),
+			formatLine+"\nBenchmarkRun-8 1000000 1240 ns/op", 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			recs, err := Parse(strings.NewReader(raw), name)
