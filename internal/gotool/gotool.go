@@ -1,102 +1,131 @@
 // Package gotool runs the go command line tool, surfacing stderr on failure.
-// Every invocation runs under one environment policy: the working directory
-// resolved symlink-free and PWD pinned to it, so the resolved-directory
-// premise every consumer of go-reported paths relies on holds by
-// construction — even through a symlinked checkout whose shell exports the
-// alias as PWD (spec §9's environment policy).
+// Every invocation runs under gofresh's one go-command policy (gofresh's
+// gotool): the working directory resolved to its one coordinate and PWD
+// pinned to it, so the resolved-directory premise every consumer of
+// go-reported paths relies on holds by construction — even through a
+// symlinked checkout whose shell exports the alias as PWD (spec §9's
+// environment policy). This package composes pew's two contracts around
+// gofresh's: a directory that does not resolve degrades to its absolute
+// spelling, and a nil environment inherits the process's. Every go
+// invocation pew makes is either run here through gofresh's runner
+// (Output, Sample) or, where the spawn needs its own process group
+// (internal/run's runCommand), built over the same two helpers,
+// CommandDir and CommandEnvironment.
 package gotool
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
+
+	gofreshtool "github.com/greatliontech/gofresh/gotool"
 )
 
-// CommandDir resolves dir ("" = current directory) to its symlink-free
-// absolute form. Resolution failure degrades to the absolute unresolved
-// path: the subsequent invocation then fails (or succeeds) on the real
-// filesystem state rather than here.
+// CommandDir resolves dir ("" = current directory) to gofresh's one
+// coordinate (gotool.CanonicalDir: the absolute spelling with every
+// symbolic link followed, `..` applied to the resolved prefix — through
+// `deep -> real/sub`, `deep/..` is real, the target's parent, where a
+// lexical clean of the spelling first would answer the link's parent).
+// Resolution failure degrades to the absolute unresolved path, else the
+// spelling given, so the subsequent invocation fails (or succeeds) on
+// the real filesystem state rather than here.
 func CommandDir(dir string) string {
 	if dir == "" {
 		dir = "."
 	}
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return dir
+	if canonical, err := gofreshtool.CanonicalDir(dir); err == nil {
+		return canonical
 	}
-	resolved, err := filepath.EvalSymlinks(abs)
-	if err != nil {
+	if abs, err := filepath.Abs(dir); err == nil {
 		return abs
 	}
-	return resolved
+	return dir
 }
 
-// CommandEnvironment pins PWD to resolvedDir over env, the one environment
-// policy for every go invocation pew makes.
-func CommandEnvironment(env []string, resolvedDir string) []string {
-	command := make([]string, 0, len(env)+1)
-	for _, entry := range env {
-		name, _, ok := strings.Cut(entry, "=")
-		if ok && equalEnvKey(name, "PWD") {
-			continue
-		}
-		command = append(command, entry)
-	}
-	return append(command, "PWD="+resolvedDir)
-}
+// EnvironmentError is a caller environment gofresh's normalization
+// refuses — a duplicated or malformed entry — its own class, never a
+// fact about the toolchain or the tree. The message is gofresh's own,
+// which already names the environment; the class is the type.
+type EnvironmentError struct{ Err error }
 
-func equalEnvKey(left, right string) bool {
-	if runtime.GOOS == "windows" {
-		return strings.EqualFold(left, right)
-	}
-	return left == right
-}
+func (e *EnvironmentError) Error() string { return e.Err.Error() }
+func (e *EnvironmentError) Unwrap() error { return e.Err }
 
-// Command is the one go-command constructor: `go <args>` under ctx, in
-// dir ("" = current directory) with the environment policy applied —
-// the directory resolved symlink-free and PWD pinned to it. Every go
-// invocation pew makes is built here, so §9's resolved-directory
-// premise holds for all of them by construction, the toolchain-
-// provenance sample (§7) included. Cancelling ctx kills the go
-// process; a caller that must also kill a grandchild (the test binary
-// go test spawns) runs its own process group over the same policy.
-func Command(ctx context.Context, dir string, env []string, args ...string) *exec.Cmd {
+// inherited is env, or the process environment when env is nil: a nil
+// env inherits the process environment, as an unset exec.Cmd.Env
+// would — then PWD is pinned over it. A caller passing the empty
+// non-nil slice deliberately runs go with PWD alone.
+func inherited(env []string) []string {
 	if env == nil {
-		// A nil env inherits the process environment, as an unset
-		// exec.Cmd.Env would — then PWD is pinned over it. A caller
-		// passing the empty non-nil slice deliberately runs go with
-		// PWD alone.
-		env = os.Environ()
+		return os.Environ()
 	}
-	resolved := CommandDir(dir)
-	cmd := exec.CommandContext(ctx, "go", args...)
-	cmd.Dir = resolved
-	cmd.Env = CommandEnvironment(env, resolved)
-	return cmd
+	return env
+}
+
+// CommandEnvironment is gofresh's command environment over env for
+// resolvedDir: PWD pinned to the directory under the platform's key
+// rule (gotool.EnvForCommand). A nil env inherits the process
+// environment; an environment gofresh's normalization refuses is an
+// EnvironmentError.
+func CommandEnvironment(env []string, resolvedDir string) ([]string, error) {
+	out, err := gofreshtool.EnvForCommand(inherited(env), resolvedDir)
+	if err != nil {
+		return nil, &EnvironmentError{Err: err}
+	}
+	return out, nil
+}
+
+// Output runs `go <args>` in dir under env through gofresh's runner and
+// returns stdout; on failure the error names the command and carries
+// go's stderr (the runner's own wrapping). An environment the policy
+// refuses is an EnvironmentError before any spawn — it names no command.
+func Output(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
+	return run(ctx, dir, env, nil, args...)
+}
+
+// Sample is gofresh's toolchain sample (gotool.SampleGoVersion: `go env
+// GOVERSION` in the target module's directory, PWD pinned) under pew's
+// directory resolution and nil-env inheritance; prepare, when set, is
+// the runner's boundary hook on the spawn — the seam a pin observes
+// the command's directory and environment through.
+func Sample(ctx context.Context, dir string, env []string, prepare func(*exec.Cmd)) (string, error) {
+	out, err := run(ctx, dir, env, prepare, "env", "GOVERSION")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// run is every gofresh-runner invocation pew makes: the environment
+// refused as its own class before the spawn, the directory resolved,
+// the hook handed to the runner. The normalization runs here ahead of
+// the runner's own (the same predicate, inside gotool.EnvForCommand)
+// deliberately: gofresh reports a refusal as an untyped message under
+// the command's name, so the pre-check is what lets a caller see pew's
+// class — and once it passes, the runner's second pass cannot newly
+// fail, so an environment refusal is always pew's class. The runner's
+// other refusal, a directory with no absolute form (an unreadable
+// working directory, CommandDir degraded to the spelling given), is
+// gofresh's own message and not an environment fact.
+func run(ctx context.Context, dir string, env []string, prepare func(*exec.Cmd), args ...string) ([]byte, error) {
+	env = inherited(env)
+	if _, err := gofreshtool.NormalizeEnv(env); err != nil {
+		return nil, &EnvironmentError{Err: err}
+	}
+	return gofreshtool.Runner{Prepare: prepare}.Run(ctx, CommandDir(dir), env, args...)
 }
 
 // Run executes `go <args>` in the current directory under ctx. See RunIn.
 func Run(ctx context.Context, args ...string) ([]byte, error) { return RunIn(ctx, "", args...) }
 
 // RunIn executes `go <args>` in dir ("" = current directory) under ctx and
-// returns stdout, over the ambient process environment. On failure the error
-// includes the command and go's stderr. The directory matters: a go.mod
-// `toolchain` directive / GOTOOLCHAIN is resolved relative to it, so
-// provenance capture and `go test` must run in the same dir to describe the
-// same toolchain — the directory is resolved and PWD pinned per Command.
+// returns stdout, over the ambient process environment. The directory
+// matters: a go.mod `toolchain` directive / GOTOOLCHAIN is resolved
+// relative to it, so provenance capture and `go test` must run in the
+// same dir to describe the same toolchain — the directory is resolved
+// and PWD pinned per Output.
 func RunIn(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	out, err := Command(ctx, dir, os.Environ(), args...).Output()
-	if err != nil {
-		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
-			return nil, fmt.Errorf("go %s: %w: %s",
-				strings.Join(args, " "), err, strings.TrimSpace(string(ee.Stderr)))
-		}
-		return nil, fmt.Errorf("go %s: %w", strings.Join(args, " "), err)
-	}
-	return out, nil
+	return Output(ctx, dir, nil, args...)
 }

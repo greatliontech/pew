@@ -108,7 +108,11 @@ func runCommand(ctx context.Context, dir string, env []string, name string, full
 	cmd := exec.CommandContext(ctx, name, full...)
 	resolved := gotool.CommandDir(dir)
 	cmd.Dir = resolved
-	cmd.Env = gotool.CommandEnvironment(env, resolved)
+	commandEnv, err := gotool.CommandEnvironment(env, resolved)
+	if err != nil {
+		return nil, fmt.Errorf("run: %w", err)
+	}
+	cmd.Env = commandEnv
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		// The context may fire after the leader already exited (Wait
@@ -409,9 +413,9 @@ func BenchName(resultName string) string {
 // file (`go env -w`) with go's own precedence, so a profile configured through
 // either channel is seen. Scanning the process env alone misses the env file.
 func EffectiveGoflags(ctx context.Context, moduleDir string, env []string) (string, error) {
-	out, err := gotool.Command(ctx, moduleDir, env, "env", "GOFLAGS").Output()
+	out, err := gotool.Output(ctx, moduleDir, env, "env", "GOFLAGS")
 	if err != nil {
-		return "", fmt.Errorf("run: go env GOFLAGS: %w", err)
+		return "", fmt.Errorf("run: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -772,9 +776,9 @@ func VerifyToolchainConfig(results []*benchfmt.Result, truth ToolchainTruth) err
 // toolchain and environment the measurement runs under - the out-of-band
 // truth VerifyToolchainConfig judges the stream against.
 func ReadTargetPlatform(ctx context.Context, moduleDir string, env []string) (goos, goarch string, err error) {
-	out, err := gotool.Command(ctx, moduleDir, env, "env", "-json", "GOOS", "GOARCH").Output()
+	out, err := gotool.Output(ctx, moduleDir, env, "env", "-json", "GOOS", "GOARCH")
 	if err != nil {
-		return "", "", fmt.Errorf("go env: %w", err)
+		return "", "", err
 	}
 	var v struct{ GOOS, GOARCH string }
 	if err := json.Unmarshal(out, &v); err != nil {

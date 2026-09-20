@@ -9,7 +9,6 @@ package pew
 
 import (
 	_ "embed"
-	"sync"
 
 	"github.com/greatliontech/gofresh/guidance"
 )
@@ -17,18 +16,12 @@ import (
 //go:embed docs/guidance.md
 var guidanceSrc []byte
 
-var (
-	guidanceOnce sync.Once
-	guidanceDoc  *guidance.Document
-	guidanceErr  error
-)
+// embeddedGuidance is the source parsed once for every surface to
+// project from (gofresh's Embedded); Document answers the parse error,
+// which GuidanceDocument forwards for cmd/pew to refuse loudly.
+var embeddedGuidance = guidance.Embed("pew", guidanceSrc)
 
-// GuidanceDocument is the parsed embedded guidance source, parsed
-// once; a malformed document is a build-time defect every consumer
-// surfaces loudly.
-func GuidanceDocument() (*guidance.Document, error) {
-	guidanceOnce.Do(func() {
-		guidanceDoc, guidanceErr = guidance.Parse(guidanceSrc)
-	})
-	return guidanceDoc, guidanceErr
-}
+// GuidanceDocument is the embedded guidance source's parse answer; a
+// malformed document is a build-time defect every consumer surfaces
+// loudly.
+func GuidanceDocument() (*guidance.Document, error) { return embeddedGuidance.Document() }

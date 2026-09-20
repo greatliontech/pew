@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -68,25 +69,48 @@ func TestBuildEngineRefusesUnidentifiableToolchain(t *testing.T) {
 	}
 }
 
-// goVersionCmd wires the module dir and effective env into the sample
-// through the one go-command constructor, so the provenance probe
-// resolves the directory and pins PWD exactly as every other go
-// invocation does — a symlinked checkout samples the toolchain the
-// engine's own loads read (spec §9's environment policy).
-func TestGoVersionCmdRunsUnderTheEnvironmentPolicy(t *testing.T) {
+// The sample runs under the environment policy: gofresh's runner spawns
+// `go env GOVERSION` in the resolved directory with PWD pinned to it and
+// the caller's entries kept, observed through the runner's boundary
+// hook on a real spawn — a symlinked checkout samples the toolchain
+// the engine's own loads read (spec §9's environment policy).
+func TestGoVersionSampleRunsUnderTheEnvironmentPolicy(t *testing.T) {
 	real := t.TempDir()
+	if err := os.WriteFile(filepath.Join(real, "go.mod"), []byte("module example.com/alias\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	link := filepath.Join(t.TempDir(), "alias")
 	if err := os.Symlink(real, link); err != nil {
 		t.Skipf("symlink unsupported: %v", err)
 	}
-	resolved := gotool.CommandDir(link)
-	env := []string{"A=1", "B=2", "PWD=/somewhere/else"}
-	cmd := goVersionCmd(context.Background(), link, env)
-	if cmd.Dir != resolved {
-		t.Fatalf("cmd.Dir = %q, want the resolved dir %q", cmd.Dir, resolved)
+	// The expectation is the filesystem's own answer, never CommandDir's.
+	resolved, err := filepath.EvalSymlinks(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The caller's environment: the process's, its own PWD replaced by
+	// a wrong one the policy must pin over (a duplicated key would be
+	// refused by gofresh's normalization, never replaced).
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "PWD=") {
+			env = append(env, kv)
+		}
+	}
+	env = append(env, "PEW_SAMPLE_A=1", "PEW_SAMPLE_B=2", "PWD=/somewhere/else")
+	var seen *exec.Cmd
+	prior := sampleCommandObserver
+	sampleCommandObserver = func(cmd *exec.Cmd) { seen = cmd }
+	t.Cleanup(func() { sampleCommandObserver = prior })
+	version, err := sampleGoVersion(context.Background(), link, env)
+	if err != nil || !strings.HasPrefix(version, "go") {
+		t.Fatalf("sample = %q, %v", version, err)
+	}
+	if seen == nil || seen.Dir != resolved {
+		t.Fatalf("the sample's Dir = %v, want the resolved dir %q", seen, resolved)
 	}
 	var pwd string
-	for _, kv := range cmd.Env {
+	for _, kv := range seen.Env {
 		if v, ok := strings.CutPrefix(kv, "PWD="); ok {
 			pwd = v
 		}
@@ -94,8 +118,26 @@ func TestGoVersionCmdRunsUnderTheEnvironmentPolicy(t *testing.T) {
 	if pwd != resolved {
 		t.Fatalf("PWD = %q, want it pinned to the resolved dir %q", pwd, resolved)
 	}
-	if !slices.Contains(cmd.Env, "A=1") || !slices.Contains(cmd.Env, "B=2") {
-		t.Fatalf("cmd.Env dropped the caller's entries: %v", cmd.Env)
+	if !slices.Contains(seen.Env, "PEW_SAMPLE_A=1") || !slices.Contains(seen.Env, "PEW_SAMPLE_B=2") {
+		t.Fatalf("the sample's env dropped the caller's entries: %v", seen.Env)
+	}
+	// A nil env inherits THE PROCESS'S environment, as pew's every go
+	// invocation does — gofresh's runner alone would refuse it, and an
+	// empty one would sample too: the process's marker must reach the
+	// spawn.
+	t.Setenv("PEW_SAMPLE_MARKER", "inherited")
+	seen = nil
+	if version, err := sampleGoVersion(context.Background(), link, nil); err != nil || !strings.HasPrefix(version, "go") || seen == nil || !slices.Contains(seen.Env, "PWD="+resolved) || !slices.Contains(seen.Env, "PEW_SAMPLE_MARKER=inherited") {
+		t.Fatalf("a nil env did not inherit the process environment: %q, %v, %v", version, err, seen)
+	}
+	// An environment the go-command policy refuses is its own class
+	// through the provenance check — never the toolchain refusal.
+	dup := append(slices.Clone(env), "PEW_SAMPLE_A=3")
+	err = checkToolchainProvenance(context.Background(), link, dup)
+	var envErr *gotool.EnvironmentError
+	var pe *toolchainProvenanceError
+	if !errors.As(err, &envErr) || errors.As(err, &pe) {
+		t.Fatalf("a duplicated key reported as %v; want the environment's own class", err)
 	}
 }
 

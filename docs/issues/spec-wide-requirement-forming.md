@@ -16,8 +16,10 @@ The collapse opportunity activates only when enforcement wants to
 claim a contract that has no REQ-formed twin.
 
 **Lands:** cross-tool train chunk 232 (the spec chunk) — the
-condition has fired: three witnesses of §9's one-environment policy
-(the go-command constructor's Dir/PWD pins and the resolved memo key)
-stand with no REQ id to bind against; convert that section's
-obligations to REQ-formed requirements there (same structure-only
-discipline as the §13 conversion), never speculatively.
+condition has fired: the witnesses of §9's one-environment policy
+(the go-command helpers' resolved-directory and PWD pins, the runner
+path observed through gofresh's boundary hook, the toolchain sample
+through the same hook, and the resolved memo key) stand with no REQ
+id to bind against; convert that section's obligations to REQ-formed
+requirements there (same structure-only discipline as the §13
+conversion), never speculatively.

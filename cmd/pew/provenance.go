@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -62,33 +63,40 @@ func memoizedSampler(sample func(ctx context.Context, dir string, env []string) 
 	}
 }
 
+// sampleGoVersion is the toolchain sample through pew's one go-command
+// policy (gotool.Sample: gofresh's runner under pew's directory
+// resolution and nil-env inheritance) — the sample must resolve exactly
+// as the engine's own loads do, the module's go.mod toolchain directive
+// included, under the effective environment. The runner's boundary
+// hook is the seam a pin observes the spawn's directory and environment
+// through; goVersionSampler above swaps the whole sample for the skew
+// fixtures — two seams for two questions.
 func sampleGoVersion(ctx context.Context, dir string, env []string) (string, error) {
-	out, err := goVersionCmd(ctx, dir, env).Output()
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
-			return "", fmt.Errorf("go env GOVERSION: %v: %s", err, strings.TrimSpace(string(ee.Stderr)))
-		}
-		return "", fmt.Errorf("go env GOVERSION: %w", err)
-	}
-	return strings.TrimSpace(string(out)), nil
+	return gotool.Sample(ctx, dir, env, sampleCommandObserver)
 }
 
-// goVersionCmd is pure construction, split so the Dir/Env wiring is
-// unit-pinnable: the sample must resolve exactly as the engine's own
-// loads do — the target module's directory (its go.mod toolchain
-// directive included) under the effective environment.
-func goVersionCmd(ctx context.Context, dir string, env []string) *exec.Cmd {
-	return gotool.Command(ctx, dir, env, "env", "GOVERSION")
-}
+// sampleCommandObserver is the runner's boundary hook on the sample's
+// command; nil in production, a pin installs one to observe the spawn.
+var sampleCommandObserver func(*exec.Cmd)
 
 // checkToolchainProvenance refuses the judged-run states where this
 // binary's compiled-in analysis frontend cannot faithfully read what
 // the ambient toolchain builds (gofresh.ToolchainSkew: directional
 // within a major, total across majors) — the guard every engine
 // construction inherits, so no verdict is computed over a tree the
-// binary misparses (the go1.27 stale-binary episode's structural fix).
+// binary misparses (the go1.27 stale-binary episode's structural fix). An
+// environment the go-command policy refuses passes through as its own
+// class (gotool.EnvironmentError): a fact about the caller's
+// environment, never the toolchain, so it is never the skew refusal.
 func checkToolchainProvenance(ctx context.Context, dir string, env []string) error {
 	ambient, err := goVersionSampler(ctx, dir, env)
+	var envErr *gotool.EnvironmentError
+	if errors.As(err, &envErr) {
+		// The caller's environment refused by the go-command policy
+		// says nothing about the toolchain: its own class, so the
+		// operator reads the environment fault, not a rebuild.
+		return err
+	}
 	if err != nil {
 		// A failed sample leaves the ambient side unidentifiable —
 		// gofresh's contract refuses that, so the sampling failure is

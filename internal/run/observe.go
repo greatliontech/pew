@@ -39,15 +39,28 @@ func CaptureObservationFrame(ctx context.Context, moduleDir, pkgRel string) runt
 // the appearance-pin of absence-probes matching the pattern, the
 // caller-side responsibility the directive's author takes on. The
 // classification roots come from the environment the process ran
-// under: the ingest carries the same environment the spawn used.
+// under: the ingest carries the same environment the spawn used, under
+// the same go-command policy — an environment that policy refuses is
+// not an ingest failure but the run's own input refusal, returned as
+// the error it is.
 func IngestObservation(ctx context.Context, frame runtimeinput.ProducerFrame, logPath, identity string, env []string, scratch ...string) (runtimeinput.State, error) {
 	namespaces := make([]runtimeinput.ScratchNamespace, 0, len(scratch))
 	for _, pattern := range scratch {
 		namespaces = append(namespaces, runtimeinput.ScratchNamespace{Dir: frame.PkgRel, Pattern: pattern})
 	}
+	// The refusal here is decided by the run's inputs and fires at
+	// preparation first (the package listing normalizes the same
+	// environment before anything else, the provenance sample after it,
+	// REQ-pew-preparation), so this branch is unreachable past it; the
+	// one normalization point that makes it unrepresentable is tracked in
+	// docs/issues/environment-normalized-once.md.
+	ingestEnv, err := gotool.CommandEnvironment(env, frame.PkgDir)
+	if err != nil {
+		return runtimeinput.State{}, err
+	}
 	observation, _, err := frame.Observe(ctx, logPath, runtimeinput.ProducerIngest{
 		Identity: identity,
-		Env:      gotool.CommandEnvironment(env, frame.PkgDir),
+		Env:      ingestEnv,
 		// The classification roots (toolchain, module cache, build
 		// cache, the temp root) are facts of the ingested environment
 		// the facade resolves; pew mints no scratch root of its own.

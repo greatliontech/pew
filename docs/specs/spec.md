@@ -835,20 +835,24 @@ provenance is captured atomically with the run:
   canonical incomplete disposition with its honest reason when the conjunction cannot complete.
 - Captures one ordinary measurement view and every benchmark fingerprint before execution. The
   result-contributing process for each benchmark is the package test binary launched by that
-  benchmark's own `go test` driver invocation (single-subject execution above). Pew finalizes
-  exactly one observation per invocation — completed under the §7.8 conjunction (pre-spawn
-  bracket, testlog capture, completed-process ingest), incomplete with the stated reason
-  otherwise. It validates the view and the sealed runtime state before
-  writing any result. One immutable complete process-environment snapshot configures the view, the
-  driver and inherited package test binary, and the observation's construction — spawn and
-  ingestion use the same environment, with `PWD` pinned to the package directory the driver gives
-  the test binary. The same policy governs every go invocation pew makes — measurement, list,
-  env, and module probes alike: the working directory is resolved symlink-free and `PWD` pinned
-  to it, so the resolved-directory premise holds by construction through a symlinked checkout
-  whose shell exports the alias, with no per-site bridging. Source, guard,
-  purity, or commit drift aborts the package write; worktree-state drift is arm-scoped — an arm
-  whose own repository-state bracket moved is refused alone (single-subject execution above), and
-  non-source residue never aborts the write of the sibling arms' recordings. Every destination is
+  benchmark's own `go test` driver invocation (single-subject execution above). Pew finalizes exactly
+  one observation per invocation — completed under the §7.8 conjunction (pre-spawn bracket, testlog
+  capture, completed-process ingest), incomplete with the stated reason otherwise. It validates the
+  view and the sealed runtime state before writing any result. One immutable complete
+  process-environment snapshot configures the view, the driver and inherited package test binary, and
+  the observation's construction — spawn and ingestion use the same environment, with `PWD` pinned to
+  the package directory the driver gives the test binary. The same policy governs every go invocation
+  pew makes — measurement, list, env, and module probes alike: the working directory is resolved to
+  gofresh's one coordinate (its absolute spelling with every symbolic link followed and `..` applied
+  to the resolved prefix, never to the spelling first — through `deep -> real/sub`, `deep/..` is
+  `real`, the target's parent, not the link's; a directory that does not resolve degrades to its
+  absolute spelling, or to the spelling given when no absolute form exists) and `PWD` pinned to it
+  under gofresh's go-command policy — an environment that policy's normalization refuses (a duplicated
+  or malformed entry) is refused, never repaired — so the resolved-directory premise holds by
+  construction through a symlinked checkout whose shell exports the alias, with no per-site bridging.
+  Source, guard, purity, or commit drift aborts the package write; worktree-state drift is arm-scoped
+  — an arm whose own repository-state bracket moved is refused alone (single-subject execution above),
+  and non-source residue never aborts the write of the sibling arms' recordings. Every destination is
   staged before replacement and every returned commit failure restores the prior complete set, so one
   package run is one producer transaction across ordinary filesystem errors. Each file is individually
   temp-and-rename safe; sudden process death during a multi-file commit may leave a recording absent,

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -72,13 +71,9 @@ func (ac abConfig) sideGuards(ctx context.Context, moduleDir, pkgDir string, mai
 // abPackageName resolves a package directory's package name with the same
 // toolchain environment the builds use.
 func abPackageName(ctx context.Context, dir string, env []string) (string, error) {
-	out, err := gotool.Command(ctx, dir, env, "list", "-f", "{{.Name}}", ".").Output()
+	out, err := gotool.Output(ctx, dir, env, "list", "-f", "{{.Name}}", ".")
 	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
-			return "", fmt.Errorf("go list: %w: %s", err, strings.TrimSpace(string(ee.Stderr)))
-		}
-		return "", fmt.Errorf("go list: %w", err)
+		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
 }

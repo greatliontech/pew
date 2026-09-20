@@ -460,7 +460,7 @@ func checkPackage(ctx context.Context, st *store.Store, e *gofresh.Engine, pkgPa
 		v := verdicts[subject]
 		pendingLedger := ""
 		var refreshedFP gofresh.Fingerprint
-		if v.Status == gofresh.Stale && v.Reason == "test variants" {
+		if v.Status == gofresh.Stale && v.Reason == gofresh.ReasonTestVariants {
 			if refreshed, encoded, rv, ok := inertGrownRecheckOn(ctx, view, subject, c.ledger, c.fp); ok {
 				v, refreshedFP, pendingLedger = rv, refreshed, encoded
 			}
@@ -490,7 +490,7 @@ func verdictForRecs(ctx context.Context, e *gofresh.Engine, pkgPath, moduleDir, 
 	}
 	pendingLedger := ""
 	var refreshedFP gofresh.Fingerprint
-	if v.Status == gofresh.Stale && v.Reason == "test variants" {
+	if v.Status == gofresh.Stale && v.Reason == gofresh.ReasonTestVariants {
 		if refreshed, encoded, rv, ok := inertGrownRecheck(ctx, e, moduleDir, pkgPath, bench, recordedLedger, fp); ok {
 			// The refreshed verdict takes the ordinary verdict's place: a
 			// record that would read
@@ -517,7 +517,8 @@ func verdictForRecs(ctx context.Context, e *gofresh.Engine, pkgPath, moduleDir, 
 }
 
 // inertGrownRecheck applies the inert-growth verdict rule (spec §7.9) to a
-// recording refused as exactly stale "test variants". That verdict
+// recording refused as exactly stale test variants
+// (gofresh.ReasonTestVariants). That verdict
 // certifies the benchmark's own source closure unchanged and nothing more —
 // gofresh orders the compartment comparison after the core and before the
 // environment tiers, so a moved guard or runtime input can hide behind that
