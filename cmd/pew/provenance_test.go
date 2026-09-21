@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/pew/internal/gotool"
 	runpkg "github.com/greatliontech/pew/internal/run"
 )
@@ -136,8 +137,9 @@ func TestGoVersionSampleRunsUnderTheEnvironmentPolicy(t *testing.T) {
 	err = checkToolchainProvenance(context.Background(), link, dup)
 	var envErr *gotool.EnvironmentError
 	var pe *toolchainProvenanceError
-	if !errors.As(err, &envErr) || errors.As(err, &pe) {
-		t.Fatalf("a duplicated key reported as %v; want the environment's own class", err)
+	var composite *gofresh.ToolchainProvenanceError
+	if !errors.As(err, &envErr) || errors.As(err, &pe) || errors.As(err, &composite) || strings.Contains(err.Error(), "toolchain provenance") {
+		t.Fatalf("a duplicated key reported as %v; want the environment's own class alone, unwrapped from the composite's refusal", err)
 	}
 }
 
@@ -167,67 +169,66 @@ func TestToolchainProvenanceErrorClassifies(t *testing.T) {
 	}
 }
 
-// The default sampler memoizes per (dir, env): one `go env` exec per
-// distinct key per process, so the prerequisite's cost stays constant
-// in package count.
-func TestMemoizedSamplerSamplesOncePerKey(t *testing.T) {
-	calls := map[string]int{}
-	sampler := memoizedSampler(func(_ context.Context, dir string, env []string) (string, error) {
-		calls[dir]++
-		if dir == "/bad" {
-			return "", fmt.Errorf("boom")
+// The default sampler memoizes per (coordinate, environment): one
+// `go env` command prepared per distinct key per process, so the
+// prerequisite's cost stays constant in package count; a failed sample
+// is memoized like an answered one, and a sample cancelled in flight
+// never — it must not answer a later live call for the same key with a
+// stale cancellation. The prepared commands are counted through the
+// runner's boundary hook, keyed by the directory the spawn resolved.
+func TestToolchainSamplerSamplesOncePerKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spawns the toolchain")
+	}
+	prepared := map[string]int{}
+	prior := sampleCommandObserver
+	sampleCommandObserver = func(cmd *exec.Cmd) { prepared[cmd.Dir]++ }
+	t.Cleanup(func() { sampleCommandObserver = prior })
+	// The hook sees the resolved directory; the expectations index the
+	// filesystem's own resolution of each fixture.
+	resolvedOf := func(dir string) string {
+		if r, err := filepath.EvalSymlinks(dir); err == nil {
+			return r
 		}
-		return "go1.27.0", nil
-	})
+		return dir
+	}
+	goodDir, badDir := t.TempDir(), filepath.Join(t.TempDir(), "absent")
+	good, bad := resolvedOf(goodDir), resolvedOf(badDir)
+	env := func(k string) []string { return append(slices.Clone(os.Environ()), "PEW_MEMO_KEY="+k) }
 	for range 3 {
-		if v, err := sampler(context.Background(), "/a", []string{"K=1"}); err != nil || v != "go1.27.0" {
-			t.Fatalf("sampler(/a) = %q, %v", v, err)
+		if v, err := sampleGoVersion(context.Background(), goodDir, env("1")); err != nil || !strings.HasPrefix(v, "go") {
+			t.Fatalf("sample(good) = %q, %v", v, err)
 		}
-		if _, err := sampler(context.Background(), "/bad", []string{"K=1"}); err == nil {
-			t.Fatal("memoized failure did not stay a failure")
+		if _, err := sampleGoVersion(context.Background(), badDir, env("1")); err == nil {
+			t.Fatal("a sample in an absent directory answered")
 		}
 	}
-	if _, err := sampler(context.Background(), "/a", []string{"K=2"}); err != nil {
+	if _, err := sampleGoVersion(context.Background(), goodDir, env("2")); err != nil {
 		t.Fatal(err)
 	}
-	if calls["/a"] != 2 || calls["/bad"] != 1 {
-		t.Fatalf("underlying sample calls = %v, want /a:2 (two env keys), /bad:1", calls)
+	if prepared[good] != 2 || prepared[bad] != 1 {
+		t.Fatalf("prepared = %v, want good:2 (two environment keys), bad:1 (the failure memoized)", prepared)
 	}
-	// A cancellation is not memoized: it must not answer a later live
-	// call for the same key with a stale "context canceled".
-	ctxCalls := 0
-	poison := memoizedSampler(func(ctx context.Context, dir string, env []string) (string, error) {
-		ctxCalls++
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		return "go1.27.0", nil
-	})
+	// Cancelled in flight: the hook fires once the command is prepared
+	// and before it runs, so cancelling there ends a sample that had
+	// started — the shape a pre-cancelled context never reaches (the
+	// sampler refuses before preparing anything).
 	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := poison(cancelled, "/c", nil); err == nil {
-		t.Fatal("a cancelled sample returned no error")
+	freshDir := t.TempDir()
+	fresh := resolvedOf(freshDir)
+	sampleCommandObserver = func(cmd *exec.Cmd) { prepared[cmd.Dir]++; cancel() }
+	if _, err := sampleGoVersion(cancelled, freshDir, env("1")); err == nil {
+		t.Fatal("a sample cancelled in flight answered")
 	}
-	if v, err := poison(context.Background(), "/c", nil); err != nil || v != "go1.27.0" {
+	if prepared[fresh] != 1 {
+		t.Fatalf("the cancelled sample prepared %d commands, want the one it started", prepared[fresh])
+	}
+	sampleCommandObserver = func(cmd *exec.Cmd) { prepared[cmd.Dir]++ }
+	if v, err := sampleGoVersion(context.Background(), freshDir, env("1")); err != nil || !strings.HasPrefix(v, "go") {
 		t.Fatalf("a live call after a cancelled one = %q, %v; want the fresh sample (the cancellation poisoned the memo)", v, err)
 	}
-	if ctxCalls != 2 {
-		t.Fatalf("underlying calls after cancel+live = %d, want 2 (the cancelled sample was not memoized)", ctxCalls)
-	}
-	// An alias and its target are one key: the command resolves the
-	// directory, so the memo keys by the resolved one.
-	real := t.TempDir()
-	link := filepath.Join(t.TempDir(), "alias")
-	if err := os.Symlink(real, link); err != nil {
-		t.Skipf("symlink unsupported: %v", err)
-	}
-	for _, d := range []string{link, real, link} {
-		if _, err := sampler(context.Background(), d, []string{"K=1"}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if calls[link]+calls[real] != 1 {
-		t.Fatalf("alias and target sampled %d+%d times; want one sample for the one resolved key", calls[link], calls[real])
+	if prepared[fresh] != 2 {
+		t.Fatalf("the live call after a cancelled one prepared %d in all, want two (the cancelled sample was not memoized)", prepared[fresh])
 	}
 }
 

@@ -11,10 +11,11 @@ import (
 // The real comparative capture — no seam installed — reads the module's
 // toolchain and build identity through the pass reader built under pew's
 // policy and the process facts beside them: every guard the comparator
-// judges is captured, and both children the capture spawns through the
-// reader — the go-env snapshot and the toolchain sample — run in the
-// module's resolved coordinate: a symlinked checkout reads the target,
-// never the link (spec §9's one environment policy for the go children).
+// judges is captured, the effective-GOFLAGS read and the capture share
+// the pass's one go-env snapshot, and both children the capture spawns
+// through the reader — that snapshot and the toolchain sample — run in
+// the module's resolved coordinate: a symlinked checkout reads the
+// target, never the link (spec §9's one environment policy).
 func TestSideGuardsCaptureTheModulesIdentity(t *testing.T) {
 	if testing.Short() {
 		t.Skip("spawns the toolchain over a fixture module")
@@ -42,16 +43,18 @@ func TestSideGuardsCaptureTheModulesIdentity(t *testing.T) {
 	// Both children the capture needs ride the reader — named by their
 	// arguments, not counted, so a later engine's extra child changes
 	// nothing here — and each runs in the resolved coordinate.
-	rode := map[string]bool{}
+	rode := map[string]int{}
 	for _, cmd := range seen {
 		if cmd.Dir != resolved {
 			t.Fatalf("the capture's spawn %v ran in %q, want the module's resolved coordinate %q", cmd.Args, cmd.Dir, resolved)
 		}
 		if len(cmd.Args) > 1 {
-			rode[cmd.Args[1]] = true
+			rode[cmd.Args[1]]++
 		}
 	}
-	if !rode["env"] || !rode["version"] {
-		t.Fatalf("the capture's children through the reader were %v, want the go-env snapshot and the toolchain sample", rode)
+	// One pass, one snapshot: the effective-GOFLAGS read and the guard
+	// capture share the reader, so exactly one go-env child ran.
+	if rode["env"] != 1 || rode["version"] == 0 {
+		t.Fatalf("the capture's children through the reader were %v, want one go-env snapshot and the toolchain sample", rode)
 	}
 }

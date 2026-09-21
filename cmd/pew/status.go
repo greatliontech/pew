@@ -109,7 +109,11 @@ func newEngineAtProducer(ctx context.Context, moduleDir, pkgDir string, mainPkg 
 	if err := resolveVouches(); err != nil {
 		return nil, "", err
 	}
-	goflags, err := runpkg.EffectiveGoflags(ctx, moduleDir, env)
+	reader, err := gotool.Reader(moduleDir, env, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	goflags, err := runpkg.EffectiveGoflags(ctx, reader)
 	if err != nil {
 		return nil, "", err
 	}

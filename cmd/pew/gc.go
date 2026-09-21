@@ -210,11 +210,14 @@ func addStoreOnlySourceBenchmarks(w io.Writer, st *store.Store, moduleDir string
 }
 
 func currentModuleDir(ctx context.Context) (string, error) {
-	out, err := gotool.Run(ctx, "env", "GOMOD")
+	reader, err := gotool.Reader("", nil, nil)
 	if err != nil {
 		return "", err
 	}
-	gomod := strings.TrimSpace(string(out))
+	gomod, err := gotool.EnvValue(ctx, reader, "GOMOD")
+	if err != nil {
+		return "", err
+	}
 	if gomod == "" || gomod == os.DevNull {
 		return "", nil
 	}

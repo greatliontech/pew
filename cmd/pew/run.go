@@ -15,6 +15,7 @@ import (
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/pew/internal/gitblob"
+	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 	"github.com/spf13/cobra"
@@ -717,7 +718,13 @@ func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitSta
 	// snapshots, so it gets its own pre-write revalidation: the recorded
 	// buildconfig must describe the exact bytes the measured compile
 	// consumed.
-	goflagsAtWrite, err := run.EffectiveGoflags(gate, p.Module.Dir, env)
+	// A fresh pass reader per write: the pre-write revalidation reads
+	// the environment as it is now, never the run's earlier snapshot.
+	writeReader, err := gotool.Reader(p.Module.Dir, env, nil)
+	if err != nil {
+		return gated(err)
+	}
+	goflagsAtWrite, err := run.EffectiveGoflags(gate, writeReader)
 	if err != nil {
 		return gated(err)
 	}

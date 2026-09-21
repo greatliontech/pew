@@ -20,6 +20,7 @@ import (
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
+	gofreshtool "github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/pew/internal/gotool"
 	"golang.org/x/perf/benchfmt"
@@ -388,16 +389,19 @@ func BenchName(resultName string) string {
 	return "Benchmark" + base
 }
 
-// EffectiveGoflags resolves the GOFLAGS the go command will actually apply in
-// moduleDir under env — `go env` folds the process variable and the go env
-// file (`go env -w`) with go's own precedence, so a profile configured through
-// either channel is seen. Scanning the process env alone misses the env file.
-func EffectiveGoflags(ctx context.Context, moduleDir string, env []string) (string, error) {
-	out, err := gotool.Output(ctx, moduleDir, env, "env", "GOFLAGS")
+// EffectiveGoflags resolves the GOFLAGS the go command will actually apply
+// for the pass the reader serves — `go env` folds the process variable and
+// the go env file (`go env -w`) with go's own precedence, so a profile
+// configured through either channel is seen; scanning the process env alone
+// misses the env file. The read is the pass's one snapshot: a pass that also
+// captures guards hands the same reader to the capture, so one pass pays one
+// env exec and both read one document.
+func EffectiveGoflags(ctx context.Context, reader *gofreshtool.EnvReader) (string, error) {
+	goflags, err := gotool.EnvValue(ctx, reader, "GOFLAGS")
 	if err != nil {
 		return "", fmt.Errorf("run: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return goflags, nil
 }
 
 // PGOInput resolves the PGO profile a go-test invocation of one package will

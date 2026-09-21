@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	gofresh "github.com/greatliontech/gofresh"
+	gofreshtool "github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/pew/internal/compare"
 	"github.com/greatliontech/pew/internal/gitblob"
 	"github.com/greatliontech/pew/internal/gotool"
@@ -395,7 +396,10 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 					// guarantees a decodable fingerprint on this side.
 					goflags, ok := goflagsByModule[cur.moduleDir]
 					if !ok {
-						goflags, err = runpkg.EffectiveGoflags(ctx, cur.moduleDir, os.Environ())
+						var reader *gofreshtool.EnvReader
+						if reader, err = gotool.Reader(cur.moduleDir, nil, nil); err == nil {
+							goflags, err = runpkg.EffectiveGoflags(ctx, reader)
+						}
 						if cancelledBy(ctx, err) {
 							return stoppedAt()
 						}

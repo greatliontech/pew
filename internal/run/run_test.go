@@ -12,6 +12,7 @@ import (
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/pew/internal/gotool"
 	"golang.org/x/perf/benchfmt"
 )
 
@@ -294,7 +295,11 @@ func TestEffectiveGoflags(t *testing.T) {
 			env = append(env, entry)
 		}
 	}
-	fromFile, err := EffectiveGoflags(context.Background(), dir, append(env, "GOENV="+goenv))
+	fileReader, err := gotool.Reader(dir, append(env, "GOENV="+goenv), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromFile, err := EffectiveGoflags(context.Background(), fileReader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +307,11 @@ func TestEffectiveGoflags(t *testing.T) {
 		t.Fatalf("EffectiveGoflags = %q, want the env-file value", fromFile)
 	}
 	// The process variable wins over the file, per the go command.
-	fromEnv, err := EffectiveGoflags(context.Background(), dir, append(env, "GOENV="+goenv, "GOFLAGS=-pgo=proc.pgo"))
+	envReader, err := gotool.Reader(dir, append(env, "GOENV="+goenv, "GOFLAGS=-pgo=proc.pgo"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromEnv, err := EffectiveGoflags(context.Background(), envReader)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -109,7 +109,7 @@ func TestRunError(t *testing.T) {
 	}
 }
 
-// run is every gofresh-runner invocation pew makes (Output, Sample): the
+// run is every gofresh-runner invocation pew itself issues (Output): the
 // directory resolved symlink-free and PWD pinned to it by the runner,
 // the caller's entries kept, a nil env inheriting the process's, a
 // refused environment its own class before any spawn, a cancelled
@@ -196,5 +196,77 @@ func TestRunAppliesTheEnvironmentPolicy(t *testing.T) {
 	cancel()
 	if _, err := run(cancelled, real, nil, nil, "env", "GOVERSION"); err == nil {
 		t.Fatal("a cancelled context did not stop the go invocation")
+	}
+}
+
+// A pass reader built here applies the same policy as run: its spawn
+// runs in the directory resolved symlink-free with PWD pinned to it,
+// the caller's entries kept, a nil env inheriting the process's, and a
+// refused environment its own class before any spawn — observed
+// through the boundary hook the reader takes (spec §9). The reader is
+// the one route every go-env value pew reads takes.
+func TestReaderAppliesTheEnvironmentPolicy(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	resolved, err := filepath.EvalSymlinks(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"PEW_READER_MARKER=1", "PWD=/elsewhere"}
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "PWD=") && !strings.HasPrefix(kv, "PEW_READER_MARKER=") {
+			env = append(env, kv)
+		}
+	}
+	var seen *exec.Cmd
+	reader, err := Reader(link, env, func(cmd *exec.Cmd) { seen = cmd })
+	if err != nil {
+		t.Fatal(err)
+	}
+	gomod, err := EnvValue(context.Background(), reader, "GOMOD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gomod != "" && gomod != os.DevNull {
+		t.Fatalf("GOMOD outside a module = %q", gomod)
+	}
+	if seen == nil || seen.Dir != resolved {
+		t.Fatalf("the reader's spawn Dir = %v, want the resolved dir %q", seen, resolved)
+	}
+	if !slices.Contains(seen.Env, "PWD="+resolved) || !slices.Contains(seen.Env, "PEW_READER_MARKER=1") {
+		t.Fatalf("the reader's spawn env: %v; want PWD pinned to %q and the caller's entries kept", seen.Env, resolved)
+	}
+	// One reader, one spawn: a second value reads the same document.
+	if _, err := EnvValue(context.Background(), reader, "GOFLAGS"); err != nil {
+		t.Fatal(err)
+	}
+	spawns := 0
+	reader2, err := Reader(link, env, func(*exec.Cmd) { spawns++ })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if _, err := EnvValue(context.Background(), reader2, "GOFLAGS"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if spawns != 1 {
+		t.Fatalf("three values through one reader spawned %d times, want one", spawns)
+	}
+	t.Setenv("PEW_READER_INHERITED", "yes")
+	seen = nil
+	reader3, err := Reader(link, nil, func(cmd *exec.Cmd) { seen = cmd })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnvValue(context.Background(), reader3, "GOMOD"); err != nil || seen == nil || !slices.Contains(seen.Env, "PEW_READER_INHERITED=yes") {
+		t.Fatalf("a nil env did not inherit the process environment: %v, %v", err, seen)
+	}
+	var envErr *EnvironmentError
+	if _, err := Reader(link, append(slices.Clone(env), "PEW_READER_MARKER=2"), nil); !errors.As(err, &envErr) {
+		t.Fatalf("a duplicated key built a reader: %v; want pew's environment class before any spawn", err)
 	}
 }

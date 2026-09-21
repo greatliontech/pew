@@ -8,21 +8,21 @@
 // gofresh's: a directory that does not resolve degrades to its absolute
 // spelling, and a nil environment inherits the process's. Every go
 // invocation pew makes takes one of three routes, each under the same
-// composition: run here through gofresh's runner (Output, Sample),
-// spawned by gofresh's own analysis entries through a pass reader
-// built here (Reader), or — where the spawn needs its own process
-// group (internal/run's runCommand) — built over CommandDir and
-// CommandEnvironment. Resolve is the one composition the first two
+// composition: run here through gofresh's runner (Output), spawned
+// through a pass reader built here (Reader — gofresh's own analysis
+// entries and pew's go-env reads alike), or — where the spawn needs its
+// own process group (internal/run's runCommand) — built over CommandDir
+// and CommandEnvironment. Resolve is the one composition the first two
 // share: the directory to its coordinate, the environment inherited
 // and refused as pew's class.
 package gotool
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	gofreshtool "github.com/greatliontech/gofresh/gotool"
 )
@@ -89,17 +89,22 @@ func Output(ctx context.Context, dir string, env []string, args ...string) ([]by
 	return run(ctx, dir, env, nil, args...)
 }
 
-// Sample is gofresh's toolchain sample (gotool.SampleGoVersion: `go env
-// GOVERSION` in the target module's directory, PWD pinned) under pew's
-// directory resolution and nil-env inheritance; prepare, when set, is
-// the runner's boundary hook on the spawn — the seam a pin observes
-// the command's directory and environment through.
-func Sample(ctx context.Context, dir string, env []string, prepare func(*exec.Cmd)) (string, error) {
-	out, err := run(ctx, dir, env, prepare, "env", "GOVERSION")
+// EnvValue is one go-env value read through a pass reader: the
+// reader's one `go env -json` snapshot (taken on its first ask, served
+// to every later one — gofresh's published form), the key read from
+// the pass's document. A key the go command does not set reads empty;
+// a nil reader is refused as gofresh's own analysis entries refuse it.
+// Every go-env value pew wants from one pass comes from that pass's
+// reader, never a per-key probe.
+func EnvValue(ctx context.Context, reader *gofreshtool.EnvReader, key string) (string, error) {
+	if reader == nil {
+		return "", errors.New("gotool: nil pass reader")
+	}
+	snap, err := reader.Snapshot(ctx)
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	return snap.Value(key), nil
 }
 
 // Runner is gofresh's runner under pew's boundary hook: the one spawn
