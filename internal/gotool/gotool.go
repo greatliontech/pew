@@ -7,10 +7,14 @@
 // environment policy). This package composes pew's two contracts around
 // gofresh's: a directory that does not resolve degrades to its absolute
 // spelling, and a nil environment inherits the process's. Every go
-// invocation pew makes is either run here through gofresh's runner
-// (Output, Sample) or, where the spawn needs its own process group
-// (internal/run's runCommand), built over the same two helpers,
-// CommandDir and CommandEnvironment.
+// invocation pew makes takes one of three routes, each under the same
+// composition: run here through gofresh's runner (Output, Sample),
+// spawned by gofresh's own analysis entries through a pass reader
+// built here (Reader), or — where the spawn needs its own process
+// group (internal/run's runCommand) — built over CommandDir and
+// CommandEnvironment. Resolve is the one composition the first two
+// share: the directory to its coordinate, the environment inherited
+// and refused as pew's class.
 package gotool
 
 import (
@@ -98,23 +102,57 @@ func Sample(ctx context.Context, dir string, env []string, prepare func(*exec.Cm
 	return strings.TrimSpace(string(out)), nil
 }
 
-// run is every gofresh-runner invocation pew makes: the environment
-// refused as its own class before the spawn, the directory resolved,
-// the hook handed to the runner. The normalization runs here ahead of
-// the runner's own (the same predicate, inside gotool.EnvForCommand)
-// deliberately: gofresh reports a refusal as an untyped message under
-// the command's name, so the pre-check is what lets a caller see pew's
-// class — and once it passes, the runner's second pass cannot newly
-// fail, so an environment refusal is always pew's class. The runner's
-// other refusal, a directory with no absolute form (an unreadable
-// working directory, CommandDir degraded to the spelling given), is
-// gofresh's own message and not an environment fact.
-func run(ctx context.Context, dir string, env []string, prepare func(*exec.Cmd), args ...string) ([]byte, error) {
+// Runner is gofresh's runner under pew's boundary hook: the one spawn
+// policy every go child pew makes through gofresh rides — Command's
+// derived environment over a resolved directory. prepare, when set, is
+// the hook a pin observes the command's directory and environment
+// through.
+func Runner(prepare func(*exec.Cmd)) gofreshtool.Runner {
+	return gofreshtool.Runner{Prepare: prepare}
+}
+
+// Resolve resolves the caller's directory and environment under pew's
+// policy ahead of a gofresh spawn: the directory to its coordinate, a
+// nil environment inherited, an environment the policy refuses named as
+// pew's own class before any command exists. The normalization runs
+// here ahead of the runner's own (the same predicate, inside
+// gotool.EnvForCommand) deliberately: gofresh reports a refusal as an
+// untyped message under the command's name, so the pre-check is what
+// lets a caller see pew's class — and once it passes, the runner's
+// second pass cannot newly fail, so an environment refusal is always
+// pew's class.
+func Resolve(dir string, env []string) (string, []string, error) {
 	env = inherited(env)
 	if _, err := gofreshtool.NormalizeEnv(env); err != nil {
-		return nil, &EnvironmentError{Err: err}
+		return "", nil, &EnvironmentError{Err: err}
 	}
-	return gofreshtool.Runner{Prepare: prepare}.Run(ctx, CommandDir(dir), env, args...)
+	return CommandDir(dir), env, nil
+}
+
+// Reader is a pass's go-env reader (gotool.EnvReader: the first key
+// takes the pass's one `go env -json` snapshot) over the directory and
+// environment Resolve answers, its spawns under Runner(prepare) — the
+// value gofresh's analysis entries take, built under pew's policy.
+func Reader(dir string, env []string, prepare func(*exec.Cmd)) (*gofreshtool.EnvReader, error) {
+	resolved, env, err := Resolve(dir, env)
+	if err != nil {
+		return nil, err
+	}
+	return gofreshtool.NewEnvReader(Runner(prepare), resolved, env), nil
+}
+
+// run is every gofresh-runner invocation pew itself issues — gofresh's
+// analysis entries spawn through Reader's: the directory and
+// environment through Resolve, the hook handed to the runner. The
+// runner's other refusal, a directory with no absolute form (an
+// unreadable working directory, CommandDir degraded to the spelling
+// given), is gofresh's own message and not an environment fact.
+func run(ctx context.Context, dir string, env []string, prepare func(*exec.Cmd), args ...string) ([]byte, error) {
+	resolved, env, err := Resolve(dir, env)
+	if err != nil {
+		return nil, err
+	}
+	return Runner(prepare).Run(ctx, resolved, env, args...)
 }
 
 // Run executes `go <args>` in the current directory under ctx. See RunIn.

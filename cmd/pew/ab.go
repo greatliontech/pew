@@ -64,9 +64,23 @@ func (ac abConfig) sideGuards(ctx context.Context, moduleDir, pkgDir string, mai
 	// The runtime environment is the analysis environment here: ab's
 	// guards are compared between the two sides and never recorded, and
 	// both sides measure under the same pin, so the comparative capture
-	// reads the shared analysis env for the runtime guard as well.
-	return guard.Capture(ctx, moduleDir, env, env, guard.Measurement, nil, buildInputs...)
+	// reads the shared analysis env for the runtime guard as well. The
+	// capture's own go children ride a pass reader built under pew's
+	// policy (gotool.Reader: the module's coordinate, the environment
+	// inherited and refused as pew's class) — here env is the analysis
+	// environment, never nil, and EffectiveGoflags above already refused
+	// it as pew's class, so the reader's own refusal is unreachable.
+	reader, err := gotool.Reader(moduleDir, env, captureCommandObserver)
+	if err != nil {
+		return guard.Guards{}, err
+	}
+	return guard.Capture(ctx, reader, env, guard.Measurement, buildInputs...)
 }
+
+// captureCommandObserver is the reader's boundary hook on every child
+// the capture spawns — the go-env snapshot and the toolchain sample;
+// nil in production, a pin installs one to observe their directories.
+var captureCommandObserver func(*exec.Cmd)
 
 // abPackageName resolves a package directory's package name with the same
 // toolchain environment the builds use.
