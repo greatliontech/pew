@@ -85,11 +85,10 @@ func TestIsRecordingRequiresCurrentFormat(t *testing.T) {
 	if IsRecording([]*benchfmt.Result{unknown}) {
 		t.Fatal("non-current format accepted")
 	}
-	duplicate := recs[0].Clone()
-	duplicate.Config = append(duplicate.Config, benchfmt.Config{Key: "pew-format", Value: []byte("2"), File: true})
-	if IsRecording([]*benchfmt.Result{duplicate}) {
-		t.Fatal("duplicate format accepted")
-	}
+	// A duplicated discriminator never reaches parsed configuration as
+	// two entries (benchfmt replaces a repeated key in place): the raw
+	// reader's rule, driven end to end through Parse in
+	// TestParseFromContent's table.
 }
 
 // TestRawFormatRejectsDuplicateRecordingKeys: §5's duplicate rejection covers
@@ -496,6 +495,12 @@ func TestParseFromContent(t *testing.T) {
 		"changed": strings.Replace(sample,
 			"BenchmarkRun-8 1000000 1240 ns/op",
 			formatLine+"\nBenchmarkRun-8 1000000 1240 ns/op", 1),
+		// A file spelling the reader's own annotation key, before or
+		// after its discriminator: a foreign `pew-` key the raw reader
+		// marks, and the appended annotation is authoritative whatever
+		// the file's entry says, in any position.
+		"self-annotated-after":  strings.Replace(sample, formatLine+"\n", formatLine+"\n"+run.FormatInvalidAnnotation+": no\n", 1),
+		"self-annotated-before": run.FormatInvalidAnnotation + ": no\n" + sample,
 	} {
 		t.Run(name, func(t *testing.T) {
 			recs, err := Parse(strings.NewReader(raw), name)

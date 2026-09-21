@@ -476,18 +476,32 @@ func isPewRecording(path string) bool {
 // guard keys. It lets callers distinguish pew recordings from arbitrary benchmark
 // files that happen to match the storage path shape.
 func IsRecording(recs []*benchfmt.Result) bool {
-	if !IsRecordingShape(recs) {
-		return false
-	}
-	cfg := map[string]string{}
-	formatCount := 0
-	for _, c := range recs[0].Config {
-		cfg[c.Key] = string(c.Value)
-		if c.Key == run.KeyFormat.Name {
-			formatCount++
+	return IsRecordingShape(recs) && FormatCurrent(recs[0].Config)
+}
+
+// FormatCurrent is the format rung's one judgment over a result's
+// parsed configuration: the discriminator present with the current
+// version, and no reader-side annotation marking the raw bytes invalid
+// (spec §5's `pew-format` rule) — the store's reading and the
+// fingerprint reader's alike. The discriminator is single here because
+// benchfmt keeps one entry per parsed key, so the duplicate, whitespace,
+// and line-ending rules are the raw reader's (rawFormatValid), which
+// appends the annotation Parse delivers; that entry is authoritative in
+// any position — a file spelling the annotation's key itself is a
+// foreign `pew-` key the raw reader already marks — so one "true"
+// among the annotation's entries refuses, whatever another says.
+func FormatCurrent(cfg []benchfmt.Config) bool {
+	var format string
+	invalid := false
+	for _, c := range cfg {
+		switch c.Key {
+		case run.KeyFormat.Name:
+			format = string(c.Value)
+		case run.FormatInvalidAnnotation:
+			invalid = invalid || string(c.Value) == "true"
 		}
 	}
-	return cfg[run.FormatInvalidAnnotation] != "true" && formatCount == 1 && cfg[run.KeyFormat.Name] == run.RecordingFormat
+	return !invalid && format == run.RecordingFormat
 }
 
 // IsPewMarked reports whether parsed results carry any pew-owned (`pew-`

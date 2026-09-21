@@ -132,7 +132,15 @@ writer refuses otherwise. The writer refuses any line past `benchfmt`'s
 64 KiB scanner bound — a chunked row cannot reach it, an unbounded other row is a producer fault —
 which is how REQ-pew-artifact-format's promise holds for every file `pew run` writes; a recording of
 an earlier format carrying such a line is refused on read with the regenerating operation named,
-never lifted or interpreted.
+never lifted or interpreted. The rules only the raw bytes can decide — every recording
+key's duplicate rule, the discriminator's whitespace and line-ending rules, and the
+namespace rule below — are decided there (`benchfmt` keeps one entry per parsed key, so a
+repeat is visible nowhere else) and delivered to every parsed reader as one reader-side
+annotation naming the file invalid; that annotation is authoritative in any position over
+an entry the file spells itself, and one parsed judgment reads it beside the version. A
+`pew-`-prefixed key the table does not name is `stale (format)` on read — the namespace is
+the tool's own, so a foreign spelling in it is a malformed recording, the reader's own
+annotation key among them — and, like every foreign key, warned by name at the read.
 Format governs interpretation rather than measurement identity and is projected from comparisons.
 
 **The recording key set is closed** (REQ-pew-key-set). Stream-derived configuration keys other than the four
@@ -156,7 +164,7 @@ recording carrying a file-configuration key outside the closed set (written befo
 enforcement, or hand-edited) is surfaced with a warning naming the key at every verdict read —
 it fragments comparison grouping silently, and regeneration is the remediation. `pew run` stores recordings whose
 configuration keys are drawn only from the closed set: the toolchain's four and every row of the §5
-table. This is a producer contract — read paths do not police historical recordings for foreign keys.
+table. This is a producer contract — read paths do not police historical recordings for foreign keys outside the `pew-` namespace.
 `pew-purity` is benchmark-specific despite the surrounding uniform provenance keys and is omitted
 when capture used no purity assertion; omission is the canonical no-attribution encoding.
 

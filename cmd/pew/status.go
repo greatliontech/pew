@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
@@ -152,27 +153,37 @@ func resolveVouches() error {
 	return nil
 }
 
-// engineDiagnostics receives payload-bearing gofresh diagnostics from
-// every engine a command builds — command-wide configuration like the
-// vouch set (a var, not a threaded parameter). The read is
-// unsynchronized on analysis goroutines: tests may swap it only while
-// no engine is live, and only engine-free tests do.
-var engineDiagnostics io.Writer = os.Stderr
+// engineDiagnostics is the sink every engine a command builds writes
+// its payload-bearing diagnostics through — gofresh's own
+// (gofresh.DiagnosticsTo over the operator's log): one "gofresh: "
+// line per event, a multi-line detail folded onto it, the writes
+// serialized by the sink, so analysis goroutines never interleave on
+// the log. Command-wide configuration like the vouch set (a var, not a
+// threaded parameter). The var's read is unsynchronized on analysis
+// goroutines: tests swap it for a sink over their own buffer only
+// while no engine is live, and only engine-free tests do.
+var engineDiagnostics = gofresh.DiagnosticsTo(os.Stderr)
 
-// emitEngineDiagnostic writes a payload-bearing gofresh event
+// emitEngineDiagnostic hands a payload-bearing gofresh event
 // (per-subject analysis-unavailable provenance, the unlisted-toolchain
-// notice) to the operator's log, and hands every detail-free
-// keep-alive to the reporter as the stretch in flight — a typed load's
+// notice) to the diagnostics sink, and a keep-alive that opens a unit
+// of analysis work — gofresh's own per-unit phase set, never spelled
+// here — to the reporter as the stretch in flight: a typed load's
 // phases are the longest silent stretches a verb has (spec
-// REQ-pew-progress). Without the payload consumer, an unlisted release
-// surfaces only as scattered stale/unverifiable verdicts with nothing
-// naming the walk needed.
+// REQ-pew-progress); a unit event may carry no package (the observe
+// and runtime passes), so the text is built without a doubled space.
+// A keep-alive that is a fact — the served class — names no stretch.
+// Without the payload consumer, an
+// unlisted release surfaces only as scattered stale/unverifiable
+// verdicts with nothing naming the walk needed.
 func emitEngineDiagnostic(p gofresh.Progress) {
-	if p.Detail != "" {
-		fmt.Fprintf(engineDiagnostics, "gofresh: %s %s — %s\n", p.Phase, p.Package, p.Detail)
+	if _, diagnostic := p.Diagnostic(); diagnostic {
+		engineDiagnostics(p)
 		return
 	}
-	reportPhase(fmt.Sprintf("analysis %s %s", p.Phase, p.Package))
+	if p.IsUnit() {
+		reportPhase(strings.TrimSpace("analysis " + p.Phase + " " + p.Package))
+	}
 }
 
 func buildEngine(ctx context.Context, moduleDir string, env, producerEnv []string, pgo string) (*gofresh.Engine, error) {
@@ -565,16 +576,14 @@ func inertGrownRecheckOn(ctx context.Context, view *gofresh.View, subject gofres
 // lines (spec §5: pew owns the serialization, gofresh owns the semantics), plus the
 // recorded test-variant ledger.
 func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, bool) {
+	// The format rung is the store's one judgment; this reader keeps
+	// only the fingerprint's restoration from the rows.
+	if !store.FormatCurrent(cfg) {
+		return gofresh.Fingerprint{}, "", false
+	}
 	m := make(map[string]string, len(cfg))
-	formatCount := 0
 	for _, c := range cfg {
 		m[c.Key] = string(c.Value)
-		if c.Key == runpkg.KeyFormat.Name {
-			formatCount++
-		}
-	}
-	if m[runpkg.FormatInvalidAnnotation] == "true" || formatCount != 1 || m[runpkg.KeyFormat.Name] != runpkg.RecordingFormat {
-		return gofresh.Fingerprint{}, "", false
 	}
 	return gofresh.Fingerprint{
 		MaximalClosure:     m[runpkg.KeyClosure.Name],

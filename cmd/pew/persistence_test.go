@@ -219,6 +219,14 @@ func TestReporterNamesThePhaseOnTheCadence(t *testing.T) {
 	time.Sleep(40 * time.Millisecond)
 	emitEngineDiagnostic(gofresh.Progress{Phase: "load", Package: "example.com/p"})
 	time.Sleep(40 * time.Millisecond)
+	// A keep-alive that is a fact, not a unit of work — a served class
+	// with no package — names no stretch: the load stays in flight.
+	emitEngineDiagnostic(gofresh.Progress{Phase: "served"})
+	time.Sleep(40 * time.Millisecond)
+	// A unit event with no package — the observe pass — names its
+	// stretch without a doubled space.
+	emitEngineDiagnostic(gofresh.Progress{Phase: "observe"})
+	time.Sleep(40 * time.Millisecond)
 	stop() // joins the cadence goroutine: no line lands after it
 	text := log.String()
 	if !strings.Contains(text, "pew: measuring example.com/p arm 1/2 (") || !strings.Contains(text, "elapsed)") {
@@ -226,6 +234,12 @@ func TestReporterNamesThePhaseOnTheCadence(t *testing.T) {
 	}
 	if !strings.Contains(text, "pew: analysis load example.com/p (") {
 		t.Fatalf("the engine keep-alive did not name the analysis stretch:\n%s", text)
+	}
+	if strings.Contains(text, "analysis served") || strings.Contains(text, "observe  ") {
+		t.Fatalf("a fact keep-alive named a stretch, or a stretch carried a doubled space:\n%s", text)
+	}
+	if !strings.Contains(text, "pew: analysis observe (") {
+		t.Fatalf("a package-less unit event did not name its stretch cleanly:\n%s", text)
 	}
 	time.Sleep(30 * time.Millisecond)
 	if log.String() != text {

@@ -42,10 +42,15 @@ func TestFingerprintFromConfig(t *testing.T) {
 	if g.Toolchain != "tc" || g.BuildConfig != "bc" || g.Machine != "m" || g.RuntimeConfig != "rc" {
 		t.Errorf("guards = %+v", g)
 	}
+	// Parsed configuration holds one entry per key (benchfmt's reader
+	// replaces a repeated key in place), so a duplicated discriminator
+	// never reaches this reader: the raw reader's rule marks the file
+	// (store.rawFormatValid, pinned with the store), and this reader
+	// judges the annotation it sets and the version.
 	unknown := append([]benchfmt.Config(nil), cfg...)
 	unknown[0].Value = []byte("1")
-	duplicate := append(append([]benchfmt.Config(nil), cfg...), benchfmt.Config{Key: "pew-format", Value: []byte(runpkg.RecordingFormat)})
-	for name, malformed := range map[string][]benchfmt.Config{"unknown": unknown, "duplicate": duplicate} {
+	annotated := append(append([]benchfmt.Config(nil), cfg...), benchfmt.Config{Key: runpkg.FormatInvalidAnnotation, Value: []byte("true")})
+	for name, malformed := range map[string][]benchfmt.Config{"unknown": unknown, "raw-invalid annotated": annotated} {
 		if _, _, ok := fingerprintFromConfig(malformed); ok {
 			t.Errorf("%s recording format accepted", name)
 		}
