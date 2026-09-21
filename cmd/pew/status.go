@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
@@ -60,12 +59,12 @@ func newStatusCmd() *cobra.Command {
 			return runStatus(ctx, cmd.OutOrStdout(), benchDir, label, staleOnly, explain, jsonOut, patterns)
 		},
 	}
-	cmd.Flags().StringVar(&benchDir, "bench-dir", "", "stored-recordings directory (default <module>/benchmarks); an explicit value applies to every package")
-	cmd.Flags().StringVar(&label, "label", "", "variant label to check (spec §6); empty = the unlabeled recording")
-	cmd.Flags().BoolVar(&staleOnly, "stale", false, "show only benchmarks that need re-running (non-valid)")
-	cmd.Flags().BoolVar(&explain, "explain", false, "explain each non-valid verdict: recorded vs current guard/input values (spec §12)")
-	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit one JSON object per row (spec §12, --json)")
-	cmd.Flags().StringArrayVar(&rawVouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, the load-bearing set recorded as pew-vouches (spec §12)")
+	cmd.Flags().StringVar(&benchDir, "bench-dir", "", "")
+	cmd.Flags().StringVar(&label, "label", "", "")
+	cmd.Flags().BoolVar(&staleOnly, "stale", false, "")
+	cmd.Flags().BoolVar(&explain, "explain", false, "")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "")
+	cmd.Flags().StringArrayVar(&rawVouches, "vouch", nil, "")
 	return cmd
 }
 
@@ -142,30 +141,15 @@ func resolveVouches() error {
 		dynamicStateVouches = nil
 		return nil
 	}
-	identities, err := parseDynamicStateVouches(rawVouches)
+	// The engine's own grammar and set rule (gofresh.ParseVouchEntries:
+	// IMPORT-PATH:VARIABLE, one Go identifier for the variable; a
+	// repeated flag is one acceptance; a malformed entry refuses the set).
+	identities, err := gofresh.ParseVouchEntries(rawVouches)
 	if err != nil {
 		return err
 	}
 	dynamicStateVouches = identities
 	return nil
-}
-
-// parseDynamicStateVouches maps --vouch entries onto gofresh's canonical
-// identities through the engine's own grammar (gofresh.ParseVouchEntry:
-// IMPORT-PATH:VARIABLE, one Go identifier for the variable), sorted and
-// compacted.
-func parseDynamicStateVouches(entries []string) ([]string, error) {
-	identities := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		identity, err := gofresh.ParseVouchEntry(entry)
-		if err != nil {
-			return nil, err
-		}
-		identities = append(identities, identity)
-	}
-	// The engine's vouch set is a set: a repeated flag is one acceptance.
-	slices.Sort(identities)
-	return slices.Compact(identities), nil
 }
 
 // engineDiagnostics receives payload-bearing gofresh diagnostics from

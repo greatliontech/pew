@@ -147,14 +147,14 @@ func newABCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&ac.bench, "bench", ".", "benchmark pattern (go test -bench syntax)")
-	f.IntVar(&ac.count, "count", 6, "interleaved iterations per side")
-	f.StringVar(&ac.benchtime, "benchtime", "", "per-benchmark time or iteration budget (go test -benchtime)")
-	f.StringVar(&ac.ref, "ref", "HEAD", "B side: any git rev the repository resolves")
-	f.BoolVar(&pin, "pin", false, "pin both sides to one CPU set derived from the host's topology (taskset)")
-	f.StringVar(&ac.worktreeDir, "worktree-dir", "", "same-filesystem directory for side B's worktree and both binaries when the repository's parent is unwritable or on another filesystem (default: the repository's parent)")
-	f.BoolVar(&ac.strict, "strict", false, "refuse to measure under noisy machine conditions")
-	f.StringVar(&ac.out, "out", "", "also write both sides' raw benchmark streams to this file (a derivation artifact, never a stat baseline)")
+	f.StringVar(&ac.bench, "bench", ".", "")
+	f.IntVar(&ac.count, "count", 6, "")
+	f.StringVar(&ac.benchtime, "benchtime", "", "")
+	f.StringVar(&ac.ref, "ref", "HEAD", "")
+	f.BoolVar(&pin, "pin", false, "")
+	f.StringVar(&ac.worktreeDir, "worktree-dir", "", "")
+	f.BoolVar(&ac.strict, "strict", false, "")
+	f.StringVar(&ac.out, "out", "", "")
 	return cmd
 }
 

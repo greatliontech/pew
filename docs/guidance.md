@@ -12,7 +12,7 @@
 - `ref` — B side: any git rev the repository resolves (default HEAD).
 - `pin` — pin both sides to one CPU set derived from the host's topology (taskset): the isolated set when the kernel has one, else one whole physical core, the fastest the kernel ranks, outside CPU 0's; the set and its derivation are reported first, and a host it cannot be derived on, or without taskset to apply it, refuses.
 - `strict` — refuse to measure under noisy machine conditions.
-- `worktree-dir` — directory for side B's worktree and both binaries, honoured whenever given; its purpose is a repository parent that is unwritable or on another filesystem (default the repository's parent). A placement on another device, or inside the repository, is refused. At the next run's start the placement's `.pew-ab-worktree-*` residue that this repository minted and git no longer registers is swept (an empty mint too); another repository's residue is left alone.
+- `worktree-dir` — directory for side B's worktree and both binaries, the repository's parent unless given; its purpose is a repository parent that is unwritable or on another filesystem. A placement on another device, or inside the repository, is refused. At the next run's start the placement's `.pew-ab-worktree-*` residue that this repository minted and git no longer registers is swept (an empty mint too); another repository's residue is left alone.
 - `out` — also write both sides' raw benchmark streams to this file, marked pew-ab/dirty — a derivation artifact, by shape never a stat baseline.
 **when:** use ab while a design or curve is still moving — the
 uncommitted working tree (side A) measures against the ref (side B)
@@ -37,7 +37,7 @@ HEAD while tuning a hot path.
 **surfaces:** cli
 **does:** Run benchmarks with hygiene and store results.
 **knobs:**
-- `bench-dir` — stored-recordings directory (default <module>/benchmarks).
+- `bench-dir` — stored-recordings directory, `<module>/benchmarks` unless given.
 - `count` — measurement runs per benchmark (default 10).
 - `benchtime` — duration or iterations per measurement (default 1s).
 - `bench` — benchmark name pattern (default .).
@@ -60,7 +60,7 @@ change — the unchanged benchmarks serve, the changed ones measure.
 **surfaces:** cli
 **does:** Report each benchmark as valid, stale, unverifiable, or unrecorded.
 **knobs:**
-- `bench-dir` — stored-recordings directory (default <module>/benchmarks); an explicit value applies to every package.
+- `bench-dir` — stored-recordings directory, `<module>/benchmarks` unless given; an explicit value applies to every package.
 - `label` — variant label to check; empty means the unlabeled recording.
 - `stale` — show only benchmarks that need re-running (non-valid); scriptable, the set run measures by default.
 - `explain` — explain each non-valid verdict: every guard's recorded vs current value, the closure hash, the runtime-input digest, and the manifest's watched identities — environment inputs disclosed as names with digest equality only, never values; a digest mismatch additionally names the moved watched inputs. Mutually exclusive with the JSON view (the explanation is a human view).
@@ -77,13 +77,13 @@ to re-measure.
 **surfaces:** cli
 **does:** Compare recorded benchmarks across git refs and flag regressions.
 **knobs:**
-- `bench-dir` — stored-recordings directory (default <module>/benchmarks).
+- `bench-dir` — stored-recordings directory, `<module>/benchmarks` unless given.
 - `label` — variant label to compare; empty means the unlabeled recording.
 - `alpha` — significance level for the Mann-Whitney U test (default 0.05); outside (0,1) refuses.
 - `threshold` — regression magnitude floor, in percent (default 3); negative refuses, zero means any significant worse change regresses — legitimate, noisier.
 - `confidence` — confidence level for summary intervals (default 0.95); outside (0,1) refuses.
 - `fail-on-regression` — exit non-zero if a gated metric regresses; an empty comparison then exits 2, so a CI consumer can tell measured-and-regressed from measured-nothing.
-- `explain` — lay out the values behind a one-word skip or warning: a comparison key whose two sides disagree on a guard prints both sides' recorded values naming the moving guard, and a working-tree recording warned non-valid prints its recorded-vs-current explanation. Mutually exclusive with the JSON view.
+- `explain` — lay out the values behind a one-word skip or warning: a comparison key whose two sides disagree on a guard prints both sides' recorded values naming the moving guard, and a working-tree recording warned non-valid prints its recorded-vs-current explanation; mutually exclusive with the JSON view.
 - `json` — one JSON object per comparison row, note, or empty-comparison marker; the field names are public surface and stable, and internal values (guard digests, closure hashes) are deliberately excluded — they belong to the explanation view.
 - `gate` — comma-separated units whose regression fails the build: sec/op, B/op, allocs/op (default sec/op).
 - `vouch` — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), a one-off acceptance extending the store's reviewed `vouches` file (one entry per line at the store root; the standing set every judged verb reads); the same acceptance set run records.
@@ -99,7 +99,7 @@ with the regression exit armed.
 **surfaces:** cli
 **does:** Remove stored results for benchmarks no longer in the code.
 **knobs:**
-- `bench-dir` — stored-recordings directory (default <module>/benchmarks).
+- `bench-dir` — stored-recordings directory, `<module>/benchmarks` unless given.
 **when:** use gc after deleting or renaming benchmarks — it scans
 the module's benchmark declarations (build-tagged declarations
 count as present, so a variant hidden by the current build config

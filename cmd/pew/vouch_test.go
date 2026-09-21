@@ -18,16 +18,21 @@ import (
 	"golang.org/x/perf/benchfmt"
 )
 
-// The colon pair form parses, canonicalizes, and refuses - a bare
-// package is unrepresentable, control characters and non-identifier
-// variables refuse loudly (spec §12 --vouch).
-func TestParseDynamicStateVouches(t *testing.T) {
-	got, err := parseDynamicStateVouches([]string{"b.example/dep:Var", "a.example/dep:Var", "b.example/dep:Var"})
-	if err != nil || len(got) != 2 || got[0] != "a.example/dep.Var" || got[1] != "b.example/dep.Var" {
-		t.Fatalf("parse = %v, %v", got, err)
+// The --vouch flags resolve through the engine's own grammar and set
+// rule: the colon pair form parses and canonicalizes, a repeated entry
+// is one acceptance, the set is sorted, and a bare package, control
+// characters, or a non-identifier variable refuse the whole set loudly
+// (spec §12 --vouch).
+func TestResolveVouchesTakesTheEnginesSet(t *testing.T) {
+	prior := rawVouches
+	t.Cleanup(func() { rawVouches = prior; dynamicStateVouches = nil })
+	rawVouches = []string{"b.example/dep:Var", "a.example/dep:Var", "b.example/dep:Var"}
+	if err := resolveVouches(); err != nil || len(dynamicStateVouches) != 2 || dynamicStateVouches[0] != "a.example/dep.Var" || dynamicStateVouches[1] != "b.example/dep.Var" {
+		t.Fatalf("resolved = %v, %v", dynamicStateVouches, err)
 	}
 	for _, bad := range []string{"a.example/dep", "", ":Var", "a.example/dep:", "a.example/dep:not-ident", "a.example/dep:9x", "a.example/dep:V.S", "a.example/dep :Var", "a.example/dep\x01x:Var"} {
-		if _, err := parseDynamicStateVouches([]string{bad}); err == nil {
+		rawVouches = []string{"a.example/dep:Var", bad}
+		if err := resolveVouches(); err == nil {
 			t.Fatalf("malformed vouch %q accepted", bad)
 		}
 	}

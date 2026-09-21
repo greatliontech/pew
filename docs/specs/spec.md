@@ -1098,9 +1098,18 @@ with the decision map named as the way to enumerate. The cli binds
 the per-surface coverage judgment: every visible leaf command and
 local flag documented exactly, both directions — cobra's help and
 completion plumbing is surface plumbing outside the judgment. The
-document's knob prose is the authoritative superset; flag usage
-strings stay terse wire detail, and a usage string contradicting
-the document is a defect of whichever is wrong.
+document's knob prose is the authoritative superset, and every flag
+usage string is the document's usage projection for the cli surface
+(gofresh's REQ-guidance-render: the knob's first clause in pflag's
+grammar, rendered over the built command tree) — no flag carries a
+second spelling of its usage; a default the flag's own registration
+does not print (a derived one, registered zero) is spelled in the
+clause's prose, never in the `(default X)` form the projection drops.
+*Anchor tests:* every visible leaf verb's local flag usage equals the
+document's projection derived independently (the first clause at
+parenthesis depth zero, code spans unquoted, a trailing default form
+dropped), beside literal anchors for a default-form knob, a code-span
+knob, and a derived-default knob.
 
 
 **REQ-pew-closure-soundness** (behavior): **Closure soundness (`valid` requires proof).** pew MUST report `valid` only when all six guards (§7) provably hold over a closure that is a *superset* of the source able to affect `B`'s performance. Every blind spot is **resolved** to a precise edge, **widened** to the maximal non-std closure, or **downgraded** to `unverifiable` — never silently dropped, never narrowing the covered set. An unresolved blind spot yields `unverifiable` unless an applicable explicit purity assertion accepts responsibility for that disposition; purity never waives the six guards. The six-guard predicate is itself computed only under a provenance-sound engine (§7's toolchain-provenance prerequisite): a verdict-computing invocation whose ambient toolchain skews from the binary's compiled-in frontend refuses outright rather than judging over misread sources. *Violation (strongest):* a reachable `const`/type/embed `B` depends on changes while `B`'s call graph is byte-identical, the closure hash is unchanged, and `B` is reported `valid` → silent regression behind a stale baseline (the core failure pew exists to prevent). *Kind:* entailed.

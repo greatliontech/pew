@@ -67,16 +67,16 @@ func newStatCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&sc.benchDir, "bench-dir", "", "stored-recordings directory (default <module>/benchmarks)")
-	f.StringVar(&sc.label, "label", "", "variant label to compare (spec §6); empty = the unlabeled recording")
-	f.Float64Var(&sc.opts.Alpha, "alpha", sc.opts.Alpha, "significance level for the Mann-Whitney U test")
-	f.Float64Var(&sc.opts.ThresholdPct, "threshold", sc.opts.ThresholdPct, "regression magnitude floor, in percent")
-	f.Float64Var(&sc.opts.Confidence, "confidence", sc.opts.Confidence, "confidence level for summary intervals")
-	f.BoolVar(&sc.failOnRegression, "fail-on-regression", false, "exit non-zero if a gated metric regresses")
-	f.BoolVar(&sc.explain, "explain", false, "explain skipped comparisons and stale working-tree recordings: guard/input values side by side (spec §12)")
-	f.BoolVar(&sc.jsonOut, "json", false, "emit one JSON object per comparison row/note (spec §12, --json)")
-	f.StringVar(&gate, "gate", "sec/op", "comma-separated units whose regression fails the build (sec/op, B/op, allocs/op)")
-	f.StringArrayVar(&rawVouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, the load-bearing set recorded as pew-vouches (spec §12)")
+	f.StringVar(&sc.benchDir, "bench-dir", "", "")
+	f.StringVar(&sc.label, "label", "", "")
+	f.Float64Var(&sc.opts.Alpha, "alpha", sc.opts.Alpha, "")
+	f.Float64Var(&sc.opts.ThresholdPct, "threshold", sc.opts.ThresholdPct, "")
+	f.Float64Var(&sc.opts.Confidence, "confidence", sc.opts.Confidence, "")
+	f.BoolVar(&sc.failOnRegression, "fail-on-regression", false, "")
+	f.BoolVar(&sc.explain, "explain", false, "")
+	f.BoolVar(&sc.jsonOut, "json", false, "")
+	f.StringVar(&gate, "gate", "sec/op", "")
+	f.StringArrayVar(&rawVouches, "vouch", nil, "")
 	return cmd
 }
 

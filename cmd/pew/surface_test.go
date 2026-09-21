@@ -89,12 +89,7 @@ func TestSurfaceTableTracksTheCommands(t *testing.T) {
 		}
 	}
 	commands := map[string]*cobra.Command{}
-	for _, c := range newRootCmd().Commands() {
-		if c.Name() == "completion" || c.Name() == "help" {
-			continue
-		}
-		commands[c.Name()] = c
-	}
+	visitLeafVerbs(newRootCmd(), func(name string, c *cobra.Command) { commands[name] = c })
 	for verb := range table {
 		if commands[verb] == nil {
 			t.Errorf("table names verb %q the CLI lacks", verb)

@@ -25,3 +25,18 @@ var embeddedGuidance = guidance.Embed("pew", guidanceSrc)
 // malformed document is a build-time defect every consumer surfaces
 // loudly.
 func GuidanceDocument() (*guidance.Document, error) { return embeddedGuidance.Document() }
+
+// GuidanceRegistration is a verb's served registration on a surface —
+// its description, knobless help, and whole section (gofresh's
+// projection); a verb the document lacks is a build-time defect and
+// panics at command construction.
+func GuidanceRegistration(surface, verb string) guidance.Registration {
+	return embeddedGuidance.MustRegistration(surface, verb)
+}
+
+// GuidanceKnob is one knob's served projection on a surface — its
+// usage in pflag's grammar among them; a knob the document lacks is a
+// build-time defect and panics at command construction.
+func GuidanceKnob(surface, verb, name string) guidance.Knob {
+	return embeddedGuidance.MustKnob(surface, verb, name)
+}

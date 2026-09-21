@@ -32,7 +32,7 @@ func newGCCmd() *cobra.Command {
 		},
 		Args: cobra.NoArgs,
 	}
-	cmd.Flags().StringVar(&benchDir, "bench-dir", "", "stored-recordings directory (default <module>/benchmarks)")
+	cmd.Flags().StringVar(&benchDir, "bench-dir", "", "")
 	return cmd
 }
 

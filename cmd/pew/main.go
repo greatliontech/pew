@@ -54,5 +54,6 @@ func newRootCmd() *cobra.Command {
 		newGCCmd(),
 		newGuidanceCmd(),
 	)
+	renderKnobUsage(root)
 	return root
 }

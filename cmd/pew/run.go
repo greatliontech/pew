@@ -96,15 +96,15 @@ func newRunCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&rc.benchDir, "bench-dir", "", "stored-recordings directory (default <module>/benchmarks)")
-	f.IntVar(&rc.opts.Count, "count", 10, "-count: measurement runs per benchmark")
-	f.StringVar(&rc.opts.Benchtime, "benchtime", "1s", "-benchtime: duration/iterations per measurement")
-	f.StringVar(&rc.opts.Bench, "bench", ".", "-bench: benchmark name pattern")
-	f.BoolVar(&pin, "pin", false, "pin the measurement to one CPU set derived from the host's topology (taskset)")
-	f.BoolVar(&rc.strict, "strict", false, "treat quiesce warnings as fatal")
-	f.StringVar(&rc.label, "label", "", "variant label for the recording filename")
-	f.BoolVar(&rc.all, "all", false, "measure every selected benchmark, a valid recording included (the default serves what is proven and measures the rest)")
-	f.StringArrayVar(&rawVouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, the load-bearing set recorded as pew-vouches (spec §12)")
+	f.StringVar(&rc.benchDir, "bench-dir", "", "")
+	f.IntVar(&rc.opts.Count, "count", 10, "")
+	f.StringVar(&rc.opts.Benchtime, "benchtime", "1s", "")
+	f.StringVar(&rc.opts.Bench, "bench", ".", "")
+	f.BoolVar(&pin, "pin", false, "")
+	f.BoolVar(&rc.strict, "strict", false, "")
+	f.StringVar(&rc.label, "label", "", "")
+	f.BoolVar(&rc.all, "all", false, "")
+	f.StringArrayVar(&rawVouches, "vouch", nil, "")
 	return cmd
 }
 

@@ -46,6 +46,19 @@ func TestGuidanceCoversTheCLISurface(t *testing.T) {
 			t.Errorf("%q: %v", name, err)
 			continue
 		}
+		c.LocalFlags().VisitAll(func(f *pflag.Flag) {
+			// The usage string is the document's usage projection —
+			// the first clause in pflag's grammar, derived here
+			// independently — identity, never a name match.
+			k, err := doc.Knob("cli", name, f.Name)
+			if err != nil {
+				t.Errorf("%s --%s: %v", name, f.Name, err)
+				return
+			}
+			if want := cliUsage(firstClause(k.Text)); f.Usage != want || f.Usage == "" {
+				t.Errorf("%s --%s usage %q diverged from the document's %q", name, f.Name, f.Usage, want)
+			}
+		})
 		if c.Short != short {
 			t.Errorf("%q Short diverged:\ncli %q\ndoc %q", name, c.Short, short)
 		}
@@ -192,28 +205,13 @@ func TestCoverageJudgesTheRegisteredDefaultFact(t *testing.T) {
 // default for must not spell one in its knob prose.
 func registeredCLI(root *cobra.Command) map[string]guidance.Registered {
 	registered := map[string]guidance.Registered{}
-	var walk func(prefix string, c *cobra.Command)
-	walk = func(prefix string, c *cobra.Command) {
-		for _, child := range c.Commands() {
-			if child.Hidden || child.Name() == "help" || child.Name() == "completion" {
-				continue
-			}
-			name := strings.TrimSpace(prefix + " " + child.Name())
-			if child.HasSubCommands() {
-				walk(name, child)
-				continue
-			}
-			flags := guidance.Registered{}
-			child.LocalFlags().VisitAll(func(f *pflag.Flag) {
-				if f.Name == "help" {
-					return
-				}
-				flags[f.Name] = !zeroDefault(f)
-			})
-			registered[name] = flags
-		}
-	}
-	walk("", root)
+	visitLeafVerbs(root, func(name string, c *cobra.Command) {
+		flags := guidance.Registered{}
+		c.LocalFlags().VisitAll(func(f *pflag.Flag) {
+			flags[f.Name] = !zeroDefault(f)
+		})
+		registered[name] = flags
+	})
 	return registered
 }
 
@@ -230,5 +228,77 @@ func TestRegisteredCLICarriesEachFlagsDefaultFact(t *testing.T) {
 		if !ok || got != row.prints {
 			t.Errorf("registered[%s][%s] = %v (registered: %v), want %v", row.verb, row.flag, got, ok, row.prints)
 		}
+	}
+}
+
+// cliUsage is the test's own reading of pflag's usage grammar over a
+// clause: code spans unquoted and a trailing default parenthetical —
+// the one cobra prints itself — dropped; the served string is judged
+// against this derivation, never against the package's projection.
+func cliUsage(clause string) string {
+	clause = strings.ReplaceAll(clause, "`", "")
+	if i := strings.LastIndex(clause, " (default "); i >= 0 && strings.HasSuffix(clause, ")") {
+		clause = clause[:i]
+	}
+	return clause
+}
+
+// firstClause is the test's own reading of the knob clause rule: the
+// text up to the first ';' at parenthesis depth zero, else the whole
+// text, trailing whitespace and a closing period dropped.
+func firstClause(text string) string {
+	depth := 0
+	for i, r := range text {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ';':
+			if depth == 0 {
+				text = text[:i]
+				return strings.TrimSuffix(strings.TrimSpace(text), ".")
+			}
+		}
+	}
+	return strings.TrimSuffix(strings.TrimSpace(text), ".")
+}
+
+// TestFlagUsageIsTheDocumentsProjection anchors four served usage
+// strings as literals: two knobs whose clauses carry a default
+// parenthetical (dropped — cobra prints it), one with a code span
+// (unquoted — the vouches file), and one whose derived default is
+// spelled in prose.
+func TestFlagUsageIsTheDocumentsProjection(t *testing.T) {
+	root := newRootCmd()
+	run, _, err := root.Find([]string{"run"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := run.Flags().Lookup("count").Usage; got != "measurement runs per benchmark" {
+		t.Errorf("run --count usage = %q", got)
+	}
+	ab, _, err := root.Find([]string{"ab"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ab.Flags().Lookup("bench").Usage; got != "benchmark pattern (go test -bench syntax)" {
+		t.Errorf("ab --bench usage = %q", got)
+	}
+	// A derived default — registered zero, so cobra prints none — is
+	// spelled in the clause's prose and survives the projection.
+	gc, _, err := root.Find([]string{"gc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := gc.Flags().Lookup("bench-dir").Usage; got != "stored-recordings directory, <module>/benchmarks unless given" {
+		t.Errorf("gc --bench-dir usage = %q", got)
+	}
+	status, _, err := root.Find([]string{"status"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := status.Flags().Lookup("vouch").Usage; got != "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), a one-off acceptance extending the store's reviewed vouches file (one entry per line at the store root; the standing set every judged verb reads)" {
+		t.Errorf("status --vouch usage = %q", got)
 	}
 }
