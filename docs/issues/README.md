@@ -18,6 +18,7 @@ close-out convention.
 | [ab-out-multi-package](ab-out-multi-package.md) | `ab --out` over several packages keeps only the last package's artifact; a per-package path or a multi-section format is a contract change | cross-tool train chunk 174 |
 | [mcp-surface](mcp-surface.md) | pew serves the CLI only; whether an LLM reader is owed an MCP surface (or `run`/`ab`/`gc` a `--json`) is a product-scope call | cross-tool train chunk 177 for the JSON and progress step; the MCP surface is deferred 2026-09-07 (user decision: revisit when a driving agent appears) |
 | [verdict-path-consolidation](verdict-path-consolidation.md) | the vouch set is assembled from four process-wide globals and admission decodes each row three times; collapse to one resolver value and one row decode | cross-tool train chunk 174 |
+| [gofresh-corpus-pin-lag](gofresh-corpus-pin-lag.md) | the gofresh pin (v0.105.1, the 275 bump) lags the latest release v0.107.0 by two remote-only releases; the store re-measures once at the bump; no train chunk charters it (fleet sweep 2026-09-28) | cross-tool train — awaiting triage (the pew bump behind gofresh 279/281; the next chunk-open gate slots it) |
 
 ## In-spec upgrade paths (tracked inline, not here)
 
