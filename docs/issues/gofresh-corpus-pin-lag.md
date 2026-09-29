@@ -24,7 +24,5 @@ no train chunk charters the bump either: gofresh 281's charter names
 there) without numbering them, and pew's queued chunks (174, 252, 173,
 232, 276, 177) carry no bump rider.
 
-Lands: cross-tool train — awaiting triage (the pew bump behind gofresh
-279 and the remote's v0.107.0, and behind 281 once it releases; the
-next chunk-open gate slots it as a numbered chunk or a rider on one,
-per the train's cross-session-filing rule).
+Lands: cross-tool train chunk 291 (the pew bump behind gofresh 279 and
+281; slotted at the 2026-09-29 replan).
