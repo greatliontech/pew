@@ -40,10 +40,12 @@ week under the current build and will record the current key beside
 the recordings' — the other half is the v0.101.3-pinned build's
 derivation, recoverable from pew's history.
 
-Lands: a rider on cross-tool train chunk 174 (gofresh docs/plans/cross-tool-train.md —
-pew's one verdict path; triaged 2026-09-29 at gofresh chunk 289's close): the
-ladder's strategy handling stated once (audit or validity, per the 229 ruling that
-the closed key set's strategy line is audit while gofresh's ladder judges hash
-values) and the 46 arms' flip explained against the store under both builds —
-whichever verdict the ladder had wrong is a defect fixed there, with the false
-valid the direction that voids stat verdicts.
+Lands: a rider on cross-tool train chunk 174 (audit 288, 2026-09-29, answered the
+question: NO verdict was wrong — the rung and its operands are byte-identical at
+both builds, the dynamic-state strategy is @38 at both pins, and the format rung
+above it can only move recordings down into stale (format); a `valid` arm on
+09-21 carries pew-format: 3, which only a post-230 pew writes, so the store
+moved (the whole-store re-record) — checkable by grep over tugboat's store. The
+work left: the recorded-vs-current operands on the stale line and an explain
+row for every validity key, the rung stated once; the bump's re-class
+announcement is 232's).
