@@ -31,3 +31,4 @@ index:
 - per-declaration hashing *into* cache deps (§7.7)
 - gitignored persistent closure memo (§6)
 - same-identity sample merge (§6)
+| [strategy-stale-arms-flipped-valid-without-rerecord](strategy-stale-arms-flipped-valid-without-rerecord.md) | 46 tugboat arms read `stale (dynamic-state strategy)` under the v0.101.3-pinned pew and `valid` under the v0.102.0 one with the store untouched — one verdict is wrong and the ladder does not say which (tugboat field report 2026-09-29) | a rider on cross-tool train chunk 174 (the one verdict path: the strategy handling stated, the flip explained) |
