@@ -24,5 +24,13 @@ no train chunk charters the bump either: gofresh 281's charter names
 there) without numbering them, and pew's queued chunks (174, 252, 173,
 232, 276, 177) carry no bump rider.
 
+Re-observed by the 2026-10-05 sweep: the latest remote tag is now
+v0.108.3 (gomutant and stipulator are pinned there and read current);
+this repo's pin is unchanged at v0.105.1, so the lag has grown from two
+releases to the v0.106.0–v0.108.3 series. gofresh-pin-behind-the-
+toolchain-audit (filed 2026-09-30 from tugboat, awaiting triage) names
+the same bump as the fix for the host's go1.27.1-dst.13 listing, so the
+bump now carries two docs' facts; the trigger is unchanged.
+
 Lands: cross-tool train chunk 291 (the pew bump behind gofresh 279 and
 281; slotted at the 2026-09-29 replan).
