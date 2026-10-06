@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
@@ -234,6 +235,33 @@ func runStatus(ctx context.Context, w io.Writer, benchDir, label string, staleOn
 		}
 		return err
 	}
+	prepared := make([]struct {
+		benches []string
+		err     error
+	}, len(pkgs))
+	// Establish toolchain compatibility before emitting any verdict. Recording
+	// inventory can then remain available when ordinary engine preparation fails.
+	for i, p := range pkgs {
+		if p.Module.Dir == "" {
+			continue
+		}
+		if ctx.Err() != nil {
+			return interrupted("status: interrupted before %s (package %d/%d)", p.ImportPath, i+1, len(pkgs))
+		}
+		prepared[i].benches, prepared[i].err = declaredBenchmarks(p)
+		if prepared[i].err != nil || len(prepared[i].benches) == 0 {
+			continue
+		}
+		reportPhase(fmt.Sprintf("judging %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
+		_, err := checkToolchainProvenance(ctx, p.Module.Dir, env)
+		if ctx.Err() != nil {
+			return interrupted("status: interrupted while judging %s (package %d/%d)", p.ImportPath, i+1, len(pkgs))
+		}
+		if err != nil {
+			return err
+		}
+	}
+	var failures []error
 	for i, p := range pkgs {
 		if p.Module.Dir == "" {
 			continue // not in a module (e.g. a stdlib pattern) — nothing to record
@@ -245,19 +273,22 @@ func runStatus(ctx context.Context, w io.Writer, benchDir, label string, staleOn
 		// A per-package failure (an unreadable PGO profile, a sibling that
 		// does not compile) is reported as a row and does not abort status of
 		// the rest of the tree.
-		reportErr := func(err error) {
+		reportErr := func(err error) error {
+			failures = append(failures, fmt.Errorf("%s: %w", p.ImportPath, err))
 			if jsonOut {
-				_ = writeJSONLine(w, statusJSONRow{Package: p.ImportPath, Error: err.Error()})
-				return
+				return writeJSONLine(w, statusJSONRow{Package: p.ImportPath, Error: err.Error()})
 			}
-			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
+			_, writeErr := fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
+			return writeErr
 		}
 		// The declarations first: a package with no benchmark builds no
 		// engine (two `go env` processes and the PGO digest it would
 		// otherwise pay for nothing).
-		benches, err := declaredBenchmarks(p)
+		benches, err := prepared[i].benches, prepared[i].err
 		if err != nil {
-			reportErr(err)
+			if writeErr := reportErr(err); writeErr != nil {
+				return writeErr
+			}
 			continue
 		}
 		if len(benches) == 0 {
@@ -266,30 +297,36 @@ func runStatus(ctx context.Context, w io.Writer, benchDir, label string, staleOn
 		judging := func() error {
 			return interrupted("status: interrupted while judging %s (package %d/%d)", p.ImportPath, i+1, len(pkgs))
 		}
-		e, _, err := newEngineForPkg(ctx, p, env)
-		if err != nil {
-			// The interruption outranks a provenance refusal raised in
-			// the same window: both end the verb, and the signal is the
-			// operator's own fact.
+		getEngine := sync.OnceValues(func() (*gofresh.Engine, error) {
+			e, _, err := newEngineForPkg(ctx, p, env)
+			return e, err
+		})
+		if err := statusPackage(ctx, w, os.Stderr, getEngine, benchDir, label, staleOnly, explain, jsonOut, p, benches, env); err != nil {
 			if cancelledBy(ctx, err) {
 				return judging()
 			}
-			var pe *toolchainProvenanceError
-			if errors.As(err, &pe) {
-				return err
+			var reported *reportedStatusError
+			if errors.As(err, &reported) {
+				failures = append(failures, err)
+			} else if writeErr := reportErr(err); writeErr != nil {
+				return writeErr
 			}
-			reportErr(err)
-			continue
-		}
-		if err := statusPackage(ctx, w, os.Stderr, e, benchDir, label, staleOnly, explain, jsonOut, p, benches, env); err != nil {
-			if cancelledBy(ctx, err) {
-				return judging()
-			}
-			reportErr(err)
 		}
 	}
-	return interruptedAfterLastUnit(ctx, "status: interrupted after the last package; every verdict shown stands")
+	if err := interruptedAfterLastUnit(ctx, "status: interrupted after the last package; every verdict shown stands"); err != nil {
+		return err
+	}
+	if len(failures) != 0 {
+		return fmt.Errorf("status: incomplete report: %w", errors.Join(failures...))
+	}
+	return nil
 }
+
+// reportedStatusError carries failures whose recording-specific rows were
+// already emitted. The verb still fails without emitting duplicate package rows.
+type reportedStatusError struct{ error }
+
+func (e *reportedStatusError) Unwrap() error { return e.error }
 
 // warnForeignKeys surfaces read-time foreign-key detection on every
 // verdict read (spec §5's read arm): the key fragments comparison
@@ -307,19 +344,44 @@ func declaredBenchmarks(p pkgMeta) ([]string, error) {
 	return selectedBenchmarks(p)
 }
 
-func statusPackage(ctx context.Context, w, errw io.Writer, e *gofresh.Engine, benchDir, label string, staleOnly bool, explain, jsonOut bool, p pkgMeta, benches []string, env gotool.Environment) error {
+func statusPackage(ctx context.Context, w, errw io.Writer, getEngine func() (*gofresh.Engine, error), benchDir, label string, staleOnly bool, explain, jsonOut bool, p pkgMeta, benches []string, env gotool.Environment) error {
 	dir, err := moduleBenchDir(benchDir, p.Module.Dir)
 	if err != nil {
 		return err
 	}
 	st := store.New(dir)
 	pkgRel := packageRel(p)
-	rows, err := checkPackage(ctx, st, e, p.ImportPath, pkgRel, p.Module.Dir, benches, label, nil)
+	rows, err := checkPackage(ctx, st, func(subjects []gofresh.Subject) (*gofresh.View, error) {
+		e, err := getEngine()
+		if err != nil {
+			return nil, err
+		}
+		return newViewFor(e, ctx, subjects, p.Module.Dir, gofresh.Measurement)
+	}, p.ImportPath, pkgRel, p.Module.Dir, benches, label, nil)
 	if err != nil {
 		return err
 	}
+	var failures []error
 	for _, b := range benches {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		bv := rows[b]
+		name := b
+		if label != "" {
+			name += "." + label
+		}
+		if bv.err != nil {
+			failures = append(failures, fmt.Errorf("%s.%s: %w", p.ImportPath, b, bv.err))
+			if jsonOut {
+				if err := writeJSONLine(w, statusJSONRow{Package: p.ImportPath, Benchmark: b, Label: label, Error: bv.err.Error()}); err != nil {
+					return err
+				}
+			} else if _, err := fmt.Fprintf(w, "%-12s %s.%s  (%v)\n", "error", p.ImportPath, name, bv.err); err != nil {
+				return err
+			}
+			continue
+		}
 		v, reason, fp := bv.v, bv.reason, bv.fp
 		warnForeignKeys(errw, p.ImportPath, b, bv.foreign)
 		if staleOnly && v == verdictValid {
@@ -331,25 +393,34 @@ func statusPackage(ctx context.Context, w, errw io.Writer, e *gofresh.Engine, be
 			}
 			continue
 		}
-		name := b
-		if label != "" {
-			// The row names the recording it inventoried: the labeled variant
-			// carries its label exactly as its filename does.
-			name = b + "." + label
-		}
 		line := fmt.Sprintf("%-12s %s.%s", v, p.ImportPath, name)
 		if reason != "" {
 			line += "  (" + reason + ")"
 		}
-		fmt.Fprintln(w, line)
+		if _, err := fmt.Fprintln(w, line); err != nil {
+			return err
+		}
 		// fp.MaximalClosure is non-empty iff the recording decoded: the
 		// format rung requires a pew-closure key, so the empty sentinel is
 		// exactly the unrecorded/stale-format/error set, which has nothing
 		// decodable to tabulate — a strategy-refused recording decoded and
 		// explains like any stale one.
 		if explain && v != verdictValid && v != verdictUnrecorded && fp.MaximalClosure != "" {
-			explainRecordAgainstCurrent(ctx, w, e, p.Module.Dir, p.ImportPath, b, fp, env.Values())
+			e, err := getEngine()
+			if err != nil {
+				if _, writeErr := fmt.Fprintf(w, "    cannot compute the current state: %v\n", err); writeErr != nil {
+					return writeErr
+				}
+				failures = append(failures, fmt.Errorf("%s.%s explanation: %w", p.ImportPath, b, err))
+				continue
+			}
+			if err := explainRecordAgainstCurrent(ctx, w, e, p.Module.Dir, p.ImportPath, b, fp, env.Values()); err != nil {
+				failures = append(failures, fmt.Errorf("%s.%s explanation: %w", p.ImportPath, b, err))
+			}
 		}
+	}
+	if len(failures) != 0 {
+		return &reportedStatusError{errors.Join(failures...)}
 	}
 	return nil
 }
@@ -369,6 +440,8 @@ func checkOne(ctx context.Context, st *store.Store, e *gofresh.Engine, pkgPath, 
 	switch {
 	case errors.Is(err, store.ErrNotRecorded):
 		return verdictUnrecorded, "", gofresh.Fingerprint{}, "", nil
+	case errors.Is(err, store.ErrInvalidRecording):
+		return verdictStale, "format", gofresh.Fingerprint{}, "", nil
 	case err != nil:
 		return "", "", gofresh.Fingerprint{}, "", err
 	}
@@ -388,6 +461,7 @@ var newViewFor = func(e *gofresh.Engine, ctx context.Context, subjects []gofresh
 // it (spec §7.9), and any foreign configuration keys the stored
 // recording carries (read-time trust detection, spec §5).
 type benchVerdict struct {
+	err         error
 	v           verdict
 	reason      string
 	fp          gofresh.Fingerprint
@@ -404,7 +478,7 @@ type benchVerdict struct {
 // come from the module, environment, and kind alone, so the verdicts
 // are identical under any subject grouping. Every per-recording gate
 // is unchanged.
-func checkPackage(ctx context.Context, st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir string, benches []string, label string, view *gofresh.View) (map[string]*benchVerdict, error) {
+func checkPackage(ctx context.Context, st *store.Store, buildView func([]gofresh.Subject) (*gofresh.View, error), pkgPath, pkgRel, moduleDir string, benches []string, label string, view *gofresh.View) (map[string]*benchVerdict, error) {
 	out := map[string]*benchVerdict{}
 	type pending struct {
 		bench  string
@@ -418,8 +492,12 @@ func checkPackage(ctx context.Context, st *store.Store, e *gofresh.Engine, pkgPa
 		case errors.Is(err, store.ErrNotRecorded):
 			out[b] = &benchVerdict{v: verdictUnrecorded}
 			continue
+		case errors.Is(err, store.ErrInvalidRecording):
+			out[b] = &benchVerdict{v: verdictStale, reason: "format"}
+			continue
 		case err != nil:
-			return nil, err
+			out[b] = &benchVerdict{err: err}
+			continue
 		}
 		bv := &benchVerdict{foreign: store.ForeignConfigKeys(recs)}
 		out[b] = bv
@@ -433,6 +511,15 @@ func checkPackage(ctx context.Context, st *store.Store, e *gofresh.Engine, pkgPa
 		checks = append(checks, pending{b, adm.fp, adm.ledger})
 	}
 	if len(checks) == 0 {
+		return out, nil
+	}
+	unjudged := func(err error) (map[string]*benchVerdict, error) {
+		if cancelledBy(ctx, err) {
+			return nil, err
+		}
+		for _, c := range checks {
+			out[c.bench].err = err
+		}
 		return out, nil
 	}
 	subjects := make([]gofresh.Subject, 0, len(checks))
@@ -449,15 +536,15 @@ func checkPackage(ctx context.Context, st *store.Store, e *gofresh.Engine, pkgPa
 	// environment, and kind alone, so a superset view judges exactly as
 	// one built here over the recorded subjects would.
 	if view == nil {
-		built, err := newViewFor(e, ctx, subjects, moduleDir, gofresh.Measurement)
+		built, err := buildView(subjects)
 		if err != nil {
-			return nil, err
+			return unjudged(err)
 		}
 		view = built
 	}
 	verdicts, err := view.CheckBatch(ctx, recorded)
 	if err != nil {
-		return nil, err
+		return unjudged(err)
 	}
 	for _, c := range checks {
 		subject := gofresh.Subject{Package: pkgPath, Symbol: c.bench}

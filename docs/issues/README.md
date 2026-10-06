@@ -6,7 +6,7 @@ close-out convention.
 
 | slug | summary | Lands |
 |------|---------|-------|
-| [train-riders-for-the-performance-evidence-plan](train-riders-for-the-performance-evidence-plan.md) | remaining cross-tool riders for recording recovery, freshness, comparisons, profiles and A/B; residual dependency bump tracked by the train | performance-evidence plan chunk 3 (items at 4–8 named inside) |
+| [train-riders-for-the-performance-evidence-plan](train-riders-for-the-performance-evidence-plan.md) | remaining cross-tool riders for freshness, comparisons, profiles and A/B; residual dependency bump tracked by the train | performance-evidence plan chunk 4 (items at 5–8 named inside) |
 | [ab-control-process-cancellation](ab-control-process-cancellation.md) | native Git preparation/cleanup can ignore A/B cancellation and cleanup cannot report its failure | performance-evidence plan chunk 7 |
 | [mutation-oracle-observation](mutation-oracle-observation.md) | changed-code measurement banks kills but cwd-sensitive integration observations are non-reusable and final evidence work reaches its deadline | performance-evidence plan chunk 4 |
 | [guidance-purpose-column-second-enumeration](guidance-purpose-column-second-enumeration.md) | §12's opt-in purpose column restates the document's knob prose in its own words, pinned to nothing | cross-tool train chunk 232 |
@@ -21,7 +21,6 @@ close-out convention.
 | [mcp-surface](mcp-surface.md) | pew serves the CLI only; whether an LLM reader is owed an MCP surface (or `run`/`ab`/`gc` a `--json`) is a product-scope call | cross-tool train chunk 177 for the JSON and progress step; the MCP surface when a driving agent appears (a checkable condition) |
 | [verdict-path-consolidation](verdict-path-consolidation.md) | the vouch set is assembled from four process-wide globals and admission decodes each row three times; collapse to one resolver value and one row decode | performance-evidence plan chunk 4 |
 | [strategy-stale-arms-flipped-valid-without-rerecord](strategy-stale-arms-flipped-valid-without-rerecord.md) | 46 tugboat arms read `stale (dynamic-state strategy)` under the v0.101.3-pinned pew and `valid` under the v0.102.0 one with the store untouched — one verdict is wrong and the ladder does not say which (tugboat field report 2026-09-29) | performance-evidence plan chunk 4 |
-| [loader-refuses-pre-format-3-ledger-lines-remedy-circular](loader-refuses-pre-format-3-ledger-lines-remedy-circular.md) | the store loader refuses pre-format-3 recordings whose ledger line exceeds the scanner bound — five of tugboat's nine package stores — and the remedy it names cannot run over a refused store (tugboat field report 2026-09-30) | performance-evidence plan chunk 3 |
 
 ## In-spec upgrade paths (tracked inline, not here)
 

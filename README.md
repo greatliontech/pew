@@ -17,6 +17,10 @@
    pew status --stale ./...
    ```
 
+   Status reports independent results even if another recording or package fails.
+   An incomplete report exits nonzero; stale, unrecorded and unverifiable results
+   alone are normal successful status output.
+
 3. Measure what is not proven (a valid recording serves; `--all` re-measures everything):
 
    ```sh
@@ -57,7 +61,10 @@ bracket and a completed-process ingest, so a benchmark whose closure reaches no 
 runtime input verifies, while a file-reading benchmark is refused on its own closure reason; an
 observation that cannot complete records explicit incomplete evidence with its reason. An
 explicit `//gofresh:pure` directive on the declaration is the documented full-trust override. Current recordings carry `pew-format: 3`; unversioned or unknown formats are
-rejected and must be regenerated.
+rejected and must be regenerated. Recognizable Pew recordings with malformed or
+oversized legacy metadata report `stale (format)` and can be replaced by `pew run`
+without manual deletion. Failed or interrupted measurements leave their old files
+untouched. Old-format measurements are not admitted as historical comparisons.
 
 By default recordings live under `<module>/benchmarks`. Use `--bench-dir` on the
 commands when a different storage directory is needed.

@@ -428,9 +428,10 @@ func TestStatusBuildsNoEngineForABenchmarklessPackage(t *testing.T) {
 	withWorkingDir(t, dir)
 	// An unreadable PGO profile fails every engine this environment builds.
 	t.Setenv("GOFLAGS", "-pgo="+filepath.Join(dir, "missing.pgo"))
+	writeStatRecording(t, store.New(filepath.Join(dir, "benchmarks")), "withbench", "BenchmarkW", 100)
 	var out bytes.Buffer
-	if err := runStatus(context.Background(), &out, filepath.Join(dir, "benchmarks"), "", false, false, false, []string{"./..."}); err != nil {
-		t.Fatal(err)
+	if err := runStatus(context.Background(), &out, filepath.Join(dir, "benchmarks"), "", false, false, false, []string{"./..."}); err == nil || !strings.Contains(err.Error(), "missing.pgo") {
+		t.Fatalf("missing PGO did not fail the incomplete report: %v", err)
 	}
 	errors := strings.Count(out.String(), "error ")
 	if errors != 1 || !strings.Contains(out.String(), "example.com/nobench/withbench") || strings.Contains(out.String(), "example.com/nobench/nobench") {

@@ -1086,12 +1086,17 @@ func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {
 
 func nonValid(ctx context.Context, errw io.Writer, st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, label string, benches []string, view *gofresh.View) ([]string, error) {
 	var need []string
-	rows, err := checkPackage(ctx, st, e, pkgPath, pkgRel, moduleDir, benches, label, view)
+	rows, err := checkPackage(ctx, st, func(subjects []gofresh.Subject) (*gofresh.View, error) {
+		return newViewFor(e, ctx, subjects, moduleDir, gofresh.Measurement)
+	}, pkgPath, pkgRel, moduleDir, benches, label, view)
 	if err != nil {
 		return nil, err
 	}
 	for _, b := range benches {
 		bv := rows[b]
+		if bv.err != nil {
+			return nil, bv.err
+		}
 		v, fp, grownLedger := bv.v, bv.fp, bv.grownLedger
 		warnForeignKeys(errw, pkgPath, b, bv.foreign)
 		if v == verdictValid && grownLedger != "" {

@@ -318,11 +318,11 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 			}
 			reportPhase(fmt.Sprintf("judging %s.%s (%d/%d in %s)", key.pkgRel, key.bench, ki+1, len(keys), m.modulePath))
 			baseRecs, baseOK, err := m.readSide(bl.baseRef, key.pkgRel, key.bench, key.label)
-			if err != nil {
+			if err != nil && !errors.Is(err, store.ErrInvalidRecording) {
 				return err
 			}
 			newRecs, newOK, err := m.readSide(bl.newRef, key.pkgRel, key.bench, key.label)
-			if err != nil {
+			if err != nil && !errors.Is(err, store.ErrInvalidRecording) {
 				return err
 			}
 			if !baseOK && !newOK {
@@ -454,7 +454,17 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 						}
 						fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is %s; comparison may not reflect HEAD — re-run `pew run`\n", cur.importPath, key.bench, msg)
 						if sc.explain {
-							explainRecordAgainstCurrent(ctx, errw, engine, cur.moduleDir, cur.importPath, key.bench, fp, env.Values())
+							if err := explainRecordAgainstCurrent(ctx, errw, engine, cur.moduleDir, cur.importPath, key.bench, fp, env.Values()); err != nil {
+								if cancelledBy(ctx, err) {
+									return stoppedAt()
+								}
+								// Staleness explanation is best-effort for stat; its
+								// analysis diagnostic already printed. Output loss is not.
+								var outputErr *explanationOutputError
+								if errors.As(err, &outputErr) {
+									return err
+								}
+							}
 						}
 					}
 				}
@@ -468,7 +478,9 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 						newLabel = "working-tree"
 					}
 					fmt.Fprintf(errw, "pew: explain: %s.%s guard mismatch between %s and %s:\n", key.pkgRel, key.bench, bl.baseRef, newLabel)
-					explainSides(errw, "base", "new", baseRecs, newRecs)
+					if err := explainSides(errw, "base", "new", baseRecs, newRecs); err != nil {
+						return err
+					}
 				}
 			}
 			baseAll = append(baseAll, baseRecs...)
@@ -720,10 +732,10 @@ func addStatInventory(m *statModule, bl baseline, label string) error {
 			// (format)" never reads as "nothing recorded". Unmarked files at
 			// layout paths are foreign and stay ignored.
 			parsed, ok, err := m.readSide("", r.PkgRel, r.Bench, r.Label)
-			if err != nil {
+			if err != nil && !errors.Is(err, store.ErrInvalidRecording) {
 				return err
 			}
-			if ok && store.IsPewMarked(parsed) && r.Label == label {
+			if ok && (store.IsPewMarked(parsed) || errors.Is(err, store.ErrInvalidRecording)) && r.Label == label {
 				m.keys[statKey{pkgRel: r.PkgRel, bench: r.Bench, label: r.Label}] = true
 			}
 		}
@@ -747,10 +759,10 @@ func addRefInventory(m *statModule, ref, label string) error {
 		// never reads as "nothing recorded". Unmarked files at layout paths
 		// are foreign and stay ignored.
 		recsSide, sideOK, err := m.readSide(ref, r.PkgRel, r.Bench, r.Label)
-		if err != nil {
+		if err != nil && !errors.Is(err, store.ErrInvalidRecording) {
 			return err
 		}
-		if !sideOK || !store.IsPewMarked(recsSide) {
+		if !sideOK || (!store.IsPewMarked(recsSide) && !errors.Is(err, store.ErrInvalidRecording)) {
 			continue
 		}
 		m.keys[statKey{pkgRel: r.PkgRel, bench: r.Bench, label: r.Label}] = true
@@ -792,6 +804,9 @@ func readSide(st *store.Store, repo *gitblob.Repo, ref, pkgRel, bench, label str
 		if errors.Is(err, store.ErrNotRecorded) {
 			return nil, false, nil
 		}
+		if errors.Is(err, store.ErrInvalidRecording) {
+			return nil, true, err
+		}
 		if err != nil {
 			return nil, false, err
 		}
@@ -809,6 +824,9 @@ func readSide(st *store.Store, repo *gitblob.Repo, ref, pkgRel, bench, label str
 		return nil, false, nil
 	}
 	recs, err := store.Parse(bytes.NewReader(content), ref+":"+filepath.Base(abs))
+	if errors.Is(err, store.ErrInvalidRecording) {
+		return nil, true, err
+	}
 	if err != nil {
 		return nil, false, err
 	}

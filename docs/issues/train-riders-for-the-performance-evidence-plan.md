@@ -1,6 +1,6 @@
 # Handoff: the train's pew riders for the performance-evidence plan
 
-Lands: performance-evidence plan chunk 3, with the later-chunk items
+Lands: performance-evidence plan chunk 4, with the later-chunk items
 named below landing at their stated chunks.
 
 The cross-tool train (gofresh docs/plans/cross-tool-train.md) held pew
@@ -9,14 +9,6 @@ place this plan's machine never reads. The fifth re-audit band (train
 chunk 319, 2026-10-06) dissolved the train's pew tail into this plan
 and moves every rider here. Each item is a derived fact, not a wish;
 its source tick is named so the derivation can be read.
-
-## At chunk 3 — malformed and legacy recordings
-
-- `loader-refuses-pre-format-3-ledger-lines-remedy-circular`: the
-  refusal §5 and REQ-pew-artifact-format mandate names a regenerating
-  operation (`pew run`) that loads the store first and so can never
-  run — an internal contradiction the train wrote at its chunk 230
-  (c28ebd4). The anchor amendment is this chunk's spec-first step.
 
 ## At chunk 4 — recorded-observation freshness
 

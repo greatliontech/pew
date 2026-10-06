@@ -10,10 +10,10 @@
     - [x] Pin no-Quit measurement cancellation through the shared containment path.
     - [x] Finish checked-sample integration and the single normalized-environment boundary.
   - [x] 2.3 Complete gates, mutation evidence and independent review, close resolved issues and update cross-tool tracking, commit and push, then install from the clean committed tree.
-- [ ] 3. Make malformed and legacy recording handling recoverable and fully visible.
-  - [ ] 3.1 Derive read/admission/regeneration behavior for oversized legacy metadata and failed stores, preserving raw history without accepting it as current evidence.
-  - [ ] 3.2 Implement usable in-place regeneration and complete status coverage, with regression tests for long legacy lines, foreign/current malformed files, store failures and interrupted replacement.
-  - [ ] 3.3 Complete gates, mutation evidence and review, retire resolved issue references, commit and push.
+- [x] 3. Make malformed and legacy recording handling recoverable and fully visible.
+  - [x] 3.1 Derive read/admission/regeneration behavior for oversized legacy metadata and failed stores, preserving raw history without accepting it as current evidence.
+  - [x] 3.2 Implement usable in-place regeneration and complete status coverage, with regression tests for long legacy lines, foreign/current malformed files, store failures and interrupted replacement.
+  - [x] 3.3 Complete gates, mutation evidence and review, retire resolved issue references, commit and push.
 - [ ] 4. Complete recorded-observation freshness integration.
   - [ ] 4.1 Read current gofresh observation proofs and pew's per-arm recording/verdict paths; reconcile purity, external effects and evidence identity in the canonical contract.
   - [ ] 4.2 Adopt attributable observed capture per completed arm and one shared admission/verdict path; preserve stale/unverifiable distinctions and reject incomplete or mismatched observations.

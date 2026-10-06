@@ -1,0 +1,8 @@
+{
+  "targets": [
+    {"symbol":"github.com/greatliontech/pew/internal/store.Parse","oracle":["github.com/greatliontech/pew/internal/store.TestParseIdentifiesUnusablePewRecordings","github.com/greatliontech/pew/internal/store.TestParseDoesNotAuthorizeReplacingUnknownContent","github.com/greatliontech/pew/internal/store.TestParseOwnsItsConfigValues","github.com/greatliontech/pew/internal/store.FuzzCorruptRecordingNeverBecomesEvidence"],"oracleExplicit":true},
+    {"symbol":"github.com/greatliontech/pew/internal/store.pewMarked","oracle":["github.com/greatliontech/pew/internal/store.TestParseIdentifiesUnusablePewRecordings","github.com/greatliontech/pew/internal/store.TestParseDoesNotAuthorizeReplacingUnknownContent","github.com/greatliontech/pew/internal/store.FuzzCorruptRecordingNeverBecomesEvidence"],"oracleExplicit":true},
+    {"symbol":"github.com/greatliontech/pew/internal/store.invalidRecordingError.Unwrap","oracle":["github.com/greatliontech/pew/internal/store.TestParseIdentifiesUnusablePewRecordings","github.com/greatliontech/pew/internal/store.TestParseDoesNotAuthorizeReplacingUnknownContent"],"oracleExplicit":true},
+    {"symbol":"github.com/greatliontech/pew/internal/store.invalidRecordingError.Is","oracle":["github.com/greatliontech/pew/internal/store.TestParseIdentifiesUnusablePewRecordings","github.com/greatliontech/pew/internal/store.TestParseDoesNotAuthorizeReplacingUnknownContent"],"oracleExplicit":true}
+  ]
+}

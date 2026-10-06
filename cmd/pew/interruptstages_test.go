@@ -62,10 +62,8 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
 	assertInterrupted("status", runStatus(ctx, &w, filepath.Join(dir, "b"), "", false, false, false, []string{"./..."}), "status: interrupted while judging example.com/stage/pkg")
-	// The same interruption landing after the construction: the sample
-	// answers, so with nothing to judge no stage observes the
-	// cancellation and the verb still ends by it — the last package has
-	// no next iteration to notice the signal.
+	// A completed sample does not erase a cancellation observed while
+	// establishing the invocation's provenance prerequisites.
 	answering := func(ctx context.Context, _ string, _ testEnvironmentValue) (string, error) {
 		cancel()
 		return runtime.Version(), nil
@@ -73,10 +71,22 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	goVersionSampler = answering
 	ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
-	assertInterrupted("status (after the last unit)", runStatus(ctx, &w, filepath.Join(dir, "b"), "", false, false, false, []string{"./..."}), "status: interrupted after the last package")
+	assertInterrupted("status (completed prerequisite)", runStatus(ctx, &w, filepath.Join(dir, "b"), "", false, false, false, []string{"./..."}), "status: interrupted while judging example.com/stage/pkg")
+	goVersionSampler = func(context.Context, string, testEnvironmentValue) (string, error) { return runtime.Version(), nil }
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	assertInterrupted("status (after the last unit)", runStatus(ctx, cancelOnWrite{&w, cancel}, filepath.Join(dir, "b"), "", false, false, false, []string{"./..."}), "status: interrupted after the last package")
 	// With a recording to judge, the judgment re-observes the tree under
 	// the ended context and reports the interruption itself.
 	writeStatRecording(t, store.New(filepath.Join(dir, "b")), "pkg", "BenchmarkStage", 100)
+	calls := 0
+	goVersionSampler = func(ctx context.Context, dir string, env testEnvironmentValue) (string, error) {
+		calls++
+		if calls == 2 {
+			return answering(ctx, dir, env)
+		}
+		return runtime.Version(), nil
+	}
 	ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
 	assertInterrupted("status (judgment)", runStatus(ctx, &w, filepath.Join(dir, "b"), "", false, false, false, []string{"./..."}), "status: interrupted while judging example.com/stage/pkg")

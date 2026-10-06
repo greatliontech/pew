@@ -130,9 +130,15 @@ recording. No value begins in a space or tab (`benchfmt`'s reader strips leading
 would read back shorter) and no chunked part ends in one — the chunked values are base64, and the
 writer refuses otherwise. The writer refuses any line past `benchfmt`'s
 64 KiB scanner bound — a chunked row cannot reach it, an unbounded other row is a producer fault —
-which is how REQ-pew-artifact-format's promise holds for every file `pew run` writes; a recording of
-an earlier format carrying such a line is refused on read with the regenerating operation named,
-never lifted or interpreted. The rules only the raw bytes can decide — every recording
+which is how REQ-pew-artifact-format's promise holds for every file `pew run` writes. A readable
+Pew-marked file that cannot be parsed, including an earlier-format recording carrying such a
+line, is inventoried by `status`, `run`, and `stat` as `stale (format)`: its metadata is never lifted or interpreted, and its
+parse refusal does not prevent `pew run` from measuring a replacement. The previous file remains
+untouched until the fresh recording commits. Read failures and corrupt unmarked foreign files
+are not classified as stale format by this recovery rule; their read errors remain errors.
+The explicit `--all` measurement path continues to bypass recording admission. Historical format-2
+measurements remain excluded from comparisons; no legacy-format interpretation is performed.
+The rules only the raw bytes can decide — every recording
 key's duplicate rule, the discriminator's whitespace and line-ending rules, and the
 namespace rule below — are decided there (`benchfmt` keeps one entry per parsed key, so a
 repeat is visible nowhere else) and delivered to every parsed reader as one reader-side
@@ -1086,7 +1092,11 @@ the reported scan error.
 **Machine-readable output.** `status --json` and `stat --json` emit one JSON object per line; the
 field names are public surface and stable. `status` rows carry `package`, `benchmark`, `label`
 (omitted when empty), `verdict`, `reason` (omitted when empty); a per-package failure emits
-`{package, error}`. `stat` emits comparison rows as
+`{package, error}`, and a recording-specific failure emits `{package, benchmark, label?, error}`.
+Status continues reporting independent rows after a read or analysis failure and exits `1` if
+any selected result could not be judged or reported; ordinary stale, unrecorded and unverifiable
+results do not make the report incomplete. An interruption retains its exit `130` precedence.
+`stat` emits comparison rows as
 `{"kind":"row", config, unit, benchmark, base:{center,lo,hi,confidence}, new:{…}, p, deltaPct,
 regression, gated, warnings}` (`deltaPct` is `null` when the baseline center is zero or the percentage is unrepresentable; a side's
 `lo`/`hi` are `null` when its confidence interval is non-finite — the sample-count cause rides
@@ -1127,6 +1137,18 @@ Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred
 `docs/issues/`.
 
 ## 13. Project invariants
+
+**REQ-pew-recording-recovery** (behavior): `pew run` MUST regenerate selected
+readable Pew-marked recordings rejected for format or parsing, without using
+their old provenance or measurements as current evidence, preserving the old
+bytes until a successful fresh recording commits; operational read failures and
+unidentified foreign corruption receive no stale-format classification.
+
+**REQ-pew-status-completeness** (behavior): `pew status` MUST report every
+independently available selected result and return a nonzero status when read,
+analysis or output failures leave the report incomplete, naming recording-specific
+failures with their benchmark; ordinary stale, unrecorded and unverifiable
+verdicts remain successful reporting, and interruption takes precedence.
 
 **REQ-pew-guidance** (behavior): Tool-level served prose MUST be the
 embedded guidance document's projections (`docs/guidance.md`, in the

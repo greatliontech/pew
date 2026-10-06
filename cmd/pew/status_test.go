@@ -318,8 +318,8 @@ func TestStatusJSONLabelAndErrorRows(t *testing.T) {
 	}
 	withWorkingDir(t, dir)
 	out.Reset()
-	if err := runStatus(context.Background(), &out, "", "", false, false, true, []string{"."}); err != nil {
-		t.Fatalf("runStatus: %v", err)
+	if err := runStatus(context.Background(), &out, "", "", false, false, true, []string{"."}); err == nil || !strings.Contains(err.Error(), "incomplete report") {
+		t.Fatalf("incomplete status report succeeded: %v", err)
 	}
 	var row struct {
 		Package string `json:"package"`
@@ -434,7 +434,7 @@ func statusPackageOf(w, errw io.Writer, e *gofresh.Engine, benchDir, label strin
 	if err != nil {
 		return err
 	}
-	return statusPackage(context.Background(), w, errw, e, benchDir, label, staleOnly, explain, jsonOut, p, benches, env)
+	return statusPackage(context.Background(), w, errw, func() (*gofresh.Engine, error) { return e, nil }, benchDir, label, staleOnly, explain, jsonOut, p, benches, env)
 }
 
 // An explanation names a closure-derivation move as such: a recording

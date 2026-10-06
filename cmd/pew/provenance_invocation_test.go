@@ -122,8 +122,12 @@ func TestJudgedVerbsShareSamplesOnlyWithinInvocation(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				if checks-before != 2 || spawns != invocation {
-					t.Fatalf("invocation %d: %d engine checks, %d total spawns; want 2 checks and %d spawns\n%s\n%s", invocation, checks-before, spawns, invocation, &out, &errout)
+				wantChecks := 2
+				if verb == "status" {
+					wantChecks = 4
+				} // invocation preflight, then the two lazy engines
+				if checks-before != wantChecks || spawns != invocation {
+					t.Fatalf("invocation %d: %d provenance checks, %d total spawns; want %d checks and %d spawns\n%s\n%s", invocation, checks-before, spawns, wantChecks, invocation, &out, &errout)
 				}
 			}
 		})

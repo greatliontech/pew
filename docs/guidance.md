@@ -52,7 +52,9 @@ provenance line, so the recording states exactly the conditions the
 gate evaluated; storage overwrites with in-band provenance. After
 edits only non-valid benchmarks re-measure, and each package's
 served line counts the valid recordings the run did not re-measure;
-`all` re-measures every selected one.
+`all` re-measures every selected one. Readable Pew-marked recordings with
+unusable format or metadata re-measure in place, including oversized legacy
+metadata; the old file stays intact until the fresh measurement commits.
 **example:** a run over ./... on a prepped machine after landing a
 change — the unchanged benchmarks serve, the changed ones measure.
 
@@ -64,12 +66,15 @@ change — the unchanged benchmarks serve, the changed ones measure.
 - `label` — variant label to check; empty means the unlabeled recording.
 - `stale` — show only benchmarks that need re-running (non-valid); scriptable, the set run measures by default.
 - `explain` — explain each non-valid verdict: every guard's recorded vs current value, the closure hash, the runtime-input digest, and the manifest's watched identities — environment inputs disclosed as names with digest equality only, never values; a digest mismatch additionally names the moved watched inputs. Mutually exclusive with the JSON view (the explanation is a human view).
-- `json` — one JSON object per row; the field names are public surface and stable (package, benchmark, label, verdict, reason; a per-package failure emits package and error).
+- `json` — one JSON object per row; the field names are public surface and stable (package, benchmark, label, verdict, reason; a per-package failure emits package and error, and a recording-specific failure also names its benchmark and optional label).
 - `vouch` — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), a one-off acceptance extending the store's reviewed `vouches` file (one entry per line at the store root; the standing set every judged verb reads); the same acceptance set run records.
 **when:** use status as the inventory-plus-verdict view before
 measuring or comparing — the stale filter names what run will
 measure, and the explanation view answers why a verdict is
-non-valid without re-deriving anything by hand.
+non-valid without re-deriving anything by hand. Read or analysis failures leave
+independent rows visible and make the command exit nonzero; stale, unrecorded
+and unverifiable verdicts alone are successful reporting. Check the exit status
+before treating a filtered report as complete.
 **example:** a stale-filtered status over ./... before deciding what
 to re-measure.
 

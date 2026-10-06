@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"golang.org/x/perf/benchfmt"
 
@@ -51,6 +52,17 @@ func New(dir string) *Store { return &Store{Root: dir} }
 
 // ErrNotRecorded is returned by Read when no recording exists for the benchmark.
 var ErrNotRecorded = errors.New("benchmark not recorded")
+
+// ErrInvalidRecording identifies readable Pew-marked bytes that cannot be
+// parsed. They are unusable evidence, but a fresh measurement may replace them.
+// It never identifies an I/O failure or an unmarked foreign file.
+var ErrInvalidRecording = errors.New("invalid Pew recording")
+
+type invalidRecordingError struct{ cause error }
+
+func (e *invalidRecordingError) Error() string        { return e.cause.Error() }
+func (e *invalidRecordingError) Unwrap() error        { return e.cause }
+func (e *invalidRecordingError) Is(target error) bool { return target == ErrInvalidRecording }
 
 // labelRe constrains variant labels to a safe filename component (no path
 // separators, no traversal) since labels are user-supplied (§6, --label).
@@ -768,6 +780,14 @@ func Parse(r io.Reader, name string) ([]*benchfmt.Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: read recording %s: %w", name, err)
 	}
+	results, err := parseRecording(data, name)
+	if err != nil && pewMarked(data) {
+		return nil, &invalidRecordingError{cause: err}
+	}
+	return results, err
+}
+
+func parseRecording(data []byte, name string) ([]*benchfmt.Result, error) {
 	formatValid := rawFormatValid(data)
 	rd := benchfmt.NewReader(bytes.NewReader(data), name)
 	var out []*benchfmt.Result
@@ -800,13 +820,9 @@ func Parse(r io.Reader, name string) ([]*benchfmt.Result, error) {
 	}
 	if err := rd.Err(); err != nil {
 		if errors.Is(err, bufio.ErrTooLong) && !formatValid && pewMarked(data) {
-			// A recording of an earlier format carrying a line past
-			// benchfmt's bound: written by a pew that lifted such lines
-			// on read, unreadable by this one and by plain benchstat.
-			// The current format never writes one, so the file is not
-			// interpreted — the refusal names the regenerating
-			// operation (spec §5).
-			return nil, fmt.Errorf("store: recording %s carries a line past benchfmt's scanner bound, written under an earlier format — regenerate it with pew run", name)
+			// Invalid format can mean an older encoding or corrupt current
+			// metadata. Neither authorizes interpreting the oversized value.
+			return nil, fmt.Errorf("store: recording %s carries a line past benchfmt's scanner bound — regenerate it with pew run: %w", name, err)
 		}
 		return nil, fmt.Errorf("store: read %s: %w", name, err)
 	}
@@ -821,14 +837,25 @@ func Parse(r io.Reader, name string) ([]*benchfmt.Result, error) {
 	return out, nil
 }
 
-// pewMarked reports whether the raw bytes carry any line keyed in
-// pew's namespace — the mark of a file pew wrote under some format, as
-// opposed to a foreign benchmark file the read arm contemplates.
+// pewMarked recognizes namespace-owned configuration keys without interpreting
+// recording evidence. Ordinary log text mentioning the namespace is not a key.
 func pewMarked(data []byte) bool {
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
-		if bytes.HasPrefix(line, []byte(run.RecordingKeyNamespace)) {
-			return true
+		colon := bytes.IndexByte(line, ':')
+		if colon <= 0 || !bytes.HasPrefix(line, []byte(run.RecordingKeyNamespace)) {
+			continue
 		}
+		if bytes.IndexFunc(line[:colon], func(r rune) bool { return unicode.IsSpace(r) || unicode.IsUpper(r) }) >= 0 {
+			continue
+		}
+		value := bytes.TrimSuffix(line[colon+1:], []byte{'\r'})
+		if len(value) != 0 && value[0] != ' ' && value[0] != '\t' {
+			continue
+		}
+		if len(bytes.Trim(value, " \t")) == 0 {
+			continue
+		}
+		return true
 	}
 	return false
 }

@@ -706,8 +706,12 @@ func TestAddRefInventoryReportsMalformedHistoricalRecording(t *testing.T) {
 	}
 	m := &statModule{benchDir: st.Root, store: st, repo: reader, keys: map[statKey]bool{}}
 	err = addRefInventory(m, ref.String(), "")
-	if err == nil || !strings.Contains(err.Error(), "corrupt recording") {
-		t.Fatalf("addRefInventory err=%v, want corrupt recording", err)
+	if err != nil || !m.keys[statKey{pkgRel: "pkg", bench: "BenchmarkBad"}] {
+		t.Fatalf("malformed historical recording disappeared from inventory: %v, %v", m.keys, err)
+	}
+	rows, present, readErr := m.readSide(ref.String(), "pkg", "BenchmarkBad", "")
+	if !present || rows != nil || !errors.Is(readErr, store.ErrInvalidRecording) || !strings.Contains(readErr.Error(), "corrupt recording") {
+		t.Fatalf("malformed history was admitted: rows=%v, present=%v, err=%v", rows, present, readErr)
 	}
 }
 
