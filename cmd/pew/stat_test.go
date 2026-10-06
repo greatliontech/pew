@@ -371,7 +371,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 		t.Fatal(err)
 	}
 	withWorkingDir(t, dir)
-	e, _, err := newEngineAt(context.Background(), dir, dir, false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), dir, dir, false, testEnvironment(t, os.Environ()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -461,7 +461,7 @@ func TestStatRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 		t.Fatal(err)
 	}
 	withWorkingDir(t, dir)
-	e, _, err := newEngineAt(context.Background(), dir, dir, false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), dir, dir, false, testEnvironment(t, os.Environ()))
 	if err != nil {
 		t.Fatal(err)
 	}

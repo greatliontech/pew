@@ -1,7 +1,7 @@
 # Handoff: the train's pew riders for the performance-evidence plan
 
-Lands: performance-evidence plan chunk 2 (the gofresh bump), with the
-chunk-4, -5 and -6 items named below landing at those chunks.
+Lands: performance-evidence plan chunk 3, with the later-chunk items
+named below landing at their stated chunks.
 
 The cross-tool train (gofresh docs/plans/cross-tool-train.md) held pew
 chunks whose derivations live in that plan's entries and ticks — a
@@ -9,55 +9,6 @@ place this plan's machine never reads. The fifth re-audit band (train
 chunk 319, 2026-10-06) dissolved the train's pew tail into this plan
 and moves every rider here. Each item is a derived fact, not a wish;
 its source tick is named so the derivation can be read.
-
-## At chunk 2 — the gofresh bump (the train's 291)
-
-- **Soundness, pinned as a fact:** the measurement spawn carries no
-  Quit arm. gofresh's `gotool.Containment` sends SIGQUIT before
-  SIGKILL; a SIGQUIT to a `go test` benchmark dumps goroutine stacks
-  into the measured stream, which §9 reads as splice evidence
-  (REQ-pew-sample-completeness). `runCommand`
-  (internal/run/run.go) moves onto `Runner.Program` only with the
-  Quit arm absent, and a pin witnesses the absence (train tick
-  5ede52e, audit 288's rider on 291).
-- `provenance.go` builds the provenance as a struct literal and
-  discards the checked sample (`_, err := …Check`): both move to
-  `gofresh.NewToolchainProvenance` and read the returned sample
-  (gofresh 281.C, 2dbbc6f; a sampler is bounded to one judged run —
-  REQ-fresh-toolchain-skew's consumer obligation).
-- The row projection (`fingerprintFromConfig`, status.go) validates
-  through `gofresh.Fingerprint.Validate` (gofresh 274, 0063f46).
-- pew's own `go list` calls (status.go, stat.go, ab.go) take
-  `Runner.List` — a pipe-hold salvage is refused outright
-  (`ErrListingRefused`; gofresh 281.B, 53b9e1d). `ProducerIngest`
-  takes one `runtimeinput.Roots` per verb invocation (281.D, 921bd84).
-- `Observation.Attribution` (gofresh 279, 0a3fccb) is read wherever
-  a refusal's reason is rendered; `runCommand`'s 2 s `WaitDelay`
-  salvage follows gofresh's salvage rule (`gotool.Salvaged`).
-- The bump target: whatever gofresh has released. gofresh 292 (the
-  in-module refused path spelled module-relative — a clause re-key
-  of exemption records), 297 (the dst-selection walk) and 300 (the
-  guidance lint's gofresh half) head the train's lane; a bump taken
-  before they release is followed by the train's pew 320 (the
-  residual bump with 300's pew half: the five derived defaults 275
-  spelled in prose).
-- gofresh/resident, the content-keyed toolchain audit (310) and the
-  version grammar have no pew reader today — nothing to adopt.
-- The chunk's close-out reinstall (2.3) also drops the two `mcp.log`
-  lines from `.gomutant/.gitignore` (gomutant 312 moved the exit log
-  out of every served tree) — after this machine's gomutant is
-  reinstalled at c6a9811 or later, never before.
-- `environment-normalized-once` (docs/issues) lands here: the chunk
-  touches every normalization site.
-- The fleet's CI/release gate (gofresh 48bbe3a; the train's doctrine
-  2026-10-02: every consumer adopts it at its next chunk — gomutant
-  323 and stipulator 321 charter it at this band): release.yaml on
-  `workflow_run` of a successful CI for a same-repository push,
-  serialized, SEMREL_BRANCH=head_sha, a superseded commit releasing
-  nothing; a records job (stipulator compile + the bindings view
-  failing on any non-current row); next-rc its own workflow. pew's
-  release.yaml still releases on every push to main. This plan's 2.3
-  or 8.3 close-out is the place.
 
 ## At chunk 3 — malformed and legacy recordings
 
@@ -124,7 +75,7 @@ its source tick is named so the derivation can be read.
 
 pew 320 (the residual bump), 252r (seven containment spellings, two
 module resolvers, the vestige set — `ExecuteBinary`,
-`recordingFromPath`, `run.Execute`, `gotool.RunIn`, `gitblob.State`,
+`recordingFromPath`, `run.Execute`, `gitblob.State`,
 `checkOne`, `equalExcept`'s unused parameter — the stretch literals,
 the writer census, the declared-benchmarks rule, stat's partial
 pkgMeta), 232r (`--explain`'s stream, the `pew-format-invalid` key,

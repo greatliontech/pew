@@ -1,0 +1,9 @@
+{
+  "targets": [
+    {"symbol":"github.com/greatliontech/pew/internal/gotool.NewEnvironment","oracle":["github.com/greatliontech/pew/internal/gotool.TestEnvironmentOwnsItsSnapshot","github.com/greatliontech/pew/internal/gotool.TestEnvironmentAdmissionPreservesEmptyAndInherited"],"oracleExplicit":true},
+    {"symbol":"github.com/greatliontech/pew/internal/gotool.Environment.Values","oracle":["github.com/greatliontech/pew/internal/gotool.TestEnvironmentOwnsItsSnapshot","github.com/greatliontech/pew/internal/gotool.TestEnvironmentAdmissionPreservesEmptyAndInherited"],"oracleExplicit":true},
+    {"symbol":"github.com/greatliontech/pew/internal/gotool.Environment.Lookup","oracle":["github.com/greatliontech/pew/internal/gotool.TestEnvironmentOwnsItsSnapshot","github.com/greatliontech/pew/internal/gotool.TestEnvironmentAdmissionPreservesEmptyAndInherited"],"oracleExplicit":true},
+    {"symbol":"github.com/greatliontech/pew/internal/gotool.Environment.WithParallelism","oracle":["github.com/greatliontech/pew/internal/gotool.TestEnvironmentOwnsItsSnapshot"],"oracleExplicit":true},
+    {"symbol":"github.com/greatliontech/pew/internal/gotool.Environment.For","oracle":["github.com/greatliontech/pew/internal/gotool.TestEnvironmentOwnsItsSnapshot","github.com/greatliontech/pew/internal/gotool.TestCommandEnvironmentAdmitsDirectoryBeforePinning","github.com/greatliontech/pew/internal/gotool.TestCommandEnvironmentPinsPWD"],"oracleExplicit":true}
+  ]
+}

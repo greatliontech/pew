@@ -22,20 +22,31 @@ func (e *toolchainProvenanceError) Unwrap() error { return e.err }
 
 // goVersionSampler reports the ambient toolchain's GOVERSION as the
 // target module resolves it — the engine's build-toolchain provenance
-// half. Swapped only by tests. The default is gofresh's memoized
-// sampler (gotool.Sampler: one sample per coordinate and normalized
-// environment for the process, a failed sample memoized like an
+// half. Swapped only by tests. The default samples the memoized
+// preparation reader: one snapshot per coordinate and normalized
+// environment for the invocation, a failed sample memoized like an
 // answered one, a cancelled sample never memoized) under pew's policy,
-// so `go env` exec cost stays constant in package count and an alias
+// so provenance adds no second `go env` to build preparation and an alias
 // and its target are one key.
 var goVersionSampler = sampleGoVersion
 
-// toolchainSampler is the process's one memo: gofresh's sampler over
-// pew's runner, whose boundary hook is the seam a pin observes the
-// spawn's directory and environment through (goVersionSampler above
-// swaps the whole sample for the skew fixtures — two seams for two
-// questions). The hook reads sampleCommandObserver at spawn time.
-var toolchainSampler = &gofreshtool.Sampler{Runner: gotool.Runner(observeSample)}
+type preparationReaderKey struct{}
+
+// withToolchainSampler owns the preparation readers for one judged invocation.
+// Toolchain provenance and build configuration read the same snapshot. Write
+// validation constructs a fresh reader instead of serving preparation evidence.
+func withToolchainSampler(ctx context.Context) context.Context {
+	return context.WithValue(ctx, preparationReaderKey{}, &gofreshtool.RunMemo[*gofreshtool.EnvReader]{})
+}
+
+func preparationReader(ctx context.Context, dir string, env gotool.Environment) (*gofreshtool.EnvReader, error) {
+	makeReader := func() *gofreshtool.EnvReader { return gotool.Reader(dir, env, observeSample) }
+	memo, _ := ctx.Value(preparationReaderKey{}).(*gofreshtool.RunMemo[*gofreshtool.EnvReader])
+	if memo == nil {
+		return makeReader(), nil
+	}
+	return memo.Get(gotool.CommandDir(dir), env.Values(), makeReader)
+}
 
 func observeSample(cmd *exec.Cmd) {
 	if sampleCommandObserver != nil {
@@ -43,18 +54,16 @@ func observeSample(cmd *exec.Cmd) {
 	}
 }
 
-// sampleGoVersion is the toolchain sample through pew's one go-command
-// policy: the directory resolved and a nil environment inherited (an
-// environment the policy refuses is pew's own class), then gofresh's
-// memoized sampler — the sample resolves exactly as the engine's own
+// sampleGoVersion reads the toolchain sample through pew's one go-command
+// policy and gofresh's snapshot sampler — the sample resolves as the engine's own
 // loads do, the module's go.mod toolchain directive included, under
 // the effective environment.
-func sampleGoVersion(ctx context.Context, dir string, env []string) (string, error) {
-	resolved, env, err := gotool.Resolve(dir, env)
+func sampleGoVersion(ctx context.Context, dir string, env gotool.Environment) (string, error) {
+	reader, err := preparationReader(ctx, dir, env)
 	if err != nil {
 		return "", err
 	}
-	return toolchainSampler.Sample(ctx, resolved, env)
+	return (gofreshtool.SnapshotSampler{Reader: reader}).Sample(ctx, gotool.CommandDir(dir), env.Values())
 }
 
 // sampleCommandObserver is the runner's boundary hook on the sample's
@@ -70,24 +79,26 @@ var sampleCommandObserver func(*exec.Cmd)
 // environment the go-command policy refuses passes through as its own
 // class (gotool.EnvironmentError): a fact about the caller's
 // environment, never the toolchain, so it is never the skew refusal.
-func checkToolchainProvenance(ctx context.Context, dir string, env []string) error {
+func checkToolchainProvenance(ctx context.Context, dir string, env gotool.Environment) (string, error) {
 	// The composite is gofresh's: the memoized sample, then the skew
 	// judgment, both refusals one typed class whose message already
 	// names what this side could read beside a failed sample (spec §7's
-	// refusal contract); the memo lives in toolchainSampler, the
-	// package's one, so a composite per check costs nothing.
-	_, err := (&gofresh.ToolchainProvenance{Sampler: gofresh.SampleFunc(goVersionSampler)}).Check(ctx, dir, env)
-	var envErr *gotool.EnvironmentError
-	if errors.As(err, &envErr) {
-		// The caller's environment refused by the go-command policy
-		// says nothing about the toolchain: its own class, unwrapped
-		// from the composite's refusal, so the operator reads the
-		// environment fault, not a rebuild.
-		return envErr
+	// refusal contract); the invocation owns the sampler memo, so a
+	// composite per check does not repeat its toolchain query.
+	var sample gofresh.SampleFunc
+	if goVersionSampler != nil {
+		sample = func(ctx context.Context, dir string, _ []string) (string, error) {
+			return goVersionSampler(ctx, dir, env)
+		}
 	}
+	provenance, err := gofresh.NewToolchainProvenance(sample)
+	if err != nil {
+		return "", err
+	}
+	checked, err := provenance.Check(ctx, dir, env.Values())
 	var pe *gofresh.ToolchainProvenanceError
 	if errors.As(err, &pe) {
-		return &toolchainProvenanceError{err: pe.Err}
+		return "", &toolchainProvenanceError{err: pe.Err}
 	}
-	return err
+	return checked, err
 }

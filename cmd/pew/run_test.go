@@ -21,6 +21,7 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	gofresh "github.com/greatliontech/gofresh"
+	"github.com/greatliontech/pew/internal/gotool"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
@@ -234,7 +235,7 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runRun: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
 	}
-	e, _, err := newEngineAt(context.Background(), dir, dir, false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), dir, dir, false, testEnvironment(t, os.Environ()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +340,7 @@ func TestRunPackageRecordsProvidedConditions(t *testing.T) {
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
 	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), []string{"."})
+	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +348,7 @@ func TestRunPackageRecordsProvidedConditions(t *testing.T) {
 		t.Fatalf("resolved %d packages, want 1", len(pkgs))
 	}
 	env := os.Environ()
-	e, _, err := newEngineForPkg(context.Background(), pkgs[0], env)
+	e, _, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,12 +410,12 @@ func TestRunPackageRecordsThrottleDelta(t *testing.T) {
 		t.Fatal(err)
 	}
 	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), []string{"."})
+	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	e, _, err := newEngineForPkg(context.Background(), pkgs[0], env)
+	e, _, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -567,7 +568,7 @@ func TestRunPackagePGOContentMovesBuildconfig(t *testing.T) {
 		}
 	}
 	probeEnv = append(probeEnv, "GOFLAGS=-pgo=missing.pgo")
-	if _, _, err := newEngineAt(context.Background(), t.TempDir(), t.TempDir(), false, probeEnv); err == nil {
+	if _, _, err := newEngineAt(context.Background(), t.TempDir(), t.TempDir(), false, testEnvironment(t, probeEnv)); err == nil {
 		t.Fatal("unreadable named profile did not fail closed")
 	}
 
@@ -604,7 +605,7 @@ func TestRunPackagePGOContentMovesBuildconfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), []string{"."})
+	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -618,7 +619,7 @@ func TestRunPackagePGOContentMovesBuildconfig(t *testing.T) {
 
 	record := func(benchDir string) string {
 		t.Helper()
-		e, pgoInput, err := newEngineForPkg(context.Background(), pkgs[0], env)
+		e, pgoInput, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -715,7 +716,7 @@ func TestRunPackageDefaultPGOMovesBuildconfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), []string{"."})
+	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -731,7 +732,7 @@ func TestRunPackageDefaultPGOMovesBuildconfig(t *testing.T) {
 
 	record := func(benchDir string) string {
 		t.Helper()
-		e, pgoInput, err := newEngineForPkg(context.Background(), pkgs[0], env)
+		e, pgoInput, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -808,7 +809,7 @@ func TestRunPackageRefusesPGOProfileDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), []string{"."})
+	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -819,7 +820,7 @@ func TestRunPackageRefusesPGOProfileDrift(t *testing.T) {
 		}
 	}
 	env = append(env, "GOFLAGS=-pgo=prof.pgo")
-	e, pgoInput, err := newEngineForPkg(context.Background(), pkgs[0], env)
+	e, pgoInput, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -890,7 +891,7 @@ func TestRunPackageSalvagesCorruptStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), []string{"."})
+	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -898,7 +899,7 @@ func TestRunPackageSalvagesCorruptStream(t *testing.T) {
 		t.Fatalf("resolved %d packages, want 1", len(pkgs))
 	}
 	env := os.Environ()
-	e, _, err := newEngineForPkg(context.Background(), pkgs[0], env)
+	e, _, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -989,12 +990,12 @@ func TestRunPackageDropsForeignStreamConfig(t *testing.T) {
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
 	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), []string{"."})
+	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	e, _, err := newEngineForPkg(context.Background(), pkgs[0], env)
+	e, _, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1070,7 +1071,7 @@ func TestRunPackageRefusesUnattributableOrphan(t *testing.T) {
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
 	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), []string{"."})
+	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1078,7 +1079,7 @@ func TestRunPackageRefusesUnattributableOrphan(t *testing.T) {
 		t.Fatalf("resolved %d packages, want 1", len(pkgs))
 	}
 	env := os.Environ()
-	e, _, err := newEngineForPkg(context.Background(), pkgs[0], env)
+	e, _, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1761,12 +1762,12 @@ func TestRunPackagePerArmThrottleAttribution(t *testing.T) {
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
 	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), []string{"."})
+	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	e, _, err := newEngineForPkg(context.Background(), pkgs[0], env)
+	e, _, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1944,12 +1945,12 @@ func TestRunPackageRefusesForeignCorruptEvidence(t *testing.T) {
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
 	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), []string{"."})
+	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	e, _, err := newEngineForPkg(context.Background(), pkgs[0], env)
+	e, _, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2087,5 +2088,9 @@ func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runC
 	if prep == nil || len(prep.runBenches) == 0 {
 		return nil
 	}
-	return runPreparedPackage(context.Background(), w, errw, gc, rc, prep, newEnvironments(env, rc.pin), conditions)
+	normalized, err := gotool.NewEnvironment(env)
+	if err != nil {
+		return err
+	}
+	return runPreparedPackage(context.Background(), w, errw, gc, rc, prep, newEnvironments(normalized, rc.pin), conditions)
 }

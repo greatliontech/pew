@@ -1,0 +1,21 @@
+name: Next
+
+# Future Go versions are early warnings, separate from the pinned release gate.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  next:
+    uses: greatliontech/actions/.github/workflows/go-next.yml@main
+    with:
+      short: true
+      short-timeout: 5m
+      full-timeout: 15m
+      job-minutes: 30

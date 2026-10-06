@@ -323,6 +323,10 @@ guard is computed from, so degrading per package is not sound. A skew refusal na
 series and the rebuild that clears it; an unidentifiable or failed-sample refusal names what it
 could read and the failing sample.
 
+Toolchain samples are shared only within one judged invocation, while its
+toolchain-selection inputs remain fixed. A later invocation samples again even
+at the same directory and under the same environment.
+
 - **valid** (reuse `R`) — all six guards below provably hold over a soundly over-approximated
   closure, and either neither the closure nor runtime-input manifest carries an unverifiable
   disposition or an applicable purity assertion explicitly overrides those dispositions (§7.5).
@@ -624,6 +628,11 @@ unreadable capture, a failed bracket, or any other ingest failure records the ca
 **incomplete** observation with the honest reason instead — never an absent manifest, which would
 assert "no runtime inputs" and serve.
 
+An unverifiable observation is reported at measurement time with its reason
+and, when available, the operation and producing directory that explain that
+reason. This attribution is diagnostic text, not part of the recorded manifest,
+digest, or validity identity.
+
 Pew still selects no observability proof: a file-reading benchmark's closure remains `unverifiable`
 under Gofresh's ordinary fingerprint path — refused on its own closure reason, no longer on
 manufactured incompleteness — unless an explicit purity assertion applies with its separate
@@ -876,6 +885,9 @@ provenance is captured atomically with the run:
   under gofresh's go-command policy — an environment that policy's normalization refuses (a duplicated
   or malformed entry) is refused, never repaired — so the resolved-directory premise holds by
   construction through a symlinked checkout whose shell exports the alias, with no per-site bridging.
+  Environment admission occurs before the invocation's first listing; downstream stages retain
+  the admitted snapshot rather than inheriting the ambient environment again. CPU pinning derives
+  a separate measurement snapshot without modifying analysis inputs.
   Source, guard, purity, or commit drift aborts the package write; worktree-state drift is arm-scoped
   — an arm whose own repository-state bracket moved is refused alone (single-subject execution above),
   and non-source residue never aborts the write of the sibling arms' recordings. Every destination is

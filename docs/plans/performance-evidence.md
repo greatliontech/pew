@@ -3,8 +3,12 @@
   - [x] 1.2 Specify zero-to-positive regressions independently of an undefined percentage display, reject non-finite statistical options, and pin the corrected behavior with focused and property tests.
   - [x] 1.3 Run affected and required executable checks, bind the new evidence, kill load-bearing mutations, converge independent review, then commit and push this fix.
 - [ ] 2. Adopt current gofresh correctness and toolchain support.
-  - [ ] 2.1 Re-triage the pin-lag/toolchain/installed-binary issues against the pulled gofresh release and its public containment/provenance APIs.
-  - [ ] 2.2 Update the dependency and affected integration paths without local freshness workarounds; verify fingerprint round trips, toolchain admission and controlled subprocess behavior.
+  - [x] 2.1 Re-triage the pin-lag/toolchain/installed-binary issues and the cross-machine handoff against the latest fetched release; incorporate newly landed work and the source-audited nodwarf5 selection without duplicating other agents' changes.
+  - [x] 2.2 Update the dependency and shared containment/provenance integration, consume the checked sample and public fingerprint validation, adopt listing refusal and invocation-owned observation roots, and consolidate environment normalization; preserve no-Quit measurement cancellation and attribution with explicit tests.
+    - [x] Adopt listing refusal, public fingerprint validation and invocation-owned observation roots, with reviewed regression and mutation evidence.
+    - [x] Bound provenance sampling to each judged invocation and retain diagnostic observation attribution without changing recording identity.
+    - [x] Pin no-Quit measurement cancellation through the shared containment path.
+    - [x] Finish checked-sample integration and the single normalized-environment boundary.
   - [ ] 2.3 Complete gates, mutation evidence and independent review, close resolved issues and update cross-tool tracking, commit and push, then install from the clean committed tree.
 - [ ] 3. Make malformed and legacy recording handling recoverable and fully visible.
   - [ ] 3.1 Derive read/admission/regeneration behavior for oversized legacy metadata and failed stores, preserving raw history without accepting it as current evidence.
@@ -23,10 +27,10 @@
   - [ ] 6.2 Capture diagnostic profiles separately from statistical timing samples with matched source/build/runtime identities; expose attributable sample and allocation data, empty/incomplete capture and missing-subject outcomes without fabricated certainty.
   - [ ] 6.3 Integrate profile freshness/integrity and cleanup with recordings and status, verify drift/interruption/corruption cases, run gates and mutation probes, converge review, commit and push.
 - [ ] 7. Complete A/B and historical profile comparison.
-  - [ ] 7.1 Specify per-side attribution and profile comparison over matching sample kinds and provenance, including multi-package output and explicit raw derivation artifacts.
+  - [ ] 7.1 Specify per-side attribution and profile comparison over matching sample kinds and provenance, including multi-package output, explicit raw derivation artifacts, cancellable Git control processes and bounded truthful worktree cleanup.
   - [ ] 7.2 Implement both-side capture/comparison and lossless multi-package output using shared recording/comparison mechanisms; surface missing/incompatible profiles and preserve completed units on interruption.
   - [ ] 7.3 Complete gates and mutation evidence, converge review, retire resolved profile/A-B issues and cross-tool references, commit and push.
 - [ ] 8. Close the tool-level performance workflow and remaining related issue dispositions.
-  - [ ] 8.1 Reconcile the clean-baseline recording lifecycle, per-arm noise-floor proposal, machine-readable/progress surfaces and related correctness/consolidation issues against the implemented capabilities; retain only explicit, justified deferrals with checkable triggers.
+  - [ ] 8.1 Reconcile the clean-baseline recording lifecycle, per-arm noise-floor proposal, machine-readable/progress surfaces, cross-machine handoff and CI/release gating against the implemented capabilities; retain only explicit, justified deferrals with checkable triggers.
   - [ ] 8.2 Make the canonical guidance and CLI expose the complete supported measurement/profile/comparison workflow, preserving provenance rather than editing dirty measurements into clean baselines or suppressing regressions through unexplained floors.
   - [ ] 8.3 Run full policy/gates and closing mutation campaign, converge final independent review, complete issue and plan close-out, commit and push, and install only the clean committed tool.

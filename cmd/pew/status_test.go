@@ -14,6 +14,7 @@ import (
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/recordingtest"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
@@ -91,7 +92,7 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 	}
 	const pkg = "example.com/extstatus"
 	const bench = "BenchmarkExternal"
-	e, _, err := newEngineAt(context.Background(), dir, dir, false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), dir, dir, false, testEnvironment(t, os.Environ()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +137,7 @@ func TestStatusExplainNamesTheMovingGuard(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
-	e, _, err := newEngineAt(context.Background(), ".", ".", false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), ".", ".", false, testEnvironment(t, os.Environ()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +194,7 @@ func TestStatusExplainNamesMovedInputs(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
-	e, _, err := newEngineAt(context.Background(), ".", ".", false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), ".", ".", false, testEnvironment(t, os.Environ()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +236,7 @@ func TestStatusExplainNamesMovedInputs(t *testing.T) {
 // TestStatusJSONRows pins spec §12's status -json shape: one JSON object per
 // row with stable field names, the same verdicts the text view reports.
 func TestStatusJSONRows(t *testing.T) {
-	e, _, err := newEngineAt(context.Background(), ".", ".", false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), ".", ".", false, testEnvironment(t, os.Environ()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +281,7 @@ func TestStatusJSONRows(t *testing.T) {
 // unlabeled rows never mention it), and a package whose benchmark
 // declarations cannot be read emits a {package, error} object.
 func TestStatusJSONLabelAndErrorRows(t *testing.T) {
-	e, _, err := newEngineAt(context.Background(), ".", ".", false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), ".", ".", false, testEnvironment(t, os.Environ()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +430,11 @@ func statusPackageOf(w, errw io.Writer, e *gofresh.Engine, benchDir, label strin
 	if err != nil || len(benches) == 0 {
 		return err
 	}
-	return statusPackage(context.Background(), w, errw, e, benchDir, label, staleOnly, explain, jsonOut, p, benches)
+	env, err := gotool.NewEnvironment(nil)
+	if err != nil {
+		return err
+	}
+	return statusPackage(context.Background(), w, errw, e, benchDir, label, staleOnly, explain, jsonOut, p, benches, env)
 }
 
 // An explanation names a closure-derivation move as such: a recording
@@ -480,7 +485,7 @@ func TestExplainNamesAClosureDerivationMove(t *testing.T) {
 // bench fixture with the benchmark's current fingerprint.
 func explainFixture(t *testing.T) (*gofresh.Engine, string, string, gofresh.Fingerprint) {
 	t.Helper()
-	e, _, err := newEngineAt(context.Background(), ".", ".", false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), ".", ".", false, testEnvironment(t, os.Environ()))
 	if err != nil {
 		t.Fatal(err)
 	}

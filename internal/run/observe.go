@@ -40,26 +40,25 @@ func CaptureObservationFrame(ctx context.Context, moduleDir, pkgRel string) runt
 // caller-side responsibility the directive's author takes on. The
 // classification roots come from the environment the process ran
 // under: the ingest carries the same environment the spawn used, under
+// a roots memo owned by this verb invocation, never shared across invocations.
+// Root resolution inputs remain fixed for that invocation. Ingest uses
 // the same go-command policy — an environment that policy refuses is
 // not an ingest failure but the run's own input refusal, returned as
 // the error it is.
-func IngestObservation(ctx context.Context, frame runtimeinput.ProducerFrame, logPath, identity string, env []string, scratch ...string) (runtimeinput.State, error) {
+func IngestObservation(ctx context.Context, frame runtimeinput.ProducerFrame, logPath, identity string, roots *runtimeinput.Roots, env gotool.Environment, scratch ...string) (runtimeinput.Observation, error) {
 	namespaces := make([]runtimeinput.ScratchNamespace, 0, len(scratch))
 	for _, pattern := range scratch {
 		namespaces = append(namespaces, runtimeinput.ScratchNamespace{Dir: frame.PkgRel, Pattern: pattern})
 	}
-	// The refusal here is decided by the run's inputs and fires at
-	// preparation first (the package listing normalizes the same
-	// environment before anything else, the provenance sample after it,
-	// REQ-pew-preparation), so this branch is unreachable past it; the
-	// one normalization point that makes it unrepresentable is tracked in
-	// docs/issues/environment-normalized-once.md.
-	ingestEnv, err := gotool.CommandEnvironment(env, frame.PkgDir)
+	// Environment admission already happened before preparation. Only the
+	// directory-derived PWD is constructed here from the observation frame.
+	ingestEnv, err := env.For(frame.PkgDir)
 	if err != nil {
-		return runtimeinput.State{}, err
+		return runtimeinput.Observation{}, err
 	}
 	observation, _, err := frame.Observe(ctx, logPath, runtimeinput.ProducerIngest{
 		Identity: identity,
+		Roots:    roots,
 		Env:      ingestEnv,
 		// The classification roots (toolchain, module cache, build
 		// cache, the temp root) are facts of the ingested environment
@@ -67,7 +66,10 @@ func IngestObservation(ctx context.Context, frame runtimeinput.ProducerFrame, lo
 		ScratchNamespaces: namespaces,
 	})
 	if err != nil {
-		return runtimeinput.State{}, err
+		return runtimeinput.Observation{}, err
 	}
-	return runtimeinput.CompletedState(observation)
+	if _, err := runtimeinput.CompletedState(observation); err != nil {
+		return runtimeinput.Observation{}, err
+	}
+	return observation, nil
 }

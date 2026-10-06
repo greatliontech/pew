@@ -123,7 +123,7 @@ func TestExecuteDerivesCommandEnvironment(t *testing.T) {
 		}
 	}
 	env = append(env, "GOWORK=off", "PWD=/wrong")
-	out, err := Execute(dir, "", env, []string{"run", "."})
+	out, err := Execute(dir, "", testEnvironment(t, env), []string{"run", "."})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,10 +295,7 @@ func TestEffectiveGoflags(t *testing.T) {
 			env = append(env, entry)
 		}
 	}
-	fileReader, err := gotool.Reader(dir, append(env, "GOENV="+goenv), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	fileReader := gotool.Reader(dir, testEnvironment(t, append(env, "GOENV="+goenv)), nil)
 	fromFile, err := EffectiveGoflags(context.Background(), fileReader)
 	if err != nil {
 		t.Fatal(err)
@@ -307,10 +304,7 @@ func TestEffectiveGoflags(t *testing.T) {
 		t.Fatalf("EffectiveGoflags = %q, want the env-file value", fromFile)
 	}
 	// The process variable wins over the file, per the go command.
-	envReader, err := gotool.Reader(dir, append(env, "GOENV="+goenv, "GOFLAGS=-pgo=proc.pgo"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	envReader := gotool.Reader(dir, testEnvironment(t, append(env, "GOENV="+goenv, "GOFLAGS=-pgo=proc.pgo")), nil)
 	fromEnv, err := EffectiveGoflags(context.Background(), envReader)
 	if err != nil {
 		t.Fatal(err)

@@ -123,7 +123,7 @@ func BenchmarkCount(b *testing.B) {
 		t.Helper()
 		dynamicStateVouches = vouches
 		defer func() { dynamicStateVouches = nil }()
-		e, err := buildEngine(context.Background(), dir, os.Environ(), nil, "")
+		e, err := buildEngine(context.Background(), dir, testEnvironment(t, os.Environ()), nil, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -137,7 +137,7 @@ func BenchmarkCount(b *testing.B) {
 		}
 		return fp
 	}
-	plainEngine, err := buildEngine(context.Background(), dir, os.Environ(), nil, "")
+	plainEngine, err := buildEngine(context.Background(), dir, testEnvironment(t, os.Environ()), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func BenchmarkCount(b *testing.B) {
 	// The vouched VERDICT no longer names the culprit - the discharge is
 	// load-bearing, not merely recorded.
 	dynamicStateVouches = []string{culprit}
-	vouchedEngine, err := buildEngine(context.Background(), dir, os.Environ(), nil, "")
+	vouchedEngine, err := buildEngine(context.Background(), dir, testEnvironment(t, os.Environ()), nil, "")
 	dynamicStateVouches = nil
 	if err != nil {
 		t.Fatal(err)

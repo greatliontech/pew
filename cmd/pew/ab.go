@@ -45,16 +45,13 @@ type abConfig struct {
 // machine and runtime-config guards are process facts the two sides share by
 // construction. The PGO profile rides in as a content digest exactly as the
 // recording path's engine takes it.
-func (ac abConfig) sideGuards(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
+func (ac abConfig) sideGuards(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env gotool.Environment) (guard.Guards, error) {
 	if ac.guards != nil {
-		return ac.guards(ctx, moduleDir, pkgDir, mainPkg, env)
+		return ac.guards(ctx, moduleDir, pkgDir, mainPkg, env.Values())
 	}
 	// One pass, one reader: the effective GOFLAGS and the guards'
 	// capture read the same `go env -json` document.
-	reader, err := gotool.Reader(moduleDir, env, captureCommandObserver)
-	if err != nil {
-		return guard.Guards{}, err
-	}
+	reader := gotool.Reader(moduleDir, env, captureCommandObserver)
 	goflags, err := run.EffectiveGoflags(ctx, reader)
 	if err != nil {
 		return guard.Guards{}, err
@@ -75,7 +72,7 @@ func (ac abConfig) sideGuards(ctx context.Context, moduleDir, pkgDir string, mai
 	// pew's policy (gotool.Reader: the module's coordinate, the
 	// environment inherited and refused as pew's class — here env is the
 	// analysis environment, never nil).
-	return guard.Capture(ctx, reader, env, guard.Measurement, buildInputs...)
+	return guard.Capture(ctx, reader, env.Values(), guard.Measurement, buildInputs...)
 }
 
 // captureCommandObserver is the reader's boundary hook on every child
@@ -85,8 +82,8 @@ var captureCommandObserver func(*exec.Cmd)
 
 // abPackageName resolves a package directory's package name with the same
 // toolchain environment the builds use.
-func abPackageName(ctx context.Context, dir string, env []string) (string, error) {
-	out, err := gotool.Output(ctx, dir, env, "list", "-f", "{{.Name}}", ".")
+func abPackageName(ctx context.Context, dir string, env gotool.Environment) (string, error) {
+	out, err := gotool.List(ctx, dir, env, "-f", "{{.Name}}", ".")
 	if err != nil {
 		return "", err
 	}
@@ -100,16 +97,16 @@ func (ac abConfig) snapshotThrottle() run.ThrottleSnapshot {
 	return run.SnapshotThrottle()
 }
 
-func (ac abConfig) executeBinary(ctx context.Context, dir, pin string, env []string, bin string, args []string) ([]byte, error) {
+func (ac abConfig) executeBinary(ctx context.Context, dir, pin string, env gotool.Environment, bin string, args []string) ([]byte, error) {
 	if ac.execute != nil {
-		return ac.execute(dir, pin, env, bin, args)
+		return ac.execute(dir, pin, env.Values(), bin, args)
 	}
 	return run.ExecuteBinaryContext(ctx, dir, pin, env, bin, args)
 }
 
-func (ac abConfig) buildBinary(ctx context.Context, dir string, env []string, args []string) error {
+func (ac abConfig) buildBinary(ctx context.Context, dir string, env gotool.Environment, args []string) error {
 	if ac.build != nil {
-		return ac.build(dir, env, args)
+		return ac.build(dir, env.Values(), args)
 	}
 	// The same process-group runner the measurements use: a cancelled
 	// build takes its compile and link children with it and reports the
@@ -159,11 +156,15 @@ func newABCmd() *cobra.Command {
 }
 
 func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []string) error {
+	analysis, err := gotool.NewEnvironment(nil)
+	if err != nil {
+		return err
+	}
 	if ac.count < 1 {
 		return fmt.Errorf("ab: count must be at least 1")
 	}
 	reportPhase("listing")
-	pkgs, err := resolvePackages(ctx, patterns)
+	pkgs, err := resolvePackages(ctx, analysis, patterns)
 	if err != nil {
 		if cancelledBy(ctx, err) {
 			return interrupted("ab: interrupted while listing packages; no pair measured")
@@ -211,7 +212,7 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 		return err
 	}
 	defer cleanup()
-	envs := newEnvironments(os.Environ(), ac.pin)
+	envs := newEnvironments(analysis, ac.pin)
 	env := envs.analysis
 	// Every package prepares before any package measures (spec
 	// REQ-pew-preparation): containment, the B side's existence, both
@@ -265,7 +266,7 @@ type abPreparation struct {
 // prepareABPackage builds a package's A/B preparation record, firing
 // every refusal the two trees decide before any iteration; a returned
 // record with a temp dir owns it even when the error is non-nil.
-func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, worktree, placement string, env []string) (*abPreparation, error) {
+func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, worktree, placement string, env gotool.Environment) (*abPreparation, error) {
 	// Each package's own module maps into the worktree - a go.work
 	// pattern can resolve packages from several modules, and a
 	// module outside this repository has no B side to compare.

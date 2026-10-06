@@ -5,9 +5,8 @@ import (
 	"io"
 	"os/exec"
 	"runtime"
-	"strconv"
-	"strings"
 
+	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/run"
 )
 
@@ -37,21 +36,23 @@ func derivePin(errw io.Writer) (run.Pin, error) {
 // observation is ingested under and the one revalidation judges under
 // are the same value by construction.
 type environments struct {
-	analysis, runtime []string
+	analysis gotool.Environment
+	runtime  *gotool.Environment
 }
 
-func newEnvironments(env []string, pin run.Pin) environments {
+func newEnvironments(env gotool.Environment, pin run.Pin) environments {
 	e := environments{analysis: env}
 	if pin.Pinned() {
-		e.runtime = pinEnvironment(env, pin)
+		measured := pinEnvironment(env, pin)
+		e.runtime = &measured
 	}
 	return e
 }
 
 // measured is the environment the measured process runs under.
-func (e environments) measured() []string {
+func (e environments) measured() gotool.Environment {
 	if e.runtime != nil {
-		return e.runtime
+		return *e.runtime
 	}
 	return e.analysis
 }
@@ -71,20 +72,13 @@ func (e environments) measured() []string {
 // the measured process and the engine's producer environment see this
 // environment: go's own builds and loads parallelize on GOMAXPROCS and
 // are not pinned.
-func pinEnvironment(env []string, pin run.Pin) []string {
+func pinEnvironment(env gotool.Environment, pin run.Pin) gotool.Environment {
 	if !pin.Pinned() {
 		return env
 	}
-	out := make([]string, 0, len(env)+1)
-	for _, kv := range env {
-		if value, ok := strings.CutPrefix(kv, "GOMAXPROCS="); ok {
-			if value != "" {
-				return env
-			}
-			continue
-		}
-		out = append(out, kv)
+	if value, _ := env.Lookup("GOMAXPROCS"); value != "" {
+		return env
 	}
 	width := min(len(pin.CPUs), runtime.GOMAXPROCS(0))
-	return append(out, "GOMAXPROCS="+strconv.Itoa(width))
+	return env.WithParallelism(width)
 }

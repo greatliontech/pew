@@ -10,6 +10,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	gofreshtool "github.com/greatliontech/gofresh/gotool"
 )
 
 // One environment policy for every go invocation (spec §9): the working
@@ -60,7 +63,7 @@ func TestCommandDirResolvesSymlinkAlias(t *testing.T) {
 
 func TestCommandEnvironmentPinsPWD(t *testing.T) {
 	env := []string{"HOME=/h", "PWD=/somewhere/aliased", "GOFLAGS=-count=1"}
-	got, err := CommandEnvironment(env, "/resolved/dir")
+	got, err := testEnvironment(t, env).For("/resolved/dir")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +81,7 @@ func TestCommandEnvironmentPinsPWD(t *testing.T) {
 	// gofresh's normalization refuses a duplicated key where the old
 	// pinning replaced it silently, as pew's own class carrying
 	// gofresh's message once; a nil env inherits the process's.
-	_, err = CommandEnvironment([]string{"A=1", "A=2"}, "/resolved/dir")
+	_, err = NewEnvironment([]string{"A=1", "A=2"})
 	var envErr *EnvironmentError
 	if !errors.As(err, &envErr) {
 		t.Fatalf("a duplicated key was reported as %v; want the environment's class", err)
@@ -86,13 +89,13 @@ func TestCommandEnvironmentPinsPWD(t *testing.T) {
 	if msg := err.Error(); strings.Count(msg, "environment") != 1 {
 		t.Fatalf("the class message repeats gofresh's word: %q", msg)
 	}
-	if inherited, err := CommandEnvironment(nil, "/resolved/dir"); err != nil || !slices.Contains(inherited, "PWD=/resolved/dir") || len(inherited) < 2 {
+	if inherited, err := testEnvironment(t, nil).For("/resolved/dir"); err != nil || !slices.Contains(inherited, "PWD=/resolved/dir") || len(inherited) < 2 {
 		t.Fatalf("a nil env did not inherit the process environment: %v, %v", inherited, err)
 	}
 }
 
 func TestRunOK(t *testing.T) {
-	out, err := Run(context.Background(), "env", "GOMODCACHE")
+	out, err := Output(context.Background(), "", testEnvironment(t, nil), "env", "GOMODCACHE")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,10 +105,59 @@ func TestRunOK(t *testing.T) {
 }
 
 func TestRunError(t *testing.T) {
-	if _, err := Run(context.Background(), "this-is-not-a-go-subcommand"); err == nil {
+	if _, err := Output(context.Background(), "", testEnvironment(t, nil), "this-is-not-a-go-subcommand"); err == nil {
 		t.Fatal("expected error")
 	} else if !strings.Contains(err.Error(), "go this-is-not-a-go-subcommand") {
 		t.Errorf("error not wrapped with command: %v", err)
+	}
+}
+
+func TestListRefusesUndrainedOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell pipe-hold fixture")
+	}
+	bin := t.TempDir()
+	release := filepath.Join(bin, "release")
+	done := filepath.Join(bin, "done")
+	t.Setenv("PEW_LIST_RELEASE", release)
+	t.Setenv("PEW_LIST_DONE", done)
+	t.Cleanup(func() {
+		if err := os.WriteFile(release, nil, 0600); err != nil {
+			t.Error(err)
+			return
+		}
+		deadline := time.After(5 * time.Second)
+		tick := time.NewTicker(10 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			if _, err := os.Stat(done); err == nil {
+				return
+			}
+			select {
+			case <-deadline:
+				t.Error("pipe holder did not acknowledge cleanup")
+				return
+			case <-tick.C:
+			}
+		}
+	})
+	// The apparent listing is valid JSON, but a descendant still owns its
+	// output pipe after the successful driver exit. Syntax is not completeness.
+	script := "#!/bin/sh\n[ \"$1\" = list ] || exit 2\nprintf '{\"ImportPath\":\"example.test/pkg\"}\\n'\n(while [ ! -e \"$PEW_LIST_RELEASE\" ]; do sleep 0.01; done; : > \"$PEW_LIST_DONE\") &\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	out, err := List(ctx, t.TempDir(), testEnvironment(t, nil), "-json", ".")
+	if !errors.Is(err, gofreshtool.ErrListingRefused) || len(out) != 0 || gofreshtool.Salvaged(ctx, err) {
+		t.Fatalf("undrained listing: output %q, error %v; want refusal without salvage", out, err)
+	}
+	_, err = NewEnvironment([]string{"A=1", "A=2"})
+	var envErr *EnvironmentError
+	if !errors.As(err, &envErr) {
+		t.Fatalf("invalid environment: %v", err)
 	}
 }
 
@@ -143,7 +195,7 @@ func TestRunAppliesTheEnvironmentPolicy(t *testing.T) {
 		}
 		return pwd
 	}
-	out, err := run(context.Background(), link, env, observe, "env", "GOVERSION")
+	out, err := run(context.Background(), link, testEnvironment(t, env), observe, "env", "GOVERSION")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +220,7 @@ func TestRunAppliesTheEnvironmentPolicy(t *testing.T) {
 	// A refused environment is refused as its own class before any
 	// spawn — the hook never sees a command.
 	seen = nil
-	_, err = run(context.Background(), link, append(slices.Clone(env), "PEW_RUN_MARKER=2"), observe, "env", "GOVERSION")
+	_, err = NewEnvironment(append(slices.Clone(env), "PEW_RUN_MARKER=2"))
 	var envErr *EnvironmentError
 	if !errors.As(err, &envErr) {
 		t.Fatalf("a duplicated key was reported as %v; want the environment's class", err)
@@ -181,7 +233,7 @@ func TestRunAppliesTheEnvironmentPolicy(t *testing.T) {
 	// with a toolchain directive fails to resolve without GOMODCACHE.
 	t.Setenv("PEW_RUN_INHERITED", "yes")
 	seen = nil
-	if _, err := run(context.Background(), real, nil, observe, "env", "GOVERSION"); err != nil {
+	if _, err := run(context.Background(), real, testEnvironment(t, nil), observe, "env", "GOVERSION"); err != nil {
 		t.Fatal(err)
 	}
 	if seen == nil || !slices.Contains(seen.Env, "PEW_RUN_INHERITED=yes") {
@@ -194,7 +246,7 @@ func TestRunAppliesTheEnvironmentPolicy(t *testing.T) {
 	// rather than running an unkillable go process.
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := run(cancelled, real, nil, nil, "env", "GOVERSION"); err == nil {
+	if _, err := run(cancelled, real, testEnvironment(t, nil), nil, "env", "GOVERSION"); err == nil {
 		t.Fatal("a cancelled context did not stop the go invocation")
 	}
 }
@@ -222,10 +274,7 @@ func TestReaderAppliesTheEnvironmentPolicy(t *testing.T) {
 		}
 	}
 	var seen *exec.Cmd
-	reader, err := Reader(link, env, func(cmd *exec.Cmd) { seen = cmd })
-	if err != nil {
-		t.Fatal(err)
-	}
+	reader := Reader(link, testEnvironment(t, env), func(cmd *exec.Cmd) { seen = cmd })
 	gomod, err := EnvValue(context.Background(), reader, "GOMOD")
 	if err != nil {
 		t.Fatal(err)
@@ -244,10 +293,7 @@ func TestReaderAppliesTheEnvironmentPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	spawns := 0
-	reader2, err := Reader(link, env, func(*exec.Cmd) { spawns++ })
-	if err != nil {
-		t.Fatal(err)
-	}
+	reader2 := Reader(link, testEnvironment(t, env), func(*exec.Cmd) { spawns++ })
 	for range 3 {
 		if _, err := EnvValue(context.Background(), reader2, "GOFLAGS"); err != nil {
 			t.Fatal(err)
@@ -258,15 +304,12 @@ func TestReaderAppliesTheEnvironmentPolicy(t *testing.T) {
 	}
 	t.Setenv("PEW_READER_INHERITED", "yes")
 	seen = nil
-	reader3, err := Reader(link, nil, func(cmd *exec.Cmd) { seen = cmd })
-	if err != nil {
-		t.Fatal(err)
-	}
+	reader3 := Reader(link, testEnvironment(t, nil), func(cmd *exec.Cmd) { seen = cmd })
 	if _, err := EnvValue(context.Background(), reader3, "GOMOD"); err != nil || seen == nil || !slices.Contains(seen.Env, "PEW_READER_INHERITED=yes") {
 		t.Fatalf("a nil env did not inherit the process environment: %v, %v", err, seen)
 	}
 	var envErr *EnvironmentError
-	if _, err := Reader(link, append(slices.Clone(env), "PEW_READER_MARKER=2"), nil); !errors.As(err, &envErr) {
+	if _, err := NewEnvironment(append(slices.Clone(env), "PEW_READER_MARKER=2")); !errors.As(err, &envErr) {
 		t.Fatalf("a duplicated key built a reader: %v; want pew's environment class before any spawn", err)
 	}
 }

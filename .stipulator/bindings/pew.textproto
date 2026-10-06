@@ -930,3 +930,53 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "b329ef5ecf34b0e80c2f29beee0a15abbfc801a76deb499cdcc7d79dc95d6fab"
 }
+
+bindings {
+  requirement_id: "REQ-pew-provenance-completeness"
+  content_hash: "5726cbe4869f5fbbea81d49f902481186c51b034df27285b6ded9854493e5c75"
+  source_hash: "d357f18bbedd5fde46204206a612f89e609ab244cd9c6c3ad8eff95053f6fe6a"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestRunOwnsObservationRootsPerInvocation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "63dd2dac949833675b9113aefbcb2c5659bddabfe517889fcaa595b7f3876504"
+}
+
+bindings {
+  requirement_id: "REQ-pew-closure-soundness"
+  content_hash: "6df308b31bed02dc43a87c6126ba77585a9574d1a967d019f9c3bbe91ac11438"
+  source_hash: "3677924f3981ae127b90e4238f796bfa9d519a4bd3e51f6abf349575d58b4168"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestJudgedVerbsShareSamplesOnlyWithinInvocation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2ac29c5d1030fdc45f23554dba6cdf2c0534a3d02cf13a97f30c5345301f5cbd"
+}
+
+bindings {
+  requirement_id: "REQ-pew-sample-completeness"
+  content_hash: "d4d33bc5af09e4ae91d6801e58b327b1be2eaa8457d05f1829d82d43e245a0e9"
+  source_hash: "9b5214ccf86824438fa5ab43bea1ea806ebb494b0a583b8952e92478e91859de"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/internal/run.TestMeasurementCancellationDoesNotSendQuit"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "752bd65e02d74d3adb6abcb860acc45ea3929d29af41255a96fa6fd868b8266f"
+}
+
+bindings {
+  requirement_id: "REQ-pew-preparation"
+  content_hash: "fd391b4964e9ec1830eccfad12182830e08adcdf837687d1e798c45a8996c749"
+  source_hash: "f069225841c5bca68c1d47ec90a96d2c47abbef44e4113723a5cdac7669f6153"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/internal/gotool.TestEnvironmentAdmissionPreservesEmptyAndInherited"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cd8c860c2767ecdafdcf7d7e86fd48a956075405864ffb15873e45cee3baf424"
+}
+
+bindings {
+  requirement_id: "REQ-pew-sample-completeness"
+  content_hash: "d4d33bc5af09e4ae91d6801e58b327b1be2eaa8457d05f1829d82d43e245a0e9"
+  source_hash: "9b5214ccf86824438fa5ab43bea1ea806ebb494b0a583b8952e92478e91859de"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/internal/run.TestMeasurementRefusesUndrainedOutput"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "162c120a12843bec581f003f18fb5c492618c91378252e2b29fda71f4f736fc2"
+}

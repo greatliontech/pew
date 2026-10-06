@@ -8,13 +8,11 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	gofresh "github.com/greatliontech/gofresh"
-	gofreshtool "github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/pew/internal/compare"
 	"github.com/greatliontech/pew/internal/gitblob"
 	"github.com/greatliontech/pew/internal/gotool"
@@ -243,12 +241,17 @@ func (b baseline) historicalRefs() []string {
 }
 
 func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []string) error {
+	ctx = withToolchainSampler(ctx)
+	env, err := gotool.NewEnvironment(nil)
+	if err != nil {
+		return err
+	}
 	reportPhase("listing")
 	bl, err := baselineFor(refs)
 	if err != nil {
 		return err
 	}
-	pkgs, err := statPackages(ctx, bl, errw)
+	pkgs, err := statPackages(ctx, env, bl, errw)
 	if err != nil {
 		if cancelledBy(ctx, err) {
 			return interrupted("stat: interrupted while listing packages")
@@ -397,8 +400,9 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 					// guarantees a decodable fingerprint on this side.
 					goflags, ok := goflagsByModule[cur.moduleDir]
 					if !ok {
-						var reader *gofreshtool.EnvReader
-						if reader, err = gotool.Reader(cur.moduleDir, nil, nil); err == nil {
+						reader, readerErr := preparationReader(ctx, cur.moduleDir, env)
+						err = readerErr
+						if err == nil {
 							goflags, err = runpkg.EffectiveGoflags(ctx, reader)
 						}
 						if cancelledBy(ctx, err) {
@@ -425,7 +429,7 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 						if err := resolveVouches(); err != nil {
 							return err
 						}
-						engine, err = buildEngine(ctx, cur.moduleDir, os.Environ(), nil, pgo)
+						engine, err = buildEngine(ctx, cur.moduleDir, env, nil, pgo)
 						if cancelledBy(ctx, err) {
 							return stoppedAt()
 						}
@@ -450,7 +454,7 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 						}
 						fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is %s; comparison may not reflect HEAD — re-run `pew run`\n", cur.importPath, key.bench, msg)
 						if sc.explain {
-							explainRecordAgainstCurrent(ctx, errw, engine, cur.moduleDir, cur.importPath, key.bench, fp, os.Environ())
+							explainRecordAgainstCurrent(ctx, errw, engine, cur.moduleDir, cur.importPath, key.bench, fp, env.Values())
 						}
 					}
 				}
@@ -501,10 +505,10 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 	return nil
 }
 
-func statPackages(ctx context.Context, bl baseline, errw io.Writer) ([]pkgMeta, error) {
-	pkgs, err := resolvePackages(ctx, []string{"./..."})
+func statPackages(ctx context.Context, env gotool.Environment, bl baseline, errw io.Writer) ([]pkgMeta, error) {
+	pkgs, err := resolvePackages(ctx, env, []string{"./..."})
 	if err != nil {
-		fallback, fallbackErr := fallbackStatPackages(ctx)
+		fallback, fallbackErr := fallbackStatPackages(ctx, env)
 		if fallbackErr != nil {
 			if bl.newRef != "" {
 				fmt.Fprintf(errw, "pew: warning: current package inventory unavailable: %v\n", err)
@@ -518,7 +522,7 @@ func statPackages(ctx context.Context, bl baseline, errw io.Writer) ([]pkgMeta, 
 	if len(pkgs) != 0 {
 		return pkgs, nil
 	}
-	fallback, err := fallbackStatPackages(ctx)
+	fallback, err := fallbackStatPackages(ctx, env)
 	if err != nil {
 		if bl.newRef != "" {
 			return nil, nil
@@ -671,16 +675,16 @@ func dedupeStatModules(mods []*statModule) []*statModule {
 	return out
 }
 
-func fallbackStatPackages(ctx context.Context) ([]pkgMeta, error) {
-	p, err := currentModulePackage(ctx)
+func fallbackStatPackages(ctx context.Context, env gotool.Environment) ([]pkgMeta, error) {
+	p, err := currentModulePackage(ctx, env)
 	if err != nil {
 		return nil, err
 	}
 	return []pkgMeta{p}, nil
 }
 
-func currentModulePackage(ctx context.Context) (pkgMeta, error) {
-	out, err := gotool.Run(ctx, "list", "-m", "-json")
+func currentModulePackage(ctx context.Context, env gotool.Environment) (pkgMeta, error) {
+	out, err := gotool.List(ctx, "", env, "-m", "-json")
 	if err != nil {
 		return pkgMeta{}, err
 	}

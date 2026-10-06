@@ -37,8 +37,12 @@ func newGCCmd() *cobra.Command {
 }
 
 func runGC(ctx context.Context, w io.Writer, benchDir string) error {
+	env, err := gotool.NewEnvironment(nil)
+	if err != nil {
+		return err
+	}
 	reportPhase("listing")
-	pkgs, err := resolvePackages(ctx, []string{"./..."})
+	pkgs, err := resolvePackages(ctx, env, []string{"./..."})
 	if err != nil {
 		if cancelledBy(ctx, err) {
 			return interrupted("gc: interrupted while listing packages")
@@ -79,7 +83,7 @@ func runGC(ctx context.Context, w io.Writer, benchDir string) error {
 	}
 	if len(groups) == 0 {
 		reportPhase("resolving the module")
-		moduleDir, err := currentModuleDir(ctx)
+		moduleDir, err := currentModuleDir(ctx, env)
 		if cancelledBy(ctx, err) {
 			return interrupted("gc: interrupted while resolving the module")
 		}
@@ -209,11 +213,8 @@ func addStoreOnlySourceBenchmarks(w io.Writer, st *store.Store, moduleDir string
 	return reported, nil
 }
 
-func currentModuleDir(ctx context.Context) (string, error) {
-	reader, err := gotool.Reader("", nil, nil)
-	if err != nil {
-		return "", err
-	}
+func currentModuleDir(ctx context.Context, env gotool.Environment) (string, error) {
+	reader := gotool.Reader("", env, nil)
 	gomod, err := gotool.EnvValue(ctx, reader, "GOMOD")
 	if err != nil {
 		return "", err

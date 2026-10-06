@@ -361,7 +361,7 @@ func TestRunServesValidRecordingsByDefault(t *testing.T) {
 			if !build {
 				measurements++
 			}
-			return run.Execute(moduleDir, pin, env, args)
+			return run.Execute(moduleDir, pin, testEnvironment(t, env), args)
 		},
 	}
 	var out bytes.Buffer

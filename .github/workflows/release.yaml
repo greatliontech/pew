@@ -1,28 +1,21 @@
 name: Release
 
+# Only CI can authorize publication. The shared workflow verifies that its
+# successful same-repository push still names the tip of main before tagging.
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches:
       - main
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
-    runs-on: ubuntu-latest
+    uses: greatliontech/actions/.github/workflows/go-release.yml@main
     permissions:
       contents: write
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-
-      - uses: actions/create-github-app-token@v2
-        id: app-token
-        with:
-          app-id: ${{ vars.GLT_RELEASER_APP_ID }}
-          private-key: ${{ secrets.GLT_RELEASER_APP_KEY }}
-
-      - uses: greatliontech/semrel@main
-        with:
-          release: true
-          releaseToken: ${{ steps.app-token.outputs.token }}
+    secrets: inherit

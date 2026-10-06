@@ -14,6 +14,7 @@ import (
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/gitblob"
 	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/run"
@@ -24,6 +25,7 @@ import (
 
 type runConfig struct {
 	benchDir, label string
+	roots           *runtimeinput.Roots
 	// pin is the derived CPU set a pinned run measures on, unpinned when
 	// empty; the --pin switch derives it at entry.
 	pin         run.Pin
@@ -50,9 +52,9 @@ func (rc runConfig) snapshotThrottle() run.ThrottleSnapshot {
 	return run.SnapshotThrottle()
 }
 
-func (rc runConfig) executeGo(ctx context.Context, moduleDir, pin string, env, args []string) ([]byte, error) {
+func (rc runConfig) executeGo(ctx context.Context, moduleDir, pin string, env gotool.Environment, args []string) ([]byte, error) {
 	if rc.execute != nil {
-		return rc.execute(moduleDir, pin, env, args)
+		return rc.execute(moduleDir, pin, env.Values(), args)
 	}
 	return run.ExecuteContext(ctx, moduleDir, pin, env, args)
 }
@@ -109,8 +111,14 @@ func newRunCmd() *cobra.Command {
 }
 
 func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []string) error {
+	ctx = withToolchainSampler(ctx)
+	env, err := gotool.NewEnvironment(nil)
+	if err != nil {
+		return err
+	}
+	rc.roots = &runtimeinput.Roots{}
 	reportPhase("listing")
-	pkgs, err := resolvePackages(ctx, patterns)
+	pkgs, err := resolvePackages(ctx, env, patterns)
 	if err != nil {
 		if cancelledBy(ctx, err) {
 			return interrupted("interrupted while listing packages; nothing measured")
@@ -145,7 +153,7 @@ func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []str
 		}
 	}
 	gc := newGitStateCache(excludeDirs)
-	envs := newEnvironments(os.Environ(), rc.pin)
+	envs := newEnvironments(env, rc.pin)
 	// Every package prepares before any package measures (spec
 	// REQ-pew-preparation): the refusals the listing and the flags decide
 	// — the benchmark declarations, the store destinations, the effective
@@ -670,7 +678,7 @@ var armWriteGateBound = 2 * time.Minute
 // commit. Each recording describes exactly its own invocation: the run
 // conditions carry this arm's throttle-bracket delta and the runtime
 // evidence is this arm's own digest and manifest.
-func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, prep *packagePreparation, view *gofresh.View, commit string, initialDirty bool, encodedLedger, name string, fp gofresh.Fingerprint, m armMeasurement, env []string) error {
+func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, prep *packagePreparation, view *gofresh.View, commit string, initialDirty bool, encodedLedger, name string, fp gofresh.Fingerprint, m armMeasurement, env gotool.Environment) error {
 	st, pkgRel, pgoInput := prep.st, prep.pkgRel, prep.pgoInput
 	// The gate runs detached from the verb's context under its own
 	// bound: the arm is measured, and a measured unit is kept (spec
@@ -720,10 +728,7 @@ func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitSta
 	// consumed.
 	// A fresh pass reader per write: the pre-write revalidation reads
 	// the environment as it is now, never the run's earlier snapshot.
-	writeReader, err := gotool.Reader(p.Module.Dir, env, nil)
-	if err != nil {
-		return gated(err)
-	}
+	writeReader := gotool.Reader(p.Module.Dir, env, nil)
 	goflagsAtWrite, err := run.EffectiveGoflags(gate, writeReader)
 	if err != nil {
 		return gated(err)
@@ -777,7 +782,7 @@ type armMeasurement struct {
 // surfaces as a crash and as a moved bracket, neither masking the other. In
 // every case only this arm's recording is discarded, its prior recording
 // untouched.
-func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, env []string, opts run.Options, pkgRel, name string, truth run.ToolchainTruth, scratch []string, base run.Conditions) (armMeasurement, []string, error) {
+func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, env gotool.Environment, opts run.Options, pkgRel, name string, truth run.ToolchainTruth, scratch []string, base run.Conditions) (armMeasurement, []string, error) {
 	pattern, err := restrictBenchmarkPattern(opts.Bench, []string{name})
 	if err != nil {
 		return armMeasurement{}, nil, err
@@ -856,9 +861,16 @@ func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStat
 	}
 	armConditions := base
 	armConditions.Throttled = throttled
-	runtimeState, err := run.IngestObservation(ctx, frame, testlogPath, "package-test-binary:"+p.ImportPath, env, scratch...)
+	runtimeState, err := run.IngestObservation(ctx, frame, testlogPath, "package-test-binary:"+p.ImportPath, rc.roots, env, scratch...)
 	if err != nil {
 		return armMeasurement{}, nil, err
+	}
+	if runtimeState.Unverifiable {
+		reason := runtimeState.Reason
+		if runtimeState.Attribution != "" {
+			reason += " — " + runtimeState.Attribution
+		}
+		fmt.Fprintf(errw, "pew: warning: runtime observation for %s.%s: %s\n", p.ImportPath, name, reason)
 	}
 	// The stream is transient input, not a recording (spec §9): interleaved
 	// foreign stdout output corrupts individual result lines, so corruption is

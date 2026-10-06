@@ -29,7 +29,7 @@ func TestCancellationKillsTheProcessGroup(t *testing.T) {
 	// The shell backgrounds a grandchild and records ITS pid ($!), then
 	// sleeps well past the grace — the shape of `go test` and the test
 	// binary it spawns.
-	_, err := ExecuteBinaryContext(ctx, t.TempDir(), "", os.Environ(), "sh", []string{"-c", "sleep 30 & echo $! > " + marker + "; sleep 30"})
+	_, err := ExecuteBinaryContext(ctx, t.TempDir(), "", testEnvironment(t, os.Environ()), "sh", []string{"-c", "sleep 30 & echo $! > " + marker + "; sleep 30"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled command = %v; want context.Canceled", err)
 	}

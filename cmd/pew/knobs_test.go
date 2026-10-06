@@ -139,21 +139,21 @@ func TestPinEnvironmentStatesTheWidth(t *testing.T) {
 		want string
 	}{
 		"operator's value kept":      {[]string{"GOMAXPROCS=1", "X=y"}, two, "GOMAXPROCS=1 X=y"},
-		"empty value replaced":       {[]string{"GOMAXPROCS=", "X=y"}, two, "X=y GOMAXPROCS=2"},
-		"width stated":               {[]string{"X=y"}, two, "X=y GOMAXPROCS=2"},
+		"empty value replaced":       {[]string{"GOMAXPROCS=", "X=y"}, two, "GOMAXPROCS=2 X=y"},
+		"width stated":               {[]string{"X=y"}, two, "GOMAXPROCS=2 X=y"},
 		"unpinned untouched":         {[]string{"X=y"}, run.Pin{}, "X=y"},
-		"bounded by the own default": {[]string{"X=y"}, run.Pin{CPUs: make([]int, runtime.GOMAXPROCS(0)+5)}, "X=y GOMAXPROCS=" + strconv.Itoa(runtime.GOMAXPROCS(0))},
+		"bounded by the own default": {[]string{"X=y"}, run.Pin{CPUs: make([]int, runtime.GOMAXPROCS(0)+5)}, "GOMAXPROCS=" + strconv.Itoa(runtime.GOMAXPROCS(0)) + " X=y"},
 	} {
-		if got := strings.Join(pinEnvironment(tc.env, tc.pin), " "); got != tc.want {
+		if got := strings.Join(pinEnvironment(testEnvironment(t, tc.env), tc.pin).Values(), " "); got != tc.want {
 			t.Errorf("%s: pinEnvironment = %q, want %q", name, got, tc.want)
 		}
 	}
 	// An unpinned run declares no producer environment: the two
 	// environments are one, and the measured one is the analysis one.
-	if envs := newEnvironments([]string{"X=y"}, run.Pin{}); envs.runtime != nil || strings.Join(envs.measured(), " ") != "X=y" {
+	if envs := newEnvironments(testEnvironment(t, []string{"X=y"}), run.Pin{}); envs.runtime != nil || strings.Join(envs.measured().Values(), " ") != "X=y" {
 		t.Errorf("unpinned environments = %+v, want no runtime environment", envs)
 	}
-	if envs := newEnvironments([]string{"X=y"}, two); strings.Join(envs.runtime, " ") != "X=y GOMAXPROCS=2" || strings.Join(envs.analysis, " ") != "X=y" {
+	if envs := newEnvironments(testEnvironment(t, []string{"X=y"}), two); strings.Join(envs.runtime.Values(), " ") != "GOMAXPROCS=2 X=y" || strings.Join(envs.analysis.Values(), " ") != "X=y" {
 		t.Errorf("pinned environments = %+v, want the analysis one wide and the runtime one pinned", envs)
 	}
 }
@@ -226,7 +226,7 @@ func TestPinnedRunGuardsItsPin(t *testing.T) {
 	}
 	// The unpinned environment reads the pinned recording stale on the
 	// runtime-configuration guard.
-	e, _, err := newEngineAt(context.Background(), dir, filepath.Join(dir, "a"), false, os.Environ())
+	e, _, err := newEngineAt(context.Background(), dir, filepath.Join(dir, "a"), false, testEnvironment(t, os.Environ()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,9 @@ func TestPinnedRunGuardsItsPin(t *testing.T) {
 		t.Fatalf("unpinned verdict over the pinned recording = {%s %q}, want {stale runtimeconfig}", v, reason)
 	}
 	// The pinned environment reads it as its own.
-	pinned, _, err := newEngineAtProducer(context.Background(), dir, filepath.Join(dir, "a"), false, os.Environ(), pinEnvironment(os.Environ(), pin))
+	analysis := testEnvironment(t, os.Environ())
+	measured := pinEnvironment(analysis, pin)
+	pinned, _, err := newEngineAtProducer(context.Background(), dir, filepath.Join(dir, "a"), false, analysis, &measured)
 	if err != nil {
 		t.Fatal(err)
 	}

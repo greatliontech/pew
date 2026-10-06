@@ -11,12 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
@@ -51,7 +49,7 @@ func TestArgs(pkg string, o Options) []string {
 
 // Execute runs the benchmark command in dir under a background context
 // and returns stdout; the ctx form ExecuteContext is the measured seam.
-func Execute(dir, pin string, env, args []string) ([]byte, error) {
+func Execute(dir, pin string, env gotool.Environment, args []string) ([]byte, error) {
 	return ExecuteContext(context.Background(), dir, pin, env, args)
 }
 
@@ -80,7 +78,7 @@ func formatCPUList(cpus []int) string {
 // ExecuteContext is Execute under a context: cancellation kills the
 // whole process group — the `go` tool and the test binary it spawned —
 // so an interrupted verb never leaves a benchmark running.
-func ExecuteContext(ctx context.Context, dir, pin string, env, args []string) ([]byte, error) {
+func ExecuteContext(ctx context.Context, dir, pin string, env gotool.Environment, args []string) ([]byte, error) {
 	name, full := "go", args
 	if pin != "" {
 		name, full = "taskset", append([]string{"-c", pin, "go"}, args...)
@@ -92,7 +90,7 @@ func ExecuteContext(ctx context.Context, dir, pin string, env, args []string) ([
 // output is not a benchmark stream) in dir under ctx, in its own
 // process group: a cancelled build takes its compile and link children
 // with it; a failure's error carries the command's stderr.
-func BuildContext(ctx context.Context, dir string, env, args []string) error {
+func BuildContext(ctx context.Context, dir string, env gotool.Environment, args []string) error {
 	_, err := runCommand(ctx, dir, env, "go", args)
 	return err
 }
@@ -101,41 +99,29 @@ func BuildContext(ctx context.Context, dir string, env, args []string) error {
 // waited on after its process group is killed.
 const killGrace = 2 * time.Second
 
-// runCommand runs one command in its own process group under ctx and
-// returns its stdout. A plain CommandContext kills only the direct
-// child; the test binary `go test` spawns is a grandchild that would
-// outlive the interrupt holding the stdout pipe, so cancellation
-// signals the group and the wait is bounded (spec REQ-pew-interruption).
-func runCommand(ctx context.Context, dir string, env []string, name string, full []string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, full...)
-	resolved := gotool.CommandDir(dir)
-	cmd.Dir = resolved
-	commandEnv, err := gotool.CommandEnvironment(env, resolved)
+// runCommand uses the shared command constructor and containment policy for
+// go, taskset and standing benchmark binaries. Pew retains its directory and
+// environment admission and its benchmark-output/error presentation.
+func runCommand(ctx context.Context, dir string, env gotool.Environment, name string, full []string) ([]byte, error) {
+	runner := gotool.Runner(nil)
+	// Quit is intentionally absent: SIGQUIT would write goroutine stacks into
+	// the measured stream, contaminating its sample-completeness evidence.
+	runner.Containment = &gofreshtool.Containment{WaitDelay: killGrace}
+	cmd, err := runner.Program(ctx, gotool.CommandDir(dir), env.Values(), name, full...)
 	if err != nil {
 		return nil, fmt.Errorf("run: %w", err)
 	}
-	cmd.Env = commandEnv
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		// The context may fire after the leader already exited (Wait
-		// reaps before it notices the cancellation): an empty group
-		// answers ESRCH, which is the process-done case — never an
-		// injected cancellation error over a finished command, and
-		// never a signal at a reused group id.
-		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
-			if errors.Is(err, syscall.ESRCH) {
-				return os.ErrProcessDone
-			}
-			return err
-		}
-		return nil
-	}
-	cmd.WaitDelay = killGrace
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		if gofreshtool.Salvaged(ctx, err) {
+			// A successful driver can still lose a whole trailing sub-benchmark
+			// when its pipe is cut. Counts of the rows retained cannot prove
+			// that no row disappeared, so measurement output has no salvage.
+			return nil, fmt.Errorf("run: undrained measurement output: %w", err)
 		}
 		return nil, fmt.Errorf("run: %s %s: %w: %s",
 			name, strings.Join(full, " "), err, strings.TrimSpace(stderr.String()))
@@ -777,7 +763,7 @@ func VerifyToolchainConfig(results []*benchfmt.Result, truth ToolchainTruth) err
 // ReadTargetPlatform reads the build target (GOOS, GOARCH) from the same
 // toolchain and environment the measurement runs under - the out-of-band
 // truth VerifyToolchainConfig judges the stream against.
-func ReadTargetPlatform(ctx context.Context, moduleDir string, env []string) (goos, goarch string, err error) {
+func ReadTargetPlatform(ctx context.Context, moduleDir string, env gotool.Environment) (goos, goarch string, err error) {
 	out, err := gotool.Output(ctx, moduleDir, env, "env", "-json", "GOOS", "GOARCH")
 	if err != nil {
 		return "", "", err
@@ -793,14 +779,14 @@ func ReadTargetPlatform(ctx context.Context, moduleDir string, env []string) (go
 // `taskset -c <pin>`) in dir and returns stdout - the A/B derivation
 // path executes standing binaries so both sides build before either
 // side measures and the tree is never mutated (spec §12, pew ab).
-func ExecuteBinary(dir, pin string, env []string, bin string, args []string) ([]byte, error) {
+func ExecuteBinary(dir, pin string, env gotool.Environment, bin string, args []string) ([]byte, error) {
 	return ExecuteBinaryContext(context.Background(), dir, pin, env, bin, args)
 }
 
 // ExecuteBinaryContext is ExecuteBinary under a context: cancellation
 // kills the binary's whole process group, so an interrupted comparison
 // leaves no side running.
-func ExecuteBinaryContext(ctx context.Context, dir, pin string, env []string, bin string, args []string) ([]byte, error) {
+func ExecuteBinaryContext(ctx context.Context, dir, pin string, env gotool.Environment, bin string, args []string) ([]byte, error) {
 	name, full := bin, args
 	if pin != "" {
 		name, full = "taskset", append([]string{"-c", pin, bin}, args...)

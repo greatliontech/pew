@@ -34,7 +34,7 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	orig := goVersionSampler
 	t.Cleanup(func() { goVersionSampler = orig })
 	var cancel context.CancelFunc
-	goVersionSampler = func(ctx context.Context, _ string, _ []string) (string, error) {
+	goVersionSampler = func(ctx context.Context, _ string, _ testEnvironmentValue) (string, error) {
 		cancel() // the operator interrupts while the sample runs
 		return "", ctx.Err()
 	}
@@ -66,7 +66,7 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	// answers, so with nothing to judge no stage observes the
 	// cancellation and the verb still ends by it — the last package has
 	// no next iteration to notice the signal.
-	answering := func(ctx context.Context, _ string, _ []string) (string, error) {
+	answering := func(ctx context.Context, _ string, _ testEnvironmentValue) (string, error) {
 		cancel()
 		return runtime.Version(), nil
 	}
@@ -80,7 +80,7 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
 	assertInterrupted("status (judgment)", runStatus(ctx, &w, filepath.Join(dir, "b"), "", false, false, false, []string{"./..."}), "status: interrupted while judging example.com/stage/pkg")
-	goVersionSampler = func(ctx context.Context, _ string, _ []string) (string, error) {
+	goVersionSampler = func(ctx context.Context, _ string, _ testEnvironmentValue) (string, error) {
 		cancel()
 		return "", ctx.Err()
 	}
@@ -146,7 +146,7 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	})
 	assertInterrupted("gc", runGC(ctx, &w, filepath.Join(gcDir, "b")), "gc: interrupted while resolving the module")
 	setPhaseHook(nil)
-	goVersionSampler = func(ctx context.Context, _ string, _ []string) (string, error) {
+	goVersionSampler = func(ctx context.Context, _ string, _ testEnvironmentValue) (string, error) {
 		cancel()
 		return "", ctx.Err()
 	}
@@ -213,7 +213,7 @@ func TestGoVersionSampleHonorsTheCallersContext(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/sample\n\ngo 1.24\n")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := sampleGoVersion(ctx, dir, os.Environ()); !errors.Is(err, context.Canceled) {
+	if _, err := sampleGoVersion(ctx, dir, testEnvironment(t, os.Environ())); !errors.Is(err, context.Canceled) {
 		t.Fatalf("sample under a cancelled context = %v; want the cancellation", err)
 	}
 }
