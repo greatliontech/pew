@@ -22,7 +22,6 @@ close-out convention.
 | [verdict-path-consolidation](verdict-path-consolidation.md) | the vouch set is assembled from four process-wide globals and admission decodes each row three times; collapse to one resolver value and one row decode | performance-evidence plan chunk 4 |
 | [strategy-stale-arms-flipped-valid-without-rerecord](strategy-stale-arms-flipped-valid-without-rerecord.md) | 46 tugboat arms read `stale (dynamic-state strategy)` under the v0.101.3-pinned pew and `valid` under the v0.102.0 one with the store untouched — one verdict is wrong and the ladder does not say which (tugboat field report 2026-09-29) | performance-evidence plan chunk 4 |
 | [loader-refuses-pre-format-3-ledger-lines-remedy-circular](loader-refuses-pre-format-3-ledger-lines-remedy-circular.md) | the store loader refuses pre-format-3 recordings whose ledger line exceeds the scanner bound — five of tugboat's nine package stores — and the remedy it names cannot run over a refused store (tugboat field report 2026-09-30) | performance-evidence plan chunk 3 |
-| [installed-binary-dirty-build](installed-binary-dirty-build.md) | the installed binary is stamped at a docs-only descendant (36df236f8ce4) of the last build-input commit with `vcs.modified=true` — compiled from a tree with uncommitted changes, so its content corresponds to no commit (fleet sweep 2026-10-05); the standing `go install` from a clean tree clears it | performance-evidence plan chunk 2 (2.3) |
 
 ## In-spec upgrade paths (tracked inline, not here)
 

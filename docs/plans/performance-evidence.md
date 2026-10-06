@@ -2,14 +2,14 @@
   - [x] 1.1 Read the canonical recording/comparison contracts, reproduce the zero-baseline and non-finite-option paths, and establish the existing fast verification baseline.
   - [x] 1.2 Specify zero-to-positive regressions independently of an undefined percentage display, reject non-finite statistical options, and pin the corrected behavior with focused and property tests.
   - [x] 1.3 Run affected and required executable checks, bind the new evidence, kill load-bearing mutations, converge independent review, then commit and push this fix.
-- [ ] 2. Adopt current gofresh correctness and toolchain support.
+- [x] 2. Adopt current gofresh correctness and toolchain support.
   - [x] 2.1 Re-triage the pin-lag/toolchain/installed-binary issues and the cross-machine handoff against the latest fetched release; incorporate newly landed work and the source-audited nodwarf5 selection without duplicating other agents' changes.
   - [x] 2.2 Update the dependency and shared containment/provenance integration, consume the checked sample and public fingerprint validation, adopt listing refusal and invocation-owned observation roots, and consolidate environment normalization; preserve no-Quit measurement cancellation and attribution with explicit tests.
     - [x] Adopt listing refusal, public fingerprint validation and invocation-owned observation roots, with reviewed regression and mutation evidence.
     - [x] Bound provenance sampling to each judged invocation and retain diagnostic observation attribution without changing recording identity.
     - [x] Pin no-Quit measurement cancellation through the shared containment path.
     - [x] Finish checked-sample integration and the single normalized-environment boundary.
-  - [ ] 2.3 Complete gates, mutation evidence and independent review, close resolved issues and update cross-tool tracking, commit and push, then install from the clean committed tree.
+  - [x] 2.3 Complete gates, mutation evidence and independent review, close resolved issues and update cross-tool tracking, commit and push, then install from the clean committed tree.
 - [ ] 3. Make malformed and legacy recording handling recoverable and fully visible.
   - [ ] 3.1 Derive read/admission/regeneration behavior for oversized legacy metadata and failed stores, preserving raw history without accepting it as current evidence.
   - [ ] 3.2 Implement usable in-place regeneration and complete status coverage, with regression tests for long legacy lines, foreign/current malformed files, store failures and interrupted replacement.
