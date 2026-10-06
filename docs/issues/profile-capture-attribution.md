@@ -1,6 +1,6 @@
 # Profile capture and attribution as recording companions
 
-Lands: cross-tool train chunk 15
+Lands: performance-evidence plan chunk 6 (profile companions) and 7 (per-side capture in ab); the obsolete second condition folded (audit 319).
 
 **Composition note carried from the closed derivation-ab-mode doc:
 per-side profile capture (`-cpuprofile`/`-benchmem` per A/B side)
@@ -8,10 +8,6 @@ belongs in `pew ab` itself - profile attribution is part of the same
 derivation loop, and the mode's standing binaries make per-side
 capture free.
 
-Lands:** cross-tool train chunk 15 (gofresh
-docs/plans/cross-tool-train.md), after the one-go-invocation chunk —
-folded from the original condition: profile evidence needing machine
-checking, with tugboat's hand-run bench protocol the standing consumer.
 
 pew owns curves, provenance, and comparison; the *attribution* half of
 a measurement is a hand protocol in consumers. tugboat's standing

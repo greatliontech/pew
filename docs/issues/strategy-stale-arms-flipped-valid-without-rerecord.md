@@ -40,12 +40,4 @@ week under the current build and will record the current key beside
 the recordings' — the other half is the v0.101.3-pinned build's
 derivation, recoverable from pew's history.
 
-Lands: a rider on cross-tool train chunk 174 (audit 288, 2026-09-29, answered the
-question: NO verdict was wrong — the rung and its operands are byte-identical at
-both builds, the dynamic-state strategy is @38 at both pins, and the format rung
-above it can only move recordings down into stale (format); a `valid` arm on
-09-21 carries pew-format: 3, which only a post-230 pew writes, so the store
-moved (the whole-store re-record) — checkable by grep over tugboat's store. The
-work left: the recorded-vs-current operands on the stale line and an explain
-row for every validity key, the rung stated once; the bump's re-class
-announcement is 232's).
+Lands: performance-evidence plan chunk 4 (rides the one verdict path: the explain row per validity key; audit 319).

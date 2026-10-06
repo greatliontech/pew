@@ -33,6 +33,4 @@ reachability, structural after.
 
 (At 275: the pre-normalization now lives in internal/gotool.Resolve, paid ahead of the runner's own pass for the collected form and the pass reader alike — one site more than the three named above; the collapse is unchanged.)
 
-Lands: cross-tool train chunk 252 (the hygiene sweep), built over gofresh 265's environment
-setter once 275 has consumed it — so the typed environment is gofresh's, not a fourth spelling
-(re-slotted at audit 264).
+Lands: performance-evidence plan chunk 2 (the bump touches every normalization site; audit 319).

@@ -14,4 +14,4 @@ categorical predicate for run conditions, equality elsewhere) and one grammar
 for the absent and mixed arms — a served-text change on the run-conditions
 notes, pinned by the compare goldens.
 
-Lands: cross-tool train chunk 252 (the hygiene sweep).
+Lands: performance-evidence plan chunk 5 (5.2's typed reporting; audit 319).
