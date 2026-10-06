@@ -342,11 +342,12 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 			}
 			// The three independent conditions of §10.1. Magnitude is on the
 			// absolute change (|Δ| ≥ threshold); direction is a separate gate, so a
-			// large *improvement* (|Δ| clears the floor but Δ < 0) is never a
-			// regression. NaN delta (zero baseline) fails both comparisons.
+			// large improvement is never a regression. A percentage is undefined
+			// at zero, but a positive cost where there was none clears every
+			// finite relative floor; presentation keeps that delta undefined.
 			significant := cmp.P < opts.Alpha
-			worse := higherIsWorse[unit] && delta > 0
-			magnitude := math.Abs(delta) >= opts.ThresholdPct
+			worse := higherIsWorse[unit] && nsum.Center > bsum.Center
+			magnitude := (bsum.Center == 0 && nsum.Center > 0) || math.Abs(delta) >= opts.ThresholdPct
 			regression := significant && worse && magnitude
 
 			tk := tkey{g.config, unit}

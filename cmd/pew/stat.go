@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -43,10 +44,6 @@ func newStatCmd() *cobra.Command {
 		Long:  guidanceHelp("stat"),
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			vouchStoreDir = sc.benchDir
-			if err := resolveVouches(); err != nil {
-				return err
-			}
 			gu, err := parseGateUnits(gate)
 			if err != nil {
 				return err
@@ -59,6 +56,10 @@ func newStatCmd() *cobra.Command {
 				return fmt.Errorf("stat: --explain and -json are mutually exclusive (the explanation is a human view)")
 			}
 			if err := store.ValidateLabel(sc.label); err != nil {
+				return err
+			}
+			vouchStoreDir = sc.benchDir
+			if err := resolveVouches(); err != nil {
 				return err
 			}
 			ctx, stop := commandContext(cmd)
@@ -86,14 +87,14 @@ func newStatCmd() *cobra.Command {
 // condition (3)). A zero threshold is allowed — it means "any significant worse
 // change regresses", a legitimate (noisier) choice.
 func validateOptions(o compare.Options) error {
-	if o.Alpha <= 0 || o.Alpha >= 1 {
+	if math.IsNaN(o.Alpha) || o.Alpha <= 0 || o.Alpha >= 1 {
 		return fmt.Errorf("stat: --alpha must be in (0,1), got %v", o.Alpha)
 	}
-	if o.Confidence <= 0 || o.Confidence >= 1 {
+	if math.IsNaN(o.Confidence) || o.Confidence <= 0 || o.Confidence >= 1 {
 		return fmt.Errorf("stat: --confidence must be in (0,1), got %v", o.Confidence)
 	}
-	if o.ThresholdPct < 0 {
-		return fmt.Errorf("stat: --threshold must be ≥ 0, got %v", o.ThresholdPct)
+	if math.IsNaN(o.ThresholdPct) || math.IsInf(o.ThresholdPct, 0) || o.ThresholdPct < 0 {
+		return fmt.Errorf("stat: --threshold must be finite and ≥ 0, got %v", o.ThresholdPct)
 	}
 	return nil
 }

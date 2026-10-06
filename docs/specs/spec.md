@@ -917,6 +917,27 @@ benchmath, default α = 0.05, *not* CI-overlap; and (3) its magnitude clears a *
 3%, just above good-hygiene noise). All three are needed: significance without a magnitude floor
 flags real-but-trivial changes; a floor without significance flags noise.
 
+#### Numeric edge cases
+
+**REQ-pew-zero-baseline** (behavior): For a judged nonnegative metric, a
+statistically significant increase from a zero baseline center to a positive
+center MUST count as a regression for every finite percentage floor, retaining
+an undefined percentage delta (`null` in JSON) rather than using that display
+value as the direction or magnitude decision; zero to zero is unchanged and
+positive to zero is an improvement.
+
+**REQ-pew-statistical-options** (behavior): Comparison option admission MUST
+reject non-finite alpha, confidence and threshold values before comparison work,
+requiring finite alpha/confidence in (0,1) and a finite nonnegative percentage
+floor, with zero floor retaining its any-significant-worsening meaning.
+
+**REQ-pew-delta-representation** (behavior): A comparison whose finite sample
+centers produce an unrepresentable floating-point percentage MUST retain its
+comparison and regression decision and emit `deltaPct: null` in JSON, just as
+for a zero baseline, rather than fail serialization or silently omit its row.
+
+#### Comparison modes and reporting
+
 - **`pew stat` (default)** reports the benchstat-style table and marks `⚠ regression` on any metric
   meeting the three conditions. **`--fail-on-regression`** drives a non-zero exit on the same
   criterion for CI. `sec/op` gates by default; `allocs/op` and `B/op` are flagged but failing on
@@ -1055,7 +1076,7 @@ field names are public surface and stable. `status` rows carry `package`, `bench
 (omitted when empty), `verdict`, `reason` (omitted when empty); a per-package failure emits
 `{package, error}`. `stat` emits comparison rows as
 `{"kind":"row", config, unit, benchmark, base:{center,lo,hi,confidence}, new:{…}, p, deltaPct,
-regression, gated, warnings}` (`deltaPct` is `null` when the baseline center is zero; a side's
+regression, gated, warnings}` (`deltaPct` is `null` when the baseline center is zero or the percentage is unrepresentable; a side's
 `lo`/`hi` are `null` when its confidence interval is non-finite — the sample-count cause rides
 `warnings`; `config`/`warnings` omitted when empty), each not-compared note as
 `{"kind":"note", text}`, and an empty comparison as one `{"kind":"empty", reason}` object
@@ -1108,7 +1129,7 @@ local flag documented exactly, both directions — cobra's help and
 completion plumbing is surface plumbing outside the judgment. The
 document's knob prose is the authoritative superset, and every flag
 usage string is the document's usage projection for the cli surface
-(gofresh's REQ-guidance-render: the knob's first clause in pflag's
+(gofresh's [guidance rendering contract](https://github.com/greatliontech/gofresh/blob/main/docs/specs/guidance.md): the knob's first clause in pflag's
 grammar, rendered over the built command tree) — no flag carries a
 second spelling of its usage; a default the flag's own registration
 does not print (a derived one, registered zero) is spelled in the

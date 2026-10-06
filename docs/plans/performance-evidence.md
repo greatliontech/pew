@@ -1,0 +1,32 @@
+- [x] 1. Correct numeric regression judgments and statistical-option admission.
+  - [x] 1.1 Read the canonical recording/comparison contracts, reproduce the zero-baseline and non-finite-option paths, and establish the existing fast verification baseline.
+  - [x] 1.2 Specify zero-to-positive regressions independently of an undefined percentage display, reject non-finite statistical options, and pin the corrected behavior with focused and property tests.
+  - [x] 1.3 Run affected and required executable checks, bind the new evidence, kill load-bearing mutations, converge independent review, then commit and push this fix.
+- [ ] 2. Adopt current gofresh correctness and toolchain support.
+  - [ ] 2.1 Re-triage the pin-lag/toolchain/installed-binary issues against the pulled gofresh release and its public containment/provenance APIs.
+  - [ ] 2.2 Update the dependency and affected integration paths without local freshness workarounds; verify fingerprint round trips, toolchain admission and controlled subprocess behavior.
+  - [ ] 2.3 Complete gates, mutation evidence and independent review, close resolved issues and update cross-tool tracking, commit and push, then install from the clean committed tree.
+- [ ] 3. Make malformed and legacy recording handling recoverable and fully visible.
+  - [ ] 3.1 Derive read/admission/regeneration behavior for oversized legacy metadata and failed stores, preserving raw history without accepting it as current evidence.
+  - [ ] 3.2 Implement usable in-place regeneration and complete status coverage, with regression tests for long legacy lines, foreign/current malformed files, store failures and interrupted replacement.
+  - [ ] 3.3 Complete gates, mutation evidence and review, retire resolved issue references, commit and push.
+- [ ] 4. Complete recorded-observation freshness integration.
+  - [ ] 4.1 Read current gofresh observation proofs and pew's per-arm recording/verdict paths; reconcile purity, external effects and evidence identity in the canonical contract.
+  - [ ] 4.2 Adopt attributable observed capture per completed arm and one shared admission/verdict path; preserve stale/unverifiable distinctions and reject incomplete or mismatched observations.
+  - [ ] 4.3 Verify source/runtime-input movement, rejected proof and reuse cases, run gates and mutation probes, converge review, close resolved issues, commit and push.
+- [ ] 5. Supply complete and auditable comparison policies.
+  - [ ] 5.1 Specify required benchmark/unit coverage, missing or skipped comparisons, run-condition compatibility and freshness admission separately from informational comparison; preserve existing explicit modes and flag any breaking default change before implementation.
+  - [ ] 5.2 Implement typed coverage/disposition reporting and enforceable comparison policies, including non-finite samples and zero-baseline metrics, with text/JSON and CLI parity.
+  - [ ] 5.3 Verify partial/empty/new/missing-arm cases and condition mismatches, run gates and mutations, converge review, commit and push.
+- [ ] 6. Add provenance-bound profile capture and subject attribution.
+  - [ ] 6.1 Specify CPU/allocation profile companions, capture conditions, integrity, ownership, persistence, attribution evidence and failure behavior; use the approved github.com/google/pprof/profile dependency rather than parsing human-rendered profiler output.
+  - [ ] 6.2 Capture diagnostic profiles separately from statistical timing samples with matched source/build/runtime identities; expose attributable sample and allocation data, empty/incomplete capture and missing-subject outcomes without fabricated certainty.
+  - [ ] 6.3 Integrate profile freshness/integrity and cleanup with recordings and status, verify drift/interruption/corruption cases, run gates and mutation probes, converge review, commit and push.
+- [ ] 7. Complete A/B and historical profile comparison.
+  - [ ] 7.1 Specify per-side attribution and profile comparison over matching sample kinds and provenance, including multi-package output and explicit raw derivation artifacts.
+  - [ ] 7.2 Implement both-side capture/comparison and lossless multi-package output using shared recording/comparison mechanisms; surface missing/incompatible profiles and preserve completed units on interruption.
+  - [ ] 7.3 Complete gates and mutation evidence, converge review, retire resolved profile/A-B issues and cross-tool references, commit and push.
+- [ ] 8. Close the tool-level performance workflow and remaining related issue dispositions.
+  - [ ] 8.1 Reconcile the clean-baseline recording lifecycle, per-arm noise-floor proposal, machine-readable/progress surfaces and related correctness/consolidation issues against the implemented capabilities; retain only explicit, justified deferrals with checkable triggers.
+  - [ ] 8.2 Make the canonical guidance and CLI expose the complete supported measurement/profile/comparison workflow, preserving provenance rather than editing dirty measurements into clean baselines or suppressing regressions through unexplained floors.
+  - [ ] 8.3 Run full policy/gates and closing mutation campaign, converge final independent review, complete issue and plan close-out, commit and push, and install only the clean committed tool.

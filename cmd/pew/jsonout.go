@@ -99,13 +99,10 @@ func writeStatJSON(w io.Writer, res *compare.Result, emptyReason func() string) 
 				Base:       summaryJSON(row.Base),
 				New:        summaryJSON(row.New),
 				P:          row.Cmp.P,
+				DeltaPct:   finiteOrNull(row.DeltaPct),
 				Regression: row.Regression,
 				Gated:      row.Gated,
 				Warnings:   row.Warnings,
-			}
-			if !math.IsNaN(row.DeltaPct) {
-				d := row.DeltaPct
-				out.DeltaPct = &d
 			}
 			if err := writeJSONLine(w, out); err != nil {
 				return err

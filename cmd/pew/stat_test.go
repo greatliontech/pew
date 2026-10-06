@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,6 +107,34 @@ func TestValidateOptions(t *testing.T) {
 	for _, o := range bad {
 		if err := validateOptions(o); err == nil {
 			t.Errorf("validateOptions(%+v): want error", o)
+		}
+	}
+}
+
+func TestStatRejectsNonFiniteOptions(t *testing.T) {
+	for _, flag := range []string{"alpha", "confidence", "threshold"} {
+		for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+			t.Run(fmt.Sprintf("%s/%v", flag, value), func(t *testing.T) {
+				opts := compare.DefaultOptions()
+				switch flag {
+				case "alpha":
+					opts.Alpha = value
+				case "confidence":
+					opts.Confidence = value
+				case "threshold":
+					opts.ThresholdPct = value
+				}
+				if err := validateOptions(opts); err == nil || !strings.Contains(err.Error(), "--"+flag) {
+					t.Fatalf("non-finite %s=%v: %v", flag, value, err)
+				}
+				cmd := newStatCmd()
+				cmd.SetOut(io.Discard)
+				cmd.SetErr(io.Discard)
+				cmd.SetArgs([]string{fmt.Sprintf("--%s=%v", flag, value)})
+				if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "--"+flag) {
+					t.Fatalf("command accepted non-finite %s=%v or reached dependencies: %v", flag, value, err)
+				}
+			})
 		}
 	}
 }
@@ -1244,6 +1273,73 @@ func TestStatFailOnRegressionPartialSkipGovernedByComparedSubset(t *testing.T) {
 	var empty *nothingComparedError
 	if errors.As(err, &empty) {
 		t.Fatalf("regression misclassified as empty comparison: %v", err)
+	}
+}
+
+func TestStatZeroBaselineRegressionGate(t *testing.T) {
+	testStatNullDeltaRegression(t, 0, 1, "allocs/op")
+}
+
+func TestStatFiniteDeltaOverflowJSON(t *testing.T) {
+	testStatNullDeltaRegression(t, 1e-300, 1e100, "sec/op")
+}
+
+func testStatNullDeltaRegression(t *testing.T, baseline, current float64, unit string) {
+	t.Helper()
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statzerogate\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	write := func(value float64) {
+		values := make([]float64, 8)
+		for i := range values {
+			values[i] = value
+		}
+		recs := recordingtest.Results("BenchmarkZero", values)
+		for _, r := range recs {
+			r.Values[0].Unit = unit
+		}
+		if err := st.Write("pkg", "BenchmarkZero", "", recs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(baseline)
+	base := commitAll(t, repo, "baseline")
+	write(current)
+	newer := commitAll(t, repo, "increased cost")
+	withWorkingDir(t, dir)
+	opts := compare.DefaultOptions()
+	opts.GateUnits = map[string]bool{unit: true}
+	sc := statConfig{benchDir: st.Root, opts: opts, failOnRegression: true, jsonOut: true}
+	var out, errOut bytes.Buffer
+	err = runStat(context.Background(), &out, &errOut, sc, []string{base.String(), newer.String()})
+	if err == nil || err.Error() != "regression detected" || exitCode(err) != 1 {
+		t.Fatalf("undefined-percentage gate: %v\nstdout: %s\nstderr: %s", err, out.String(), errOut.String())
+	}
+	var sawRow bool
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		var row struct {
+			Kind       string   `json:"kind"`
+			DeltaPct   *float64 `json:"deltaPct"`
+			Regression bool     `json:"regression"`
+			Gated      bool     `json:"gated"`
+		}
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatal(err)
+		}
+		if row.Kind == "row" {
+			sawRow = true
+			if row.DeltaPct != nil || !row.Regression || !row.Gated {
+				t.Fatalf("incorrect undefined-percentage JSON: %s", line)
+			}
+		}
+	}
+	if !sawRow {
+		t.Fatalf("no comparison row: %s", out.String())
 	}
 }
 

@@ -638,8 +638,8 @@ func withUnit(name, machine, unit string, vals []float64) []*benchfmt.Result {
 	return rs
 }
 
-// TestNaNDeltaOnZeroBaseline: a zero baseline center yields a NaN delta and never
-// a regression (the magnitude is undefined, not "infinitely worse").
+// TestNaNDeltaOnZeroBaseline keeps the undefined percentage separate from the
+// judgment: a significant increase from no allocations is still a regression.
 func TestNaNDeltaOnZeroBaseline(t *testing.T) {
 	base := sampleSet("BenchmarkX-8", "m1", map[string][]float64{"allocs/op": rep(0, 8)})
 	newer := sampleSet("BenchmarkX-8", "m1", map[string][]float64{"allocs/op": rep(5, 8)})
@@ -652,12 +652,42 @@ func TestNaNDeltaOnZeroBaseline(t *testing.T) {
 		if !math.IsNaN(row.DeltaPct) {
 			t.Errorf("DeltaPct = %v on zero baseline, want NaN", row.DeltaPct)
 		}
-		if row.Regression {
-			t.Error("regression flagged on an undefined (zero-baseline) delta")
+		if !row.Regression || !res.Regressed() {
+			t.Error("significant zero-to-positive allocation increase did not regress")
 		}
 		return
 	}
 	t.Fatal("allocs/op table missing")
+}
+
+func FuzzZeroBaselineRegression(f *testing.F) {
+	for _, seed := range []struct{ value, floor float64 }{
+		{1, 3}, {5, 0}, {1, 1000}, {math.SmallestNonzeroFloat64, math.MaxFloat64},
+	} {
+		f.Add(seed.value, seed.floor)
+	}
+	f.Fuzz(func(t *testing.T, value, floor float64) {
+		if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) || floor < 0 || math.IsNaN(floor) || math.IsInf(floor, 0) {
+			return
+		}
+		for _, unit := range []string{"sec/op", "B/op", "allocs/op"} {
+			opts := DefaultOptions()
+			opts.ThresholdPct = floor
+			opts.GateUnits = map[string]bool{unit: true}
+			base := withUnit("BenchmarkZero-1", "m1", unit, rep(0, 8))
+			positive := withUnit("BenchmarkZero-1", "m1", unit, rep(value, 8))
+			res := Compare(base, positive, opts)
+			if !res.Regressed() || res.GatedComparisons() != 1 {
+				t.Fatalf("%s: zero -> %g at floor %g did not regress: %+v", unit, value, floor, res)
+			}
+			if !math.IsNaN(res.Tables[0].Rows[0].DeltaPct) {
+				t.Fatal("zero-baseline percentage became defined")
+			}
+			if Compare(positive, base, opts).Regressed() || Compare(base, base, opts).Regressed() {
+				t.Fatalf("%s: improvement or unchanged zero baseline regressed", unit)
+			}
+		}
+	})
 }
 
 func TestWriteTextMarksRegression(t *testing.T) {

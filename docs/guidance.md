@@ -79,9 +79,9 @@ to re-measure.
 **knobs:**
 - `bench-dir` — stored-recordings directory, `<module>/benchmarks` unless given.
 - `label` — variant label to compare; empty means the unlabeled recording.
-- `alpha` — significance level for the Mann-Whitney U test (default 0.05); outside (0,1) refuses.
-- `threshold` — regression magnitude floor, in percent (default 3); negative refuses, zero means any significant worse change regresses — legitimate, noisier.
-- `confidence` — confidence level for summary intervals (default 0.95); outside (0,1) refuses.
+- `alpha` — finite significance level for the Mann-Whitney U test (default 0.05); outside (0,1) refuses.
+- `threshold` — finite regression magnitude floor, in percent (default 3); negative refuses, zero means any significant worse change regresses — legitimate, noisier; a significant zero-to-positive cost clears every finite floor while its percentage remains undefined.
+- `confidence` — finite confidence level for summary intervals (default 0.95); outside (0,1) refuses.
 - `fail-on-regression` — exit non-zero if a gated metric regresses; an empty comparison then exits 2, so a CI consumer can tell measured-and-regressed from measured-nothing.
 - `explain` — lay out the values behind a one-word skip or warning: a comparison key whose two sides disagree on a guard prints both sides' recorded values naming the moving guard, and a working-tree recording warned non-valid prints its recorded-vs-current explanation; mutually exclusive with the JSON view.
 - `json` — one JSON object per comparison row, note, or empty-comparison marker; the field names are public surface and stable, and internal values (guard digests, closure hashes) are deliberately excluded — they belong to the explanation view.

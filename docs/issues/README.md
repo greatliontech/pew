@@ -6,6 +6,7 @@ close-out convention.
 
 | slug | summary | Lands |
 |------|---------|-------|
+| [mutation-oracle-observation](mutation-oracle-observation.md) | changed-code measurement banks kills but cwd-sensitive integration observations are non-reusable and final evidence work reaches its deadline | performance-evidence plan chunk 4 |
 | [guidance-purpose-column-second-enumeration](guidance-purpose-column-second-enumeration.md) | §12's opt-in purpose column restates the document's knob prose in its own words, pinned to nothing | cross-tool train chunk 232 |
 | [remote-bench-execution](remote-bench-execution.md) | run measurements on a dedicated homelab bench machine: gRPC-over-SSH `pew agent`, machine lease, off-box builds, calibration drift-vet | capability charter (gofresh docs/plans/capability-charters.md) — activates when a dedicated bench machine is provisioned |
 | [profile-capture-attribution](profile-capture-attribution.md) | subject attribution is consumer hand protocol: capture profiles with recordings, attribution verdict in status, profile diff in stat | cross-tool train chunk 15 |
