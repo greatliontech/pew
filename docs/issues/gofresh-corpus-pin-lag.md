@@ -32,5 +32,4 @@ toolchain-audit (filed 2026-09-30 from tugboat, awaiting triage) names
 the same bump as the fix for the host's go1.27.1-dst.13 listing, so the
 bump now carries two docs' facts; the trigger is unchanged.
 
-Lands: cross-tool train chunk 291 (the pew bump behind gofresh 279 and
-281; slotted at the 2026-09-29 replan).
+Lands: performance-evidence plan chunk 2 (the gofresh bump, delegated from the train's 291 at audit 319; the handoff doc carries the bump's riders).

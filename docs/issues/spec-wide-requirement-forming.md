@@ -15,11 +15,4 @@ authoritative elaboration — the split is deliberate and stable.
 The collapse opportunity activates only when enforcement wants to
 claim a contract that has no REQ-formed twin.
 
-**Lands:** cross-tool train chunk 232 (the spec chunk) — the
-condition has fired: the witnesses of §9's one-environment policy
-(the go-command helpers' resolved-directory and PWD pins, the runner
-path observed through gofresh's boundary hook, the toolchain sample
-through the same hook, and the resolved memo key) stand with no REQ
-id to bind against; convert that section's obligations to REQ-formed
-requirements there (same structure-only discipline as the §13
-conversion), never speculatively.
+Lands: each performance-evidence chunk forms its own section's REQs on demand (chunk 1 formed §10.1's; §9's one-environment-policy witnesses at chunk 2); the REQ home rule itself is the train's 232 residue, after that plan closes (audit 319).

@@ -19,4 +19,4 @@ the binary/ambient skew but not the pin.
 Need: bump the gofresh requirement to the release carrying the
 go1.27.1-dst.13 listing (v0.108.0 or the next), rebuild, and reinstall.
 
-Lands: awaiting triage.
+Lands: performance-evidence plan chunk 2 (the bump itself: since gofresh 310 the audit is keyed by content, so any tag from v0.108.1 on carries the listing; train audit 319).

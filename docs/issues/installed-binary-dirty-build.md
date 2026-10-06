@@ -30,7 +30,4 @@ loader-refuses-pre-format-3-ledger-lines-remedy-circular and
 strategy-stale-arms-flipped-valid-without-rerecord are store-reading
 defects. No doc covers binary provenance.
 
-Lands: cross-tool train chunk 291 (the gofresh bump; the pin-lag doc's
-trigger, adopted — the bump's close-out rebuilds and reinstalls from
-the committed tree, which is this doc's whole remedy); an earlier pew
-session's clean install closes it sooner.
+Lands: performance-evidence plan chunk 2 (2.3 reinstalls from the committed tree — this doc's whole remedy; train audit 319).

@@ -51,4 +51,4 @@ regenerates in place and `pew stat`'s lineage survives; and a store
 refusal is a store-level verdict on the status face's tally line, not
 an easily filtered `error` row.
 
-Lands: awaiting triage.
+Lands: performance-evidence plan chunk 3 (3.1/3.2 — the remedy the anchor names cannot run before the load: the anchor the train wrote at 230 is amended at that chunk's spec-first step; train audit 319).
