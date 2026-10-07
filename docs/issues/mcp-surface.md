@@ -22,4 +22,4 @@ Invariants preserved either way: the CLI's verb-defaults table stays
 the CLI's contract; a second surface derives its own defaults and is
 never the CLI rendered through a wrapper.
 
-Lands: cross-tool train chunk 177 for the JSON and progress step; the MCP surface lands when a driving agent appears (a checkable condition; recorded as such at the 2026-09-29 ratification)
+Lands: performance-evidence plan chunks 9 and 12 for JSON parity and progress; the MCP surface lands when a driving agent appears.

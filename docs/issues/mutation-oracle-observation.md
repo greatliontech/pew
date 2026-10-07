@@ -1,6 +1,6 @@
 # Mutation campaign observation and close-out
 
-Lands: performance-evidence plan chunk 4
+Lands: performance-evidence plan chunk 8
 
 The changed-code campaign over newStatCmd, validateOptions and Compare measured
 24 candidates and banked three machine-local records (22 killed, no open survivors),

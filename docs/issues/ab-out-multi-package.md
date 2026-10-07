@@ -13,4 +13,4 @@ Invariants preserved: the artifact stays marked `pew-ab`/`dirty`,
 never a stat baseline; each package's artifact holds exactly its own
 two streams.
 
-Lands: performance-evidence plan chunk 7 (lossless multi-package output; audit 319).
+Lands: performance-evidence plan chunk 11 (lossless multi-package output).

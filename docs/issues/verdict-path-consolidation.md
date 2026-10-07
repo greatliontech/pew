@@ -34,4 +34,4 @@ fingerprint for `--explain`).
 Invariants preserved: every row judged; closed-key agreement across
 rows; strategy rung on the working-tree side only (REQ-pew-admission).
 
-Lands: performance-evidence plan chunk 4 (4.2's one shared admission/verdict path; the handoff doc names the invariants to preserve; audit 319).
+Lands: performance-evidence plan chunk 8 (invocation-owned vouches and one admission/verdict path).

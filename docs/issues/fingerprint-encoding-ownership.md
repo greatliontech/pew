@@ -14,4 +14,4 @@ change coherently. A clean format cutover is appropriate for the fleet-owned
 deployment; historical records regenerate rather than gaining inferred evidence.
 The schema must be settled before the proposed final reset to v1.
 
-Lands: performance-evidence plan chunk 4.2, after 4.1 settles the evidence contract.
+Lands: performance-evidence plan chunk 7 (the canonical persisted fingerprint boundary).

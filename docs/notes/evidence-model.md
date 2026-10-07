@@ -1,8 +1,9 @@
 # Evidence model and bottom-up refactor proposal
 
-This proposal derives the measurement and reuse boundaries for pew and its shared
-gofresh substrate. It proposes a replacement for the evidence-handling spine;
-it does not change the current requirements or authorize a weaker reuse claim.
+This design rationale derives the measurement and reuse boundaries for pew and
+its shared gofresh substrate. The canonical specs define the requirements; this
+note explains the evidence-handling architecture and its dependency order. It
+does not authorize a weaker reuse claim.
 
 ## Recommendation
 

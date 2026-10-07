@@ -40,4 +40,4 @@ week under the current build and will record the current key beside
 the recordings' — the other half is the v0.101.3-pinned build's
 derivation, recoverable from pew's history.
 
-Lands: performance-evidence plan chunk 4 (rides the one verdict path: the explain row per validity key; audit 319).
+Lands: performance-evidence plan chunk 8 (the shared verdict path and explain row per validity key).

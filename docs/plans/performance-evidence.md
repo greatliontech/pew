@@ -14,23 +14,41 @@
   - [x] 3.1 Derive read/admission/regeneration behavior for oversized legacy metadata and failed stores, preserving raw history without accepting it as current evidence.
   - [x] 3.2 Implement usable in-place regeneration and complete status coverage, with regression tests for long legacy lines, foreign/current malformed files, store failures and interrupted replacement.
   - [x] 3.3 Complete gates, mutation evidence and review, retire resolved issue references, commit and push.
-- [ ] 4. Complete recorded-observation freshness integration.
-  - [ ] 4.1 Rederive and settle the shared measurement/observation evidence contract and bottom-up refactor direction before further capture integration; reconcile completion premises, encoding ownership, purity, external effects and evidence identity.
-  - [ ] 4.2 Adopt attributable observed capture per completed arm and one shared admission/verdict path; preserve stale/unverifiable distinctions and reject incomplete or mismatched observations.
-  - [ ] 4.3 Verify source/runtime-input movement, rejected proof and reuse cases, run gates and mutation probes, converge review, close resolved issues, commit and push.
-- [ ] 5. Supply complete and auditable comparison policies.
-  - [ ] 5.1 Specify required benchmark/unit coverage, missing or skipped comparisons, run-condition compatibility and freshness admission separately from informational comparison; preserve existing explicit modes and flag any breaking default change before implementation.
-  - [ ] 5.2 Implement typed coverage/disposition reporting and enforceable comparison policies, including non-finite samples and zero-baseline metrics, with text/JSON and CLI parity.
-  - [ ] 5.3 Verify partial/empty/new/missing-arm cases and condition mismatches, run gates and mutations, converge review, commit and push.
-- [ ] 6. Add provenance-bound profile capture and subject attribution.
-  - [ ] 6.1 Specify CPU/allocation profile companions, capture conditions, integrity, ownership, persistence, attribution evidence and failure behavior; use the approved github.com/google/pprof/profile dependency rather than parsing human-rendered profiler output.
-  - [ ] 6.2 Capture diagnostic profiles separately from statistical timing samples with matched source/build/runtime identities; expose attributable sample and allocation data, empty/incomplete capture and missing-subject outcomes without fabricated certainty.
-  - [ ] 6.3 Integrate profile freshness/integrity and cleanup with recordings and status, verify drift/interruption/corruption cases, run gates and mutation probes, converge review, commit and push.
-- [ ] 7. Complete A/B and historical profile comparison.
-  - [ ] 7.1 Specify per-side attribution and profile comparison over matching sample kinds and provenance, including multi-package output, explicit raw derivation artifacts, cancellable Git control processes and bounded truthful worktree cleanup.
-  - [ ] 7.2 Implement both-side capture/comparison and lossless multi-package output using shared recording/comparison mechanisms; surface missing/incompatible profiles and preserve completed units on interruption.
-  - [ ] 7.3 Complete gates and mutation evidence, converge review, retire resolved profile/A-B issues and cross-tool references, commit and push.
-- [ ] 8. Close the tool-level performance workflow and remaining related issue dispositions.
-  - [ ] 8.1 Reconcile the clean-baseline recording lifecycle, per-arm noise-floor proposal, machine-readable/progress surfaces, cross-machine handoff and CI/release gating against the implemented capabilities; retain only explicit, justified deferrals with checkable triggers.
-  - [ ] 8.2 Make the canonical guidance and CLI expose the complete supported measurement/profile/comparison workflow, preserving provenance rather than editing dirty measurements into clean baselines or suppressing regressions through unexplained floors.
-  - [ ] 8.3 Run full policy/gates and closing mutation campaign, converge final independent review, complete issue and plan close-out, commit and push, and install only the clean committed tool.
+- [ ] 4. Settle the canonical shared evidence contract and coordinated refactor sequence.
+  - [x] 4.1 Triage the outcome-premise, fingerprint-ownership and consumer handoff issues; reconcile the current shared contracts before proposing a mechanism.
+  - [x] 4.2 Define independent process completion and outcome-support premises, preserve evidence support classes and justified applicability transformations, and record unenforced obligations without claiming existing witnesses prove them.
+  - [ ] 4.3 Compile the affected corpora, check consent/binding/gap hygiene, converge independent design review, retarget every remaining issue to this roadmap, commit and push.
+- [ ] 5. Establish a sound shared outcome-support capability in gofresh.
+  - [ ] 5.1 Triage the shared completion gap and derive the smallest useful supported operation model from the canonical contract.
+  - [ ] 5.2 Establish positive and negative witnesses for that model, including ignored errors, partial results, missing captures and normal failing-test completion; select direct evidence or a sound derivation only where demonstrated, keeping unsupported operations incomplete.
+  - [ ] 5.3 Settle any required changes to the shared canonical record and manifest contracts before implementing versioned support construction and the facade prerequisite; enforce compatibility with older observations without upgrading their support or treating health as outcome evidence.
+  - [ ] 5.4 Complete applicable checks, fault-injection and mutation evidence, converge review, publish the shared release and retain explicit gaps for unsupported operation classes.
+- [ ] 6. Migrate shared producer adapters without manufacturing completeness.
+  - [ ] 6.1 Triage all affected gomutant, stipulator and pew producer paths against the published outcome-support contract and their actual result-contributing processes.
+  - [ ] 6.2 Supply supported evidence through the shared facade or an honest incomplete disposition; preserve process identity, interruption, per-unit publication and explicit purity semantics, with no health-to-outcome inference.
+  - [ ] 6.3 Verify completed failure, abnormal termination, unsupported outcomes and historical-evidence refusal across the adapters; converge review and publish each completed consumer migration.
+- [ ] 7. Establish one canonical persisted fingerprint boundary in pew.
+  - [ ] 7.1 Triage encoding ownership and derive the benchmark-format envelope around gofresh's native fingerprint record, keeping pew-owned facts separate and settling the clean format cutover before writing it.
+  - [ ] 7.2 Replace parallel fingerprint encoding with one admitted payload and derived display/comparison projections; preserve source/guard/purity/observation evidence, closed keys, chunk bounds and regeneration-only handling.
+  - [ ] 7.3 Verify exact round trips, malformed and inconsistent evidence refusal, oversized metadata and interrupted replacement; complete gates, mutations and review, retire the encoding issue, commit and push.
+- [ ] 8. Complete invocation-owned evidence and observed freshness in pew.
+  - [ ] 8.1 Triage verdict/vouch duplication, strategy-report evidence and the outstanding movement witnesses against the shared completion and encoding contracts.
+  - [ ] 8.2 Bind environment, store/vouches and preparation resources to one invocation; share immutable analysis facts while giving every arm its own capture, attachment, validation and publication transaction.
+  - [ ] 8.3 Unify recording admission and verdict derivation; select observed capture/checking only with supported completion premises, retain unsupported observation evidence as incomplete/unverifiable while deriving final verdicts under ordinary guards and explicit purity, and preserve inert test growth's justified applicability transformation.
+  - [ ] 8.4 Verify source/runtime-input movement, proof rejection, old-record non-upgrade, sibling isolation and every verdict surface; complete gates and mutation evidence, converge review, close resolved issues, commit and push.
+- [ ] 9. Supply complete and auditable comparison policies.
+  - [ ] 9.1 Triage comparison and rendering issues; specify requested benchmark/unit coverage, missing or skipped comparisons, condition compatibility and freshness admission separately from informational comparison, obtaining consent for any breaking default change.
+  - [ ] 9.2 Implement shared metric definitions, typed coverage/disposition reporting and enforceable comparison policies, including non-finite samples and zero-baseline metrics, with text/JSON parity.
+  - [ ] 9.3 Verify partial/empty/new/missing-arm cases and condition mismatches, run gates and mutations, converge review, commit and push.
+- [ ] 10. Add provenance-bound profile capture and subject attribution.
+  - [ ] 10.1 Triage profile-companion requirements and specify CPU/allocation capture, integrity, ownership, persistence, attribution and failure behavior under the evidence contract, using the approved github.com/google/pprof/profile dependency.
+  - [ ] 10.2 Capture diagnostic profiles separately from statistical timing samples, bound to their actual executions and matched source/build/runtime identities; report empty, incomplete or unattributable captures without fabricated certainty.
+  - [ ] 10.3 Integrate profile freshness/integrity and cleanup with recording admission and status; verify drift/interruption/corruption, run gates and mutations, converge review, commit and push.
+- [ ] 11. Complete A/B execution and historical profile comparison.
+  - [ ] 11.1 Triage A/B issues and specify both-side profile comparison over compatible sample kinds and provenance, lossless multi-package output, cancellable Git control processes and bounded truthful worktree cleanup.
+  - [ ] 11.2 Implement both-side capture/comparison through shared transaction and admission mechanisms; preserve completed units, explicit derivation artifacts and missing/incompatible profile outcomes.
+  - [ ] 11.3 Complete gates and mutation evidence, converge review, retire resolved profile/A-B issues and cross-tool references, commit and push.
+- [ ] 12. Close the complete performance-evidence workflow.
+  - [ ] 12.1 Triage remaining clean-baseline, per-arm noise-floor, machine-readable/progress and cross-tool items against implemented capabilities; retain only justified, checkably triggered deferrals.
+  - [ ] 12.2 Reconcile canonical guidance with the complete measurement/profile/comparison workflow and settle final format numbering after the schema is stable, preserving provenance and supported evidence classes.
+  - [ ] 12.3 Run the applicable final gates and mutation campaign, converge review, close issues and the plan, commit and push, then install only the clean committed tool.

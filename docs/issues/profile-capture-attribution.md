@@ -1,6 +1,6 @@
 # Profile capture and attribution as recording companions
 
-Lands: performance-evidence plan chunk 6 (profile companions) and 7 (per-side capture in ab); the obsolete second condition folded (audit 319).
+Lands: performance-evidence plan chunk 10 (profile companions) and 11 (per-side capture in ab).
 
 **Composition note carried from the closed derivation-ab-mode doc:
 per-side profile capture (`-cpuprofile`/`-benchmem` per A/B side)

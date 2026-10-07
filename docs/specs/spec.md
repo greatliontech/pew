@@ -591,6 +591,18 @@ Two consequences:
 
 ### 7.8 Runtime-input evidence
 
+Observation completion has the shared library's full meaning: process completion
+and operation-outcome support are distinct prerequisites. Pew owns the receipt
+for each result-contributing benchmark process and supplies evidence admitted by
+the shared outcome-support method. A normal exit, complete benchmark samples,
+testlog identities and matching pre/post hashes do not by themselves establish
+that read results, byte counts or errors matched the guarded values. Unsupported
+outcomes are recorded as incomplete; no observation support is invented from the
+health check. A diagnostic rerun cannot provide missing evidence for a timed run.
+
+Explicit purity retains its separate full-trust meaning. It can affect a final
+verdict without changing the support class of the observation it overrides.
+
 Go's testlog stream records operation identities but omits behavior-affecting return values, byte
 counts, and errors, so testlog identities alone prove neither operation outcomes nor complete path
 coverage. Pew completes the observation the way its sibling producers do — through the producer
@@ -1137,6 +1149,13 @@ Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred
 `docs/issues/`.
 
 ## 13. Project invariants
+
+**REQ-pew-observation-premises** (invariant): Pew MUST supply process completion
+and independently established operation-outcome support under the shared
+observation contract before constructing completion-bearing runtime evidence,
+keeping unsupported outcomes incomplete and attributable to their actual
+contributing process; neither a successful benchmark nor a later diagnostic run
+supplies a missing premise for the timed execution.
 
 **REQ-pew-recording-recovery** (behavior): `pew run` MUST regenerate selected
 readable Pew-marked recordings rejected for format or parsing, without using

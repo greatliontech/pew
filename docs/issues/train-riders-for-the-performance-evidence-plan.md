@@ -1,6 +1,6 @@
 # Handoff: the train's pew riders for the performance-evidence plan
 
-Lands: performance-evidence plan chunk 4, with the later-chunk items
+Lands: performance-evidence plan chunk 7, with the later-chunk items
 named below landing at their stated chunks.
 
 The cross-tool train (gofresh docs/plans/cross-tool-train.md) held pew
@@ -10,7 +10,7 @@ chunk 319, 2026-10-06) dissolved the train's pew tail into this plan
 and moves every rider here. Each item is a derived fact, not a wish;
 its source tick is named so the derivation can be read.
 
-## At chunk 4 — recorded-observation freshness
+## At chunks 7 and 8 — evidence encoding and recorded-observation freshness
 
 - One verdict path: `checkOne` is test-only; `checkPackage`,
   `verdictForRecs` and `inertGrownRecheck` beside it; admission
@@ -25,43 +25,42 @@ its source tick is named so the derivation can be read.
   itself reordered stat's resolveVouches): one threaded value with
   engine construction, preserving REQ-pew-vouch-source (file ∪
   flags; flags never remove a vouch).
-- The format bump 127 assumed is DERIVED, not assumed: §5's
-  omittable class reads an absent row as today's behaviour, so the
-  two observation rows may need no format move; if a bump is owed,
-  232's re-class announcement ships in the same change set (every
-  bump turns the whole fleet store `stale (format)`).
+- The canonical fingerprint boundary lands at 7: settle its envelope
+  and clean format cutover before emitting it, preserving the current
+  regeneration-only policy and making the remeasurement consequence
+  explicit. Missing historical evidence is never filled in on read.
 - The two covered gaps with no scheduled work
   (`.stipulator/gaps/pew-closure-noncall`, `pew-mutable-local`): the
   spec's anchors (a const flip, a struct-field change, an embed edit;
-  a local-replace edit) land at 4.3's movement verification.
+  a local-replace edit) land at 8.4's movement verification.
 
-## At chunk 5 — comparison policies
+## At chunk 9 — comparison policies
 
 - §10.1's unqualified "its magnitude clears a threshold" beside the
   three REQs 044f7d8 added, and the null-delta rule stated three
   times (REQ-pew-zero-baseline, REQ-pew-delta-representation, §12):
-  one statement at 5.1.
+  one statement at 9.1.
 - The metric set spelled four times (stat.go `knownUnits`, compare.go
   `higherIsWorse` and `unitOrder`, a test's hand list): one registry
-  on 251's pattern at 5.2, preserving §10.1's sec/op gate default;
+  on 251's pattern at 9.2, preserving §10.1's sec/op gate default;
   `audit-note-renderers-one-grammar` lands here.
 
-## At chunk 6 — profile companions
+## At chunk 10 — profile companions
 
 - Every companion key goes through `RecordingKeys` (REQ-pew-key-set's
-  closed set); `profile-capture-attribution` lands at 6/7.
+  closed set); `profile-capture-attribution` lands at 10/11.
 
-## At chunk 7 — A/B
+## At chunk 11 — A/B
 
 - ab's seven bare `exec.Command` git stages break REQ-pew-interruption
   ("any stage on the verb's path"): the containment, with completed
   units preserved on interruption; `ab-out-multi-package` lands here.
 
-## At chunk 8
+## At chunk 12
 
 - Per-arm noise floors over same-closure recordings are sound on the
   package closure today (gofresh 102 only refines them); the `--json`
-  parity (the train's 177) at 8.1/5.2.
+  parity (the train's 177) at 12.1/9.2.
 
 ## What the train keeps (after this plan closes)
 

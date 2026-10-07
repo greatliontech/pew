@@ -1,6 +1,6 @@
 # A/B control subprocess cancellation and cleanup outcomes
 
-Lands: performance-evidence plan chunk 7
+Lands: performance-evidence plan chunk 11
 
 The benchmark/build path uses a cancellable contained process, but runAB reaches
 gitTopLevel, addWorktree, sweepStaleWorktrees and gitCommonDir whose native Git
