@@ -14,10 +14,10 @@
   - [x] 3.1 Derive read/admission/regeneration behavior for oversized legacy metadata and failed stores, preserving raw history without accepting it as current evidence.
   - [x] 3.2 Implement usable in-place regeneration and complete status coverage, with regression tests for long legacy lines, foreign/current malformed files, store failures and interrupted replacement.
   - [x] 3.3 Complete gates, mutation evidence and review, retire resolved issue references, commit and push.
-- [ ] 4. Settle the canonical shared evidence contract and coordinated refactor sequence.
+- [x] 4. Settle the canonical shared evidence contract and coordinated refactor sequence.
   - [x] 4.1 Triage the outcome-premise, fingerprint-ownership and consumer handoff issues; reconcile the current shared contracts before proposing a mechanism.
   - [x] 4.2 Define independent process completion and outcome-support premises, preserve evidence support classes and justified applicability transformations, and record unenforced obligations without claiming existing witnesses prove them.
-  - [ ] 4.3 Compile the affected corpora, check consent/binding/gap hygiene, converge independent design review, retarget every remaining issue to this roadmap, commit and push.
+  - [x] 4.3 Compile the affected corpora, check consent/binding/gap hygiene, converge independent design review, retarget every remaining issue to this roadmap, commit and push.
 - [ ] 5. Establish a sound shared outcome-support capability in gofresh.
   - [ ] 5.1 Triage the shared completion gap and derive the smallest useful supported operation model from the canonical contract.
   - [ ] 5.2 Establish positive and negative witnesses for that model, including ignored errors, partial results, missing captures and normal failing-test completion; select direct evidence or a sound derivation only where demonstrated, keeping unsupported operations incomplete.
