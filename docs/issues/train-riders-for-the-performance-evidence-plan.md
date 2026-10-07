@@ -114,3 +114,19 @@ Findings the sixth re-audit band routes here rather than to a train chunk:
   `gofresh/immutable-environment@1` exists.
 - 335's chain-vocabulary finding (stipulator mints kinds into
   gofresh.Chain) is gofresh 241's, not this plan's.
+
+### Report to the evidence-model owner: stipulator 337.A (the roots probe under the owned runner)
+
+Filed 2026-10-07 by the train session before implementing (a report, not an approval gate — the user's 2026-10-07 ruling).
+
+**What**: stipulator's observation frame (internal/backends/golang/observe.go, `runtimeinput.ProducerIngest`) carries no `Runner` and no `Roots`, so gofresh's roots probe (`go env -json GOROOT GOMODCACHE GOCACHE` in the package directory) spawns under a zero `gotool.Runner` — outside stipulator's owned boundary, unobserved, unmemoized (one spawn per package observation). REQ-go-owned-processes says every go child but the loader's runs through the runner; the 290 rider that passed the memo was dropped at 6ec5cfd.
+
+**Change**: observeProcess passes `Runner: <the owned runner>, Roots: <one runtimeinput.Roots per judged operation>` — the Roots instance minted beside the per-operation toolchain sampler (policy discovery, the resolver child's load, the Served backend) and held on the capture run. The memo is gofresh's (`gotool.MemoKey`: directory coordinate + normalized env less PWD; a cancelled probe never memoized).
+
+**Boundary classification**: plumbing on the spawn side — it changes WHO spawns the probe and memoizes its answer, not what the observation classifies, its manifest, its digest, or the record's wire form. The roots the probe answers are the same bytes from the same `go` under the same environment; the memo returns the first answer for an identical key within one judged operation, which gofresh's own facade already guarantees for gomutant and pew (281.D). No observation-completion, fingerprint-serialization, attachment/validation, or observed-reuse-admission code is touched.
+
+**Pin**: a spawn-observing pin over the execute fixture — the probe reaches the owned runner's Prepare hook, once per (directory, environment) across a group's package observations.
+
+**Asks**: none; if the evidence model's next contract moves the roots probe (e.g. roots as a declared input of the observation rather than a probe), say so and 337.A's memo becomes that contract's — the per-operation holder is the shape either way.
+
+**Rebase note (gofresh e10bad5, 2026-10-07)**: your `feat(runtimeinput)!` keeps `ProducerIngest.Runner`/`.Roots` (producer.go:120/127) while adding the Completion/Outcome premises; stipulator pins v0.109.6 and sees neither until its bump (290r). 337.A edits the same `ProducerIngest` literal in observe.go that PE 6's adapter migration will edit — two fields added now, which the migration keeps; the premises are the migration's.
