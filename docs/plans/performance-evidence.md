@@ -15,7 +15,7 @@
   - [x] 3.2 Implement usable in-place regeneration and complete status coverage, with regression tests for long legacy lines, foreign/current malformed files, store failures and interrupted replacement.
   - [x] 3.3 Complete gates, mutation evidence and review, retire resolved issue references, commit and push.
 - [ ] 4. Complete recorded-observation freshness integration.
-  - [ ] 4.1 Read current gofresh observation proofs and pew's per-arm recording/verdict paths; reconcile purity, external effects and evidence identity in the canonical contract.
+  - [ ] 4.1 Rederive and settle the shared measurement/observation evidence contract and bottom-up refactor direction before further capture integration; reconcile completion premises, encoding ownership, purity, external effects and evidence identity.
   - [ ] 4.2 Adopt attributable observed capture per completed arm and one shared admission/verdict path; preserve stale/unverifiable distinctions and reject incomplete or mismatched observations.
   - [ ] 4.3 Verify source/runtime-input movement, rejected proof and reuse cases, run gates and mutation probes, converge review, close resolved issues, commit and push.
 - [ ] 5. Supply complete and auditable comparison policies.
