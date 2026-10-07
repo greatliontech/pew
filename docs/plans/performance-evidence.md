@@ -19,8 +19,10 @@
   - [x] 4.2 Define independent process completion and outcome-support premises, preserve evidence support classes and justified applicability transformations, and record unenforced obligations without claiming existing witnesses prove them.
   - [x] 4.3 Compile the affected corpora, check consent/binding/gap hygiene, converge independent design review, retarget every remaining issue to this roadmap, commit and push.
 - [ ] 5. Establish a sound shared outcome-support capability in gofresh.
-  - [ ] 5.1 Triage the shared completion gap and derive the smallest useful supported operation model from the canonical contract.
+  - [x] 5.1 Triage the shared completion gap and derive the smallest useful supported operation model from the canonical contract.
   - [ ] 5.2 Establish positive and negative witnesses for that model, including ignored errors, partial results, missing captures and normal failing-test completion; select direct evidence or a sound derivation only where demonstrated, keeping unsupported operations incomplete.
+    - [x] Derive and verify the independent static outcome inventory, including initialization, user test-main flow, harness protocol, complete effect aggregation, audited platform selection and warm/cold equivalence.
+    - [ ] Bind the static derivation to the actual contributing process set, unchanged inherited environment and completion receipt; verify missing captures, normal failing-test completion and unsupported outcomes through that construction boundary.
   - [ ] 5.3 Settle any required changes to the shared canonical record and manifest contracts before implementing versioned support construction and the facade prerequisite; enforce compatibility with older observations without upgrading their support or treating health as outcome evidence.
   - [ ] 5.4 Complete applicable checks, fault-injection and mutation evidence, converge review, publish the shared release and retain explicit gaps for unsupported operation classes.
 - [ ] 6. Migrate shared producer adapters without manufacturing completeness.
