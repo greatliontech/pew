@@ -53,10 +53,11 @@ evidence that behavior-affecting admitted-operation outcomes agreed with their
 guarded values. Its testlog model explicitly omits return values, byte counts,
 and errors.
 
-The producer facade receives process health, identities, environment, brackets,
-and declarations. After those checks it supplies `WithCompletedProcess`, whose
-contract asserts outcome agreement as well. No outcome-evidence input establishes
-that additional premise.
+Process health, identities, environment, brackets and declarations do not establish
+operation-outcome agreement. A producer facade needs an independent outcome
+premise rather than supplying a combined assertion after checking only health.
+The shared construction boundary binds a completion receipt and analysis-issued
+support to one execution; identity-only guard data remains a separate claim.
 
 An allowed error path exposes the missing implication: a benchmark ignores a
 failed or partial file read, still emits its samples and exits successfully, and
