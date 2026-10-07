@@ -592,7 +592,7 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 			break
 		}
 		reportPhase(fmt.Sprintf("measuring %s arm %d/%d", p.ImportPath, i+1, len(runBenches)))
-		m, refused, err := measureBench(ctx, errw, rc, gc, p, envs.measured(), opts, pkgRel, name, truth, scratch, conditions)
+		m, refused, err := measureBench(ctx, errw, rc, gc, p, envs.measured(), opts, pkgRel, name, truth, scratch, conditions, view)
 		if err != nil {
 			if ctx.Err() != nil {
 				stoppedAt = i
@@ -699,6 +699,11 @@ func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitSta
 	if err := view.Validate(gate); err != nil {
 		return gated(err)
 	}
+	if m.outcomeView != nil {
+		if err := m.outcomeView.Validate(gate); err != nil {
+			return gated(err)
+		}
+	}
 	dirty := initialDirty
 	if !dirty {
 		var err error
@@ -768,6 +773,7 @@ type armMeasurement struct {
 	recs             []*benchfmt.Result
 	digest, manifest string
 	conditions       run.Conditions
+	outcomeView      *gofresh.View
 }
 
 // measureBench executes exactly one top-level benchmark in its own `go test`
@@ -782,7 +788,7 @@ type armMeasurement struct {
 // surfaces as a crash and as a moved bracket, neither masking the other. In
 // every case only this arm's recording is discarded, its prior recording
 // untouched.
-func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, env gotool.Environment, opts run.Options, pkgRel, name string, truth run.ToolchainTruth, scratch []string, base run.Conditions) (armMeasurement, []string, error) {
+func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, env gotool.Environment, opts run.Options, pkgRel, name string, truth run.ToolchainTruth, scratch []string, base run.Conditions, parent *gofresh.View) (armMeasurement, []string, error) {
 	pattern, err := restrictBenchmarkPattern(opts.Bench, []string{name})
 	if err != nil {
 		return armMeasurement{}, nil, err
@@ -815,6 +821,36 @@ func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStat
 	// bracket — and the measurement invocation carries its own testlog
 	// capture through the test binary's flag.
 	frame := run.CaptureObservationFrame(ctx, p.Module.Dir, pkgRel)
+	subject := gofresh.Subject{Package: p.ImportPath, Symbol: name}
+	outcomeView, err := parent.Sibling([]gofresh.Subject{subject})
+	if err != nil {
+		return armMeasurement{}, nil, err
+	}
+	identity := "package-test-binary:" + p.ImportPath + ":" + name
+	frame.Outcome, err = outcomeView.PrepareOutcomeSupport(ctx, frame.ProducerFrame, identity)
+	if err != nil {
+		return armMeasurement{}, nil, err
+	}
+	ingestEnv, err := env.For(frame.PkgDir)
+	if err != nil {
+		return armMeasurement{}, nil, err
+	}
+	binding, err := frame.OutcomeBinding(identity, ingestEnv)
+	if err != nil {
+		return armMeasurement{}, nil, err
+	}
+	var outcomeFingerprint gofresh.Fingerprint
+	outcomeReason := frame.Outcome.Reason(binding)
+	if outcomeReason == "" {
+		outcomeFingerprint, err = outcomeView.CaptureObserved(ctx, subject)
+		if err != nil {
+			return armMeasurement{}, nil, err
+		}
+	} else {
+		// No outcome claim will be published, so the ordinary producer view
+		// remains the validation authority for this incomplete observation.
+		outcomeView = nil
+	}
 	testlog, err := os.CreateTemp("", "pew-testlog-*")
 	if err != nil {
 		return armMeasurement{}, nil, err
@@ -861,9 +897,14 @@ func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStat
 	}
 	armConditions := base
 	armConditions.Throttled = throttled
-	runtimeState, err := run.IngestObservation(ctx, frame, testlogPath, "package-test-binary:"+p.ImportPath, rc.roots, env, scratch...)
+	runtimeState, err := run.IngestObservation(ctx, frame, testlogPath, identity, rc.roots, env, scratch...)
 	if err != nil {
 		return armMeasurement{}, nil, err
+	}
+	if outcomeView != nil {
+		if _, err := outcomeView.AttachObservation(subject, outcomeFingerprint, runtimeState); err != nil {
+			return armMeasurement{}, nil, err
+		}
 	}
 	if runtimeState.Unverifiable {
 		reason := runtimeState.Reason
@@ -871,6 +912,9 @@ func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStat
 			reason += " — " + runtimeState.Attribution
 		}
 		fmt.Fprintf(errw, "pew: warning: runtime observation for %s.%s: %s\n", p.ImportPath, name, reason)
+	}
+	if outcomeReason != "" {
+		fmt.Fprintf(errw, "pew: warning: runtime observation for %s.%s is identity-only: %s\n", p.ImportPath, name, outcomeReason)
 	}
 	// The stream is transient input, not a recording (spec §9): interleaved
 	// foreign stdout output corrupts individual result lines, so corruption is
@@ -930,7 +974,7 @@ func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStat
 		sort.Strings(foreign)
 		return armMeasurement{}, []string{fmt.Sprintf("stream carries result rows for %s, which this single-subject invocation did not run", strings.Join(foreign, ", "))}, nil
 	}
-	return armMeasurement{recs: recs, digest: runtimeState.Digest, manifest: runtimeState.Manifest, conditions: armConditions}, nil, nil
+	return armMeasurement{recs: recs, digest: runtimeState.Digest, manifest: runtimeState.Manifest, conditions: armConditions, outcomeView: outcomeView}, nil, nil
 }
 
 func requireBenchmarkGroups(names []string, groups map[string][]*benchfmt.Result) error {

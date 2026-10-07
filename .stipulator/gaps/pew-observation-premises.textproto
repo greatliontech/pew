@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-pew-observation-premises"
-reason: "Pew currently supplies process health and an identity/bracket observation but no independent operation-outcome support. It selects no observed freshness lift. The shared capability and producer migration land in performance-evidence chunks 5 and 6 before observed reuse at chunk 8."
-content_hash: "021a410efc76a1c33cf6d0a29800c3e3f3375de2685fa5db097337752a8c0ebd"
-source_hash: "20241f80c07cd8ab4e07487f76dbcea51fbce4ac9725beb09841825e3f879274"
-lands { manual { condition: "Pew supplies supported completion premises through the shared producer contract, or records unsupported outcomes incomplete, with failure-sensitive witnesses." contradicted: true } }

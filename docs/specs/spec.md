@@ -473,7 +473,7 @@ not source at all, so no source widening can bound it:
 
 | construct | external state |
 |-----------|----------------|
-| file I/O on a non-embedded path (`os.Open`, `os.ReadFile`, …) | the run records the completed observation conjunction (§7.8), but Pew selects no observability proof, so the closure remains `unverifiable` on its own reason |
+| file I/O on a non-embedded path (`os.Open`, `os.ReadFile`, …) | the run retains identity-only input guards (§7.8); file-operation outcomes remain unsupported, and the ordinary freshness policy leaves the closure `unverifiable` |
 | network I/O | a remote that may change |
 | `plugin.Open` / `plugin.Lookup` | code loaded from an arbitrary `.so` at runtime |
 | cgo linked against an external library (`#cgo LDFLAGS: -l…`) | C outside the build (in-tree `.c`/`.h` *are* hashed → that is A′, not B) |
@@ -481,7 +481,9 @@ not source at all, so no source widening can bound it:
 
 Any non-file Class-B dependence reachable in `B`'s closure → `unverifiable`. File I/O reached by
 the closure also remains `unverifiable`: rescuing it needs the completed observation conjunction
-*and* an observability proof, and Pew records the former but selects no proof (§7.8). Testlog
+*and* an observability proof. Construction-time proofs establish outcome support
+only for the shared method's admitted operations; Pew still selects the ordinary
+freshness policy when reading recordings (§7.8). Testlog
 identities alone prove neither complete path coverage nor operation outcomes, so
 they cannot suppress the Class-B marker. (Ambient nondeterminism — `time.Now`, unseeded `rand` — is a
 benchmark-*quality* issue, out of scope per §3, not a Class-B trigger.)
@@ -596,9 +598,11 @@ and operation-outcome support are distinct prerequisites. Pew owns the receipt
 for each result-contributing benchmark process and supplies evidence admitted by
 the shared outcome-support method. A normal exit, complete benchmark samples,
 testlog identities and matching pre/post hashes do not by themselves establish
-that read results, byte counts or errors matched the guarded values. Unsupported
-outcomes are recorded as incomplete; no observation support is invented from the
-health check. A diagnostic rerun cannot provide missing evidence for a timed run.
+that read results, byte counts or errors matched the guarded values. Outcome
+support is never invented from the health check. Normally completed runs
+may retain identity-only guard evidence when outcome support is unavailable;
+that evidence cannot claim complete outcomes or enable an observation-based
+freshness lift. A diagnostic rerun cannot provide missing evidence for a timed run.
 
 Explicit purity retains its separate full-trust meaning. It can affect a final
 verdict without changing the support class of the observation it overrides.
@@ -611,7 +615,8 @@ defines: each benchmark's measurement invocation — one `go test` process per b
 single-subject execution) — carries its own `-test.testlogfile` capture
 (passed through `go test`'s argument passthrough), an observation **bracket** is fingerprinted over
 the package directory immediately before each invocation (VCS bookkeeping excluded), and each
-capture is ingested with the completed-process and bracket options under the measured process's
+capture is ingested with an independently prepared outcome capability and a
+normal-completion receipt under the measured process's
 own environment — the toolchain, module-cache, build-cache, and ephemeral-temp classification
 roots are facts of that environment the engine resolves, never pew's declarations — and, where the
 package declares them, its run-scratch namespaces. A **`//pew:scratch <pattern>`** directive in any of the package's
@@ -634,7 +639,7 @@ per-run names permanently churn evidence comparison) from an absence-probe whose
 must stale the recording; the directive supplies that missing bit, and its author takes the one
 forfeited protection — absence-probes matching the pattern lose their appearance-pin, one namespace
 wide — as a caller-side soundness responsibility, exactly like a path exclusion. The resulting
-completed observation's manifest and digest ride its benchmark's recording (`pew-runtime-inputs`,
+guard manifest and digest ride its benchmark's recording (`pew-runtime-inputs`,
 `pew-runtime`) — each recording carries the manifest of exactly its own invocation's reads, never
 a package-wide union — so the runtime-input guard is real
 evidence: a moved observed input stales the recording instead of hiding behind blanket
@@ -651,11 +656,18 @@ and, when available, the operation and producing directory that explain that
 reason. This attribution is diagnostic text, not part of the recorded manifest,
 digest, or validity identity.
 
-Pew still selects no observability proof: a file-reading benchmark's closure remains `unverifiable`
-under Gofresh's ordinary fingerprint path — refused on its own closure reason, no longer on
-manufactured incompleteness — unless an explicit purity assertion applies with its separate
-full-trust semantics from §7.5. Format-2 recordings are checked through Gofresh's ordinary
-fingerprint path. Unversioned recordings are rejected at the Pew format boundary before their
+The outcome capability is prepared on the arm's own producer view before its
+timed process starts, and its selected proof is revalidated before publication.
+An unsupported inventory retains explicitly identity-only guard evidence under
+the shared facade; its ordinary source and guard validation still applies, and
+its missing outcome support is reported. One arm's preparation or attachment cannot seal
+another arm's transaction.
+
+Recordings retain Gofresh's ordinary fingerprint policy: the construction-time
+proof supports the outcome premise but does not authorize an observation-based
+freshness lift on read. A file-reading benchmark remains `unverifiable` unless an
+explicit purity assertion applies with its separate full-trust semantics from
+§7.5. Unversioned recordings are rejected at the Pew format boundary before their
 runtime manifest or any other fingerprint field is interpreted.
 
 ### 7.9 Inert test-suite growth
@@ -1156,6 +1168,9 @@ observation contract before constructing completion-bearing runtime evidence,
 keeping unsupported outcomes incomplete and attributable to their actual
 contributing process; neither a successful benchmark nor a later diagnostic run
 supplies a missing premise for the timed execution.
+
+Identity-only guard data may remain available for input-movement checks without
+conferring outcome completion or observation-based reuse.
 
 **REQ-pew-recording-recovery** (behavior): `pew run` MUST regenerate selected
 readable Pew-marked recordings rejected for format or parsing, without using

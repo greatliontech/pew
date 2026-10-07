@@ -1587,6 +1587,9 @@ func TestRunPerArmRuntimeManifestAttribution(t *testing.T) {
 		if strings.Contains(string(manifest), want.sibling) {
 			t.Errorf("%s manifest carries the sibling's read %s: %s", bench, want.sibling, manifest)
 		}
+		if strings.Contains(string(manifest), `"outcome":`) || strings.Contains(string(manifest), `"subjects":`) {
+			t.Errorf("unsupported file outcomes gained support: %s", manifest)
+		}
 	}
 }
 

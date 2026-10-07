@@ -21,6 +21,15 @@ func TestRunOwnsObservationRootsPerInvocation(t *testing.T) {
 		t.Skip("POSIX shell toolchain counter")
 	}
 	dir := twoArmFixture(t)
+	// The stub's root-open observation must belong to the analyzed program:
+	// an empty benchmark cannot legitimately produce that operation under a
+	// supported empty-effect inventory.
+	writeFile(t, filepath.Join(dir, "bench_test.go"), `package arms
+import ("os"; "testing")
+func readRoot() { f, _ := os.Open("/"); if f != nil { _ = f.Close() } }
+func BenchmarkFirst(b *testing.B) { readRoot() }
+func BenchmarkSecond(b *testing.B) { readRoot() }
+`)
 	withWorkingDir(t, dir)
 	realGo, err := exec.LookPath("go")
 	if err != nil {
@@ -98,6 +107,9 @@ func TestRunOwnsObservationRootsPerInvocation(t *testing.T) {
 		}
 		if strings.Count(errout.String(), `open "/" in `) != 2 || !strings.Contains(errout.String(), "external directory input: /") {
 			t.Fatalf("observation refusals lost their producing operations:\n%s", &errout)
+		}
+		if strings.Count(errout.String(), "is identity-only:") != 2 {
+			t.Fatalf("classification refusal suppressed missing outcome support:\n%s", &errout)
 		}
 	}
 	if arms != 4 {

@@ -1050,3 +1050,53 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "49081a9a2e2d36b9d760f16c117de6906ee03f7dc059acfe45177c47de07f907"
 }
+
+bindings {
+  requirement_id: "REQ-pew-observation-premises"
+  content_hash: "334e060747e278201bce4ef375294571d182f291d0f5f627edd47ec215cf51e7"
+  source_hash: "4ba8f2048f54cb809cbf2463a3abee85c93729c9ccd789aef72882257128a0b9"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.measureBench"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "19008328120cacca4a17e0a800ca853ec31a9be4ee67b57a34424b931cfbe8dc"
+}
+
+bindings {
+  requirement_id: "REQ-pew-observation-premises"
+  content_hash: "334e060747e278201bce4ef375294571d182f291d0f5f627edd47ec215cf51e7"
+  source_hash: "4ba8f2048f54cb809cbf2463a3abee85c93729c9ccd789aef72882257128a0b9"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/internal/run.IngestObservation"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "b7665a24d088e423da98ec5aba99d9d543f8a388d2036984ee14ed3c0d002645"
+}
+
+bindings {
+  requirement_id: "REQ-pew-observation-premises"
+  content_hash: "334e060747e278201bce4ef375294571d182f291d0f5f627edd47ec215cf51e7"
+  source_hash: "4ba8f2048f54cb809cbf2463a3abee85c93729c9ccd789aef72882257128a0b9"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestRunRecordsPerArmOutcomeSupport"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "894187dc8ae1bfca8336d11513a2b1616dfc10b3fe8c4a4b27c9bdb832320a10"
+}
+
+bindings {
+  requirement_id: "REQ-pew-observation-premises"
+  content_hash: "334e060747e278201bce4ef375294571d182f291d0f5f627edd47ec215cf51e7"
+  source_hash: "4ba8f2048f54cb809cbf2463a3abee85c93729c9ccd789aef72882257128a0b9"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestArmWriteGateRequiresOutcomeValidation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "585a798f86cfa5f7ddf60578ed9ac9b53d858b28a87d0b5aee64f9d6dee0ac02"
+}
+
+bindings {
+  requirement_id: "REQ-pew-observation-premises"
+  content_hash: "334e060747e278201bce4ef375294571d182f291d0f5f627edd47ec215cf51e7"
+  source_hash: "4ba8f2048f54cb809cbf2463a3abee85c93729c9ccd789aef72882257128a0b9"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestRunPerArmRuntimeManifestAttribution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "39ae6b9ec6b6412279ae274c1cdbb88aefb3e79bf2b13e24acceaf03a563b8d4"
+}
