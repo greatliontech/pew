@@ -1,6 +1,6 @@
 # Mutation campaign observation and close-out
 
-Lands: performance-evidence plan chunk 8
+Lands: performance-evidence plan chunk 8 (the cwd-relative refusal). The campaign's other half — it stopped reporting about two minutes short of its deadline and its close-out never returned — is gomutant docs/issues/campaign-silent-past-its-deadline.md, landing at cross-tool train chunk 267 (audit 335).
 
 The changed-code campaign over newStatCmd, validateOptions and Compare measured
 24 candidates and banked three machine-local records (22 killed, no open survivors),

@@ -32,9 +32,3 @@ applied per row so a verdict is auditable. Arms with insufficient
 history fall back to the global threshold unchanged. A
 hand-annotated per-arm floor may serve as the interim or override
 surface, but the derived floor is the design goal — annotations rot.
-
-## Lands
-
-Cross-tool train chunk 15: folds into its opening design discussion
-(both grow what a recording
-carries about its own trustworthiness).

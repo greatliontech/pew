@@ -18,4 +18,4 @@ generated from the document's first clause and pinned to it.
 Invariants preserved: the table stays the spec's behaviour and defaults
 contract; the served guidance stays the document's.
 
-Lands: cross-tool train chunk 232 (pew's spec chunk).
+Lands: performance-evidence plan chunk 12.2 (the guidance reconcile; audit 335 — the train's 232 had delegated it there while this doc still named 232).

@@ -15,4 +15,4 @@ authoritative elaboration — the split is deliberate and stable.
 The collapse opportunity activates only when enforcement wants to
 claim a contract that has no REQ-formed twin.
 
-Lands: each performance-evidence chunk forms its own section's REQs on demand (chunk 1 formed §10.1's; §9's one-environment-policy witnesses at chunk 2); the REQ home rule itself is the train's 232 residue, after that plan closes (audit 319).
+Lands: the REQ home rule at cross-tool train chunk 232r (its derivation the train's; audit 335 named two new pairs — REQ-pew-recording-recovery restating §5, REQ-pew-status-completeness restating §12); each performance-evidence chunk forms its own section's REQs on demand.
