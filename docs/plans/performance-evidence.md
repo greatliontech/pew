@@ -25,13 +25,13 @@
     - [x] Bind the static derivation to the actual contributing process set, unchanged inherited environment and completion receipt; verify missing captures, normal failing-test completion and unsupported outcomes through that construction boundary.
   - [x] 5.3 Settle any required changes to the shared canonical record and manifest contracts before implementing versioned support construction and the facade prerequisite; enforce compatibility with older observations without upgrading their support or treating health as outcome evidence.
   - [x] 5.4 Complete applicable checks, fault-injection and mutation evidence, converge review, publish the shared release and retain explicit gaps for unsupported operation classes.
-- [ ] 6. Migrate shared producer adapters without manufacturing completeness.
-  - [ ] 6.1 Triage all affected gomutant, stipulator and pew producer paths against the published outcome-support contract and their actual result-contributing processes.
-  - [ ] 6.2 Supply supported evidence through the shared facade or an honest incomplete disposition; preserve process identity, interruption, per-unit publication and explicit purity semantics, with no health-to-outcome inference.
+- [x] 6. Migrate shared producer adapters without manufacturing completeness.
+  - [x] 6.1 Triage all affected gomutant, stipulator and pew producer paths against the published outcome-support contract and their actual result-contributing processes.
+  - [x] 6.2 Supply supported evidence through the shared facade or an honest incomplete disposition; preserve process identity, interruption, per-unit publication and explicit purity semantics, with no health-to-outcome inference.
     - [x] Migrate pew's per-arm preparation, receipt, identity-only fallback and publication validation to the released shared contract.
     - [x] Migrate stipulator's package-process preparation and witness publication, preserving invocation-owned roots and the actual contributing subject set.
-    - [ ] Migrate gomutant's baseline and transformed-executable observations without borrowing unsupported evidence from another execution model.
-  - [ ] 6.3 Verify completed failure, abnormal termination, unsupported outcomes and historical-evidence refusal across the adapters; converge review and publish each completed consumer migration.
+    - [x] Migrate gomutant's baseline and transformed-executable observations without borrowing unsupported evidence from another execution model.
+  - [x] 6.3 Verify completed failure, abnormal termination, unsupported outcomes and historical-evidence refusal across the adapters; converge review and publish each completed consumer migration.
 - [ ] 7. Establish one canonical persisted fingerprint boundary in pew.
   - [ ] 7.1 Triage encoding ownership and derive the benchmark-format envelope around gofresh's native fingerprint record, keeping pew-owned facts separate and settling the clean format cutover before writing it.
   - [ ] 7.2 Replace parallel fingerprint encoding with one admitted payload and derived display/comparison projections; preserve source/guard/purity/observation evidence, closed keys, chunk bounds and regeneration-only handling.
