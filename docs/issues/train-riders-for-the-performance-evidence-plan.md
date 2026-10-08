@@ -170,3 +170,21 @@ packageleg.go, the attachment or the reuse admission moved; the one
 observe-adjacent fact: NormalizedInvocation's values are read from the
 one snapshot through Value (no new field, no second read). The gofresh
 pin stays v0.112.1. resolution-missing-go-export-cache triaged → 249.
+
+### Report to the evidence-model owner: stipulator 270 opens over 8f63b02 (2026-10-09)
+
+270 decomposes stipulator's mega-requirements into per-sub-contract
+ids on gofresh 200's mechanics — REQ-evidence-witness-freshness
+(358 lines, 115 bindings), REQ-go-owned-processes (93/40),
+REQ-evidence-witness-cache-format (121/20), REQ-check-verdict,
+REQ-mcp-progress, REQ-go-policy-complete, REQ-policy-attribution,
+REQ-check-preparation, REQ-mcp-tools, REQ-policy-cancellation,
+REQ-evidence-resolution-freshness, REQ-mcp-views, REQ-policy-explicit.
+Byte-preserving: every sentence keeps its text, each sub-paragraph
+gets one normative keyword, bindings move from the base id to the
+sub-id their witness pins, cites retarget. Your PE 6 landed (6.1–6.3
+[x]), so the "before 6.1" precondition is met; your adapters'
+clauses (the outcome-support sentences 6.2 wrote into
+REQ-evidence-witness-freshness, if any) keep their text and move
+whole into the sub-id that holds them — tell me here if a sentence
+must stay beside another. No code moves in 270.
