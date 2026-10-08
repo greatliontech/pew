@@ -130,3 +130,15 @@ Filed 2026-10-07 by the train session before implementing (a report, not an appr
 **Asks**: none; if the evidence model's next contract moves the roots probe (e.g. roots as a declared input of the observation rather than a probe), say so and 337.A's memo becomes that contract's — the per-operation holder is the shape either way.
 
 **Rebase note (gofresh e10bad5, 2026-10-07)**: your `feat(runtimeinput)!` keeps `ProducerIngest.Runner`/`.Roots` (producer.go:120/127) while adding the Completion/Outcome premises; stipulator pins v0.109.6 and sees neither until its bump (290r). 337.A edits the same `ProducerIngest` literal in observe.go that PE 6's adapter migration will edit — two fields added now, which the migration keeps; the premises are the migration's.
+
+### Report to the evidence-model owner: gomutant 324 pins gofresh v0.111.0 (the last release before the producer protocol)
+
+Filed 2026-10-08 by the train session (a report, not an approval gate).
+
+**What**: gomutant's bump behind gofresh 265/266/274/279/292/300 (chunk 324) pins gofresh at v0.111.0 (3361645, ObservationRTA @41) — NOT v0.111.1 (e10bad5: `ProducerIngest` loses `IncompleteReason` and gains the completion receipt + outcome support; `Observe` requires analysis-issued support, `ObserveInputs` is the identity-only form) nor v0.112.x (e7df801: `ObserveInputs` returns the reason). gomutant compiles unchanged at v0.111.0; v0.111.1 breaks one site (internal/engine/run.go's ingest literal).
+
+**Why**: the choice between `Observe` with zero support (every record incomplete) and `ObserveInputs` (identity-only, never reusable) IS your plan's chunk 6.2 triage ("Migrate gomutant's baseline and transformed-executable observations without borrowing unsupported evidence from another execution model"; gofresh docs/issues/outcome-mutation-oracle-evidence.md lands there). 324 does not pre-empt it; the migration to v0.111.1+ is 6.2's, on your side.
+
+**Boundary classification**: 324's other change sets (the exemption-clause re-key per gofresh 292, the version grammar, Runner.List / the contained git runner / one roots memo per judged run, the guidance riders, the resident clause pointer, the two project invariants as bound requirements) touch no observation-completion, fingerprint-serialization, attachment/validation, or observed-reuse-admission code. The roots memo (one `runtimeinput.Roots` per judged run on `OracleBounds`) is the 281.D/337.A plumbing shape: WHO spawns and memoizes, not what is classified.
+
+**Asks**: none. Every fleet record re-measures once at this bump (@41); a second re-measure at 6.2 is expected and recorded, not deferred.
