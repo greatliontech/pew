@@ -488,7 +488,18 @@ func isPewRecording(path string) bool {
 // guard keys. It lets callers distinguish pew recordings from arbitrary benchmark
 // files that happen to match the storage path shape.
 func IsRecording(recs []*benchfmt.Result) bool {
-	return IsRecordingShape(recs) && FormatCurrent(recs[0].Config)
+	if !IsRecordingShape(recs) {
+		return false
+	}
+	for _, r := range recs {
+		if !FormatCurrent(r.Config) {
+			return false
+		}
+		if _, err := run.RecordedFingerprint(r.Config); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // FormatCurrent is the format rung's one judgment over a result's
@@ -870,6 +881,9 @@ func rawFormatValid(data []byte) bool {
 			continue
 		}
 		key := string(line[:colon])
+		if run.IsFingerprintProjection(key) {
+			valid = false
+		}
 		if !run.IsRecordingKey(key) {
 			if strings.HasPrefix(key, run.RecordingKeyNamespace) {
 				valid = false

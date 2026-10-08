@@ -31,13 +31,9 @@ type Options struct {
 	Bench     string // -bench pattern (default ".")
 }
 
-// RecordingFormat is the current in-band Pew recording format. Format 3
-// bounds the two blob rows (pew-runtime-inputs, pew-test-variant-ledger)
-// as chunked continuation lines, so every stored line is one benchfmt
-// and plain benchstat read; format 2 added the test-variant compartment
-// pin and its ledger. Earlier-format recordings read stale (format) and
-// regenerate, exactly as spec §5 prescribes for any earlier shape.
-const RecordingFormat = "3"
+// RecordingFormat identifies the native-fingerprint benchmark envelope.
+// Earlier formats regenerate without interpreting or upgrading their evidence.
+const RecordingFormat = "4"
 
 // TestArgs builds the `go test` argument list for benchmarking pkg.
 func TestArgs(pkg string, o Options) []string {
@@ -168,7 +164,7 @@ func Parse(out []byte) ([]*benchfmt.Result, []CorruptLine, []DroppedConfig, erro
 			continue
 		}
 		key := string(line[:colon])
-		if strings.HasPrefix(key, RecordingKeyNamespace) || IsRecordingKey(key) {
+		if strings.HasPrefix(key, RecordingKeyNamespace) || IsRecordingKey(key) || IsFingerprintProjection(key) {
 			return nil, nil, nil, fmt.Errorf("run: benchmark output uses reserved %s configuration", key)
 		}
 	}
@@ -454,19 +450,12 @@ func BuildArgs(importPath, out string) []string {
 	return []string{"test", "-c", "-o", out, importPath}
 }
 
-// ProvenanceConfig returns the in-band provenance lines in spec §5 order: the
-// measured commit and dirty flag from pew's git layer, the gofresh guard
-// values, and the observed run conditions (§9 — provenance only, never a guard,
-// REQ-pew-runconditions-provenance). File:true so benchfmt.Writer emits them as `key: value` lines (it omits
-// File==false config as internal).
-func ProvenanceConfig(commit string, dirty bool, g guard.Guards, conditions Conditions) []benchfmt.Config {
+// ProvenanceConfig emits the envelope discriminator and Pew-owned provenance:
+// measured commit, dirty flag and observed run conditions (never guards).
+func ProvenanceConfig(commit string, dirty bool, conditions Conditions) []benchfmt.Config {
 	return []benchfmt.Config{
 		KeyFormat.Config(RecordingFormat),
 		KeyCommit.Config(commit),
-		KeyToolchain.Config(g.Toolchain),
-		KeyMachine.Config(g.Machine),
-		KeyBuildConfig.Config(g.BuildConfig),
-		KeyRuntimeConfig.Config(g.RuntimeConfig),
 		KeyDirty.Config(strconv.FormatBool(dirty)),
 		KeyRunConditions.Config(conditions.String()),
 	}
@@ -495,110 +484,19 @@ func GuardConfig(g guard.Guards) []benchfmt.Config {
 	return cfgs
 }
 
-// ClosureConfig is the recorded closure-hash line.
-func ClosureConfig(hash string) benchfmt.Config {
-	return KeyClosure.Config(hash)
-}
-
-// GofreshPurityConfig records the attributable purity evidence used by capture.
-func GofreshPurityConfig(attribution string) benchfmt.Config {
-	return KeyPurity.Config(attribution)
-}
-
-// GofreshVouchesConfig records the dynamic-state vouches that discharged
-// culprits for this fingerprint - audit riding the recording, never a
-// validity key.
-func GofreshVouchesConfig(vouches string) benchfmt.Config {
-	return KeyVouches.Config(vouches)
-}
-
-// ClosureStrategyConfig is the recorded closure-derivation line: the
-// identity derivation the closure hashes were folded under, so a reader
-// compares two recordings' closures within one derivation and names a
-// derivation move as such (gofresh's ClosureStrategy).
-func ClosureStrategyConfig(strategy string) benchfmt.Config {
-	return KeyClosureStrategy.Config(strategy)
-}
-
-// DynamicStateStrategyConfig records the shared-dynamic-state
-// derivation the fingerprint was computed under — a VALIDITY key like
-// the closure hash, not audit: gofresh refuses to serve a recording
-// whose strategy is not the current engine's, and a recording
-// predating the key reads as the empty strategy and judges stale
-// ("dynamic-state strategy") — the clean-break shape, no back-fill
-// (the go1.27 toolchain move staled every lineage regardless).
-func DynamicStateStrategyConfig(strategy string) benchfmt.Config {
-	return KeyDynamicState.Config(strategy)
-}
-
-// GofreshEvidenceConfigs composes the attributable gofresh evidence
-// lines: the purity attribution, the load-bearing vouch set, and the
-// attestation-borne discharge sets (single-subject and
-// package-process), each emitted exactly when non-empty — every
-// acceptance visible in the evidence, never silent (gofresh's
-// REQ-vouch-recorded, carried into the store).
-func GofreshEvidenceConfigs(purity, vouches, singleSubject, packageProcess string) []benchfmt.Config {
-	var cfgs []benchfmt.Config
-	if purity != "" {
-		cfgs = append(cfgs, GofreshPurityConfig(purity))
-	}
-	if vouches != "" {
-		cfgs = append(cfgs, GofreshVouchesConfig(vouches))
-	}
-	if singleSubject != "" {
-		cfgs = append(cfgs, KeySingleSubjectDischarges.Config(singleSubject))
-	}
-	if packageProcess != "" {
-		cfgs = append(cfgs, KeyPackageProcessDischarges.Config(packageProcess))
-	}
-	return cfgs
-}
-
-// TestVariantConfig is the recorded test-variant compartment hash line:
-// like the closure hash, derived rather than provenance, and the pin the
-// inert-growth verdict rule refreshes (§7.9).
-func TestVariantConfig(hash string) benchfmt.Config {
-	return KeyTestVariants.Config(hash)
-}
-
 // TestVariantLedgerConfig is the recorded compartment declaration ledger:
 // the inert-growth rule's diff base (§7.9), encoded by EncodeLedger.
 func TestVariantLedgerConfig(encoded string) benchfmt.Config {
 	return KeyTestVariantLedger.Config(encoded)
 }
 
-// FingerprintConfigs is the writer-side enumeration of the recording
-// lines a reader restores into a gofresh.Fingerprint beyond
-// ProvenanceConfig's guard lines — the closure hash and its derivation,
-// the dynamic-state strategy, the test-variant hash and ledger, the
-// runtime-input evidence, and the attributable gofresh evidence. The
-// writer and cmd/pew's reader are a matched pair pinned end-to-end by
-// TestFingerprintConfigRoundTrip: a line dropped on either side breaks
-// the round trip instead of silently narrowing the verdict evidence.
-func FingerprintConfigs(fp gofresh.Fingerprint, encodedLedger, runtimeDigest, runtimeManifest string) []benchfmt.Config {
-	cfgs := []benchfmt.Config{ClosureConfig(fp.MaximalClosure)}
-	// The two derivation rows are omittable (spec §5's class column):
-	// emitted exactly when non-empty, as the evidence rows are — a
-	// capture always answers both, so a run never omits them; the
-	// rule is the row's, not this caller's.
-	if fp.ClosureStrategy != "" {
-		cfgs = append(cfgs, ClosureStrategyConfig(fp.ClosureStrategy))
+// FingerprintConfigs encodes the native fingerprint beside Pew's ledger.
+func FingerprintConfigs(fp gofresh.Fingerprint, encodedLedger string) ([]benchfmt.Config, error) {
+	encoded, err := EncodeFingerprint(fp)
+	if err != nil {
+		return nil, err
 	}
-	if fp.DynamicStateStrategy != "" {
-		cfgs = append(cfgs, DynamicStateStrategyConfig(fp.DynamicStateStrategy))
-	}
-	cfgs = append(cfgs, TestVariantConfig(fp.TestVariantClosure), TestVariantLedgerConfig(encodedLedger))
-	cfgs = append(cfgs, RuntimeConfig(runtimeDigest, runtimeManifest)...)
-	cfgs = append(cfgs, GofreshEvidenceConfigs(fp.PurityAssertion, fp.DynamicStateVouches, fp.SingleSubjectDischarges, fp.PackageProcessDischarges)...)
-	return cfgs
-}
-
-// RuntimeConfig records the runtime-input guard and its manifest (§7.8).
-func RuntimeConfig(digest, manifest string) []benchfmt.Config {
-	return []benchfmt.Config{
-		KeyRuntime.Config(digest),
-		KeyRuntimeInputs.Config(manifest),
-	}
+	return []benchfmt.Config{KeyFingerprint.Config(encoded), TestVariantLedgerConfig(encodedLedger)}, nil
 }
 
 // Demux groups results by top-level benchmark function, appending extra config
@@ -615,8 +513,7 @@ func Demux(results []*benchfmt.Result, extra []benchfmt.Config) map[string][]*be
 }
 
 // LedgerDeclaration is one persisted test-variant declaration entry: pew
-// owns this serialization exactly as it owns the fingerprint config lines
-// (spec §5); gofresh owns the semantics.
+// owns this companion serialization (spec §5); gofresh owns the semantics.
 type LedgerDeclaration struct {
 	File     string `json:"file"`
 	Kind     string `json:"kind"`

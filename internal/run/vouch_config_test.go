@@ -1,16 +1,28 @@
 package run
 
-import "testing"
+import (
+	"github.com/greatliontech/gofresh"
+	"testing"
+)
 
-// The evidence lines gate independently: a benchmark whose only
-// impurity was a vouched culprit still records its acceptance, the
-// attestation-borne discharge sets record exactly when load-bearing,
-// and nothing emits an empty line (spec §5).
+// Independent native evidence fields retain their own presence and projections:
+// recording a vouch does not imply purity or an attestation-borne discharge.
 func TestGofreshEvidenceConfigsGateIndependently(t *testing.T) {
 	keys := func(purity, vouches, single, pkgProc string) []string {
 		var out []string
-		for _, cfg := range GofreshEvidenceConfigs(purity, vouches, single, pkgProc) {
-			out = append(out, cfg.Key+"="+string(cfg.Value))
+		fp := gofresh.Fingerprint{ResultKind: gofresh.Measurement, PurityAssertion: purity, DynamicStateVouches: vouches, SingleSubjectDischarges: single, PackageProcessDischarges: pkgProc}
+		encoded, err := EncodeFingerprint(fp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, err := DecodeFingerprint(encoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, k := range []RecordingKey{KeyPurity, KeyVouches, KeySingleSubjectDischarges, KeyPackageProcessDischarges} {
+			if v := FingerprintValue(decoded, k.Name); v != "" {
+				out = append(out, k.Name+"="+v)
+			}
 		}
 		return out
 	}

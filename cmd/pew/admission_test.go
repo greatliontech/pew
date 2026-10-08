@@ -45,18 +45,13 @@ func TestAdmitRecordingClimbsOneLadderOverTheWholeRecording(t *testing.T) {
 	}
 	// Row 0 passes; row 1 disagrees — a different closure, then a
 	// missing key: the whole recording refuses.
-	divergent := admissionConfig(gofresh.DynamicStateStrategy)
-	for i := range divergent {
-		if divergent[i].Key == "pew-closure" {
-			divergent[i].Value = []byte("other-closure")
-		}
-	}
+	divergent := recordingtest.Config(recordingtest.Set(runpkg.KeyClosure, "other-closure"))
 	if adm := admitRecording([]*benchfmt.Result{admissionRow(current), admissionRow(divergent)}, false); adm.ok || adm.class != "format" {
 		t.Fatalf("rows disagreeing on the fingerprint = %+v, want format", adm)
 	}
 	var shapeless []benchfmt.Config
 	for _, c := range current {
-		if c.Key != "pew-runtime" {
+		if c.Key != "pew-fingerprint" {
 			shapeless = append(shapeless, c)
 		}
 	}
@@ -79,12 +74,7 @@ func TestAdmitRecordingClimbsOneLadderOverTheWholeRecording(t *testing.T) {
 	}
 	// Strategy outranks the engine's closure reason: a recording stale on
 	// both refuses at the strategy rung, before any engine verdict.
-	both := admissionConfig("another-strategy")
-	for i := range both {
-		if both[i].Key == "pew-closure" {
-			both[i].Value = []byte("moved-closure")
-		}
-	}
+	both := recordingtest.Config(recordingtest.Set(runpkg.KeyDynamicState, "another-strategy"), recordingtest.Set(runpkg.KeyClosure, "moved-closure"))
 	if adm := admitRecording([]*benchfmt.Result{admissionRow(both)}, true); adm.ok || adm.class != "dynamic-state strategy" {
 		t.Fatalf("stale on strategy and closure = %+v, want the strategy class", adm)
 	}

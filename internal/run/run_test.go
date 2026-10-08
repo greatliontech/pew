@@ -20,16 +20,10 @@ import (
 // keys, order, and serializability.
 func TestProvenanceConfigKeysAndOrder(t *testing.T) {
 	load := 0.03
-	cfgs := ProvenanceConfig("c1", true, guard.Guards{
-		Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc",
-	}, Conditions{Governor: "performance", Load1: &load})
+	cfgs := ProvenanceConfig("c1", true, Conditions{Governor: "performance", Load1: &load})
 	want := []struct{ key, value string }{
 		{"pew-format", RecordingFormat},
 		{"commit", "c1"},
-		{"toolchain", "tc"},
-		{"machine", "m"},
-		{"buildconfig", "bc"},
-		{"runtimeconfig", "rc"},
 		{"dirty", "true"},
 		{"pew-runconditions", "governor=performance turbo=unknown load1=0.03 throttled=unknown battery=unknown"},
 	}
@@ -65,13 +59,11 @@ func TestBenchName(t *testing.T) {
 // without it benchfmt.Writer silently omits the line and every recording reads
 // stale (the bug this guards).
 func TestRecordedConfigSerializable(t *testing.T) {
-	if !ClosureConfig("x").File {
-		t.Error("pew-closure config must have File:true")
+	cfgs, err := FingerprintConfigs(gofresh.Fingerprint{ResultKind: gofresh.Measurement, PurityAssertion: "source directive", RuntimeDigest: "rt1", RuntimeInputs: "manifest1"}, "ledger")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if cfg := GofreshPurityConfig("source directive"); !cfg.File || cfg.Key != "pew-purity" || string(cfg.Value) != "source directive" {
-		t.Errorf("gofresh purity config = %+v", cfg)
-	}
-	for _, cfg := range RuntimeConfig("rt1", "manifest1") {
+	for _, cfg := range cfgs {
 		if !cfg.File {
 			t.Errorf("%s config must have File:true", cfg.Key)
 		}
@@ -378,11 +370,16 @@ func TestRecordingConfigKeySetIsClosed(t *testing.T) {
 	// The writer's own composition, every row emitted (each evidence
 	// field non-empty) — never a hand list of it.
 	fp := gofresh.Fingerprint{
+		ResultKind: gofresh.Measurement, RuntimeDigest: "rt", RuntimeInputs: "manifest",
 		MaximalClosure: "cl", ClosureStrategy: "cs", DynamicStateStrategy: "ds", TestVariantClosure: "tv",
 		Guards:          guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"},
 		PurityAssertion: "d", DynamicStateVouches: "v", SingleSubjectDischarges: "s", PackageProcessDischarges: "p",
 	}
-	extra := append(ProvenanceConfig("c1", false, fp.Guards, Conditions{}), FingerprintConfigs(fp, "lg", "rt", "manifest")...)
+	fpcfg, err := FingerprintConfigs(fp, "lg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra := append(ProvenanceConfig("c1", false, Conditions{}), fpcfg...)
 	closed := func(key string) bool { return IsToolchainKey(key) || IsRecordingKey(key) }
 	for _, group := range Demux(results, extra) {
 		for _, r := range group {

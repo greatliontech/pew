@@ -33,8 +33,8 @@
     - [x] Migrate gomutant's baseline and transformed-executable observations without borrowing unsupported evidence from another execution model.
   - [x] 6.3 Verify completed failure, abnormal termination, unsupported outcomes and historical-evidence refusal across the adapters; converge review and publish each completed consumer migration.
 - [ ] 7. Establish one canonical persisted fingerprint boundary in pew.
-  - [ ] 7.1 Triage encoding ownership and derive the benchmark-format envelope around gofresh's native fingerprint record, keeping pew-owned facts separate and settling the clean format cutover before writing it.
-  - [ ] 7.2 Replace parallel fingerprint encoding with one admitted payload and derived display/comparison projections; preserve source/guard/purity/observation evidence, closed keys, chunk bounds and regeneration-only handling.
+  - [x] 7.1 Triage encoding ownership and derive the benchmark-format envelope around gofresh's native fingerprint record, keeping pew-owned facts separate and settling the clean format cutover before writing it.
+  - [x] 7.2 Replace parallel fingerprint encoding with one admitted payload and derived display/comparison projections; preserve source/guard/purity/observation evidence, closed keys, chunk bounds and regeneration-only handling.
   - [ ] 7.3 Verify exact round trips, malformed and inconsistent evidence refusal, oversized metadata and interrupted replacement; complete gates, mutations and review, retire the encoding issue, commit and push.
 - [ ] 8. Complete invocation-owned evidence and observed freshness in pew.
   - [ ] 8.1 Triage verdict/vouch duplication, strategy-report evidence and the outstanding movement witnesses against the shared completion and encoding contracts.

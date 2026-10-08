@@ -12,7 +12,6 @@ import (
 	"sync"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/pew/internal/gotool"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
@@ -666,9 +665,8 @@ func inertGrownRecheckOn(ctx context.Context, view *gofresh.View, subject gofres
 	return refreshed, encoded, v, true
 }
 
-// fingerprintFromConfig reads the recorded fingerprint out of a recording's config
-// lines (spec §5: pew owns the serialization, gofresh owns the semantics), plus the
-// recorded test-variant ledger.
+// fingerprintFromConfig reads the native payload after the format rung and
+// returns Pew's companion ledger without changing historical evidence.
 func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, bool) {
 	// The format rung is the store's one judgment; this reader keeps
 	// only the fingerprint's restoration from the rows.
@@ -679,26 +677,8 @@ func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, 
 	for _, c := range cfg {
 		m[c.Key] = string(c.Value)
 	}
-	fp := gofresh.Fingerprint{
-		MaximalClosure:     m[runpkg.KeyClosure.Name],
-		ClosureStrategy:    m[runpkg.KeyClosureStrategy.Name],
-		TestVariantClosure: m[runpkg.KeyTestVariants.Name],
-		Guards: guard.Guards{
-			Toolchain:     m[runpkg.KeyToolchain.Name],
-			BuildConfig:   m[runpkg.KeyBuildConfig.Name],
-			Machine:       m[runpkg.KeyMachine.Name],
-			RuntimeConfig: m[runpkg.KeyRuntimeConfig.Name],
-		},
-		PurityAssertion:          m[runpkg.KeyPurity.Name],
-		DynamicStateVouches:      m[runpkg.KeyVouches.Name],
-		SingleSubjectDischarges:  m[runpkg.KeySingleSubjectDischarges.Name],
-		PackageProcessDischarges: m[runpkg.KeyPackageProcessDischarges.Name],
-		DynamicStateStrategy:     m[runpkg.KeyDynamicState.Name],
-		RuntimeInputs:            m[runpkg.KeyRuntimeInputs.Name],
-		RuntimeDigest:            m[runpkg.KeyRuntime.Name],
-		ResultKind:               gofresh.Measurement,
-	}
-	if err := fp.Validate(); err != nil {
+	fp, err := runpkg.RecordedFingerprint(cfg)
+	if err != nil {
 		return gofresh.Fingerprint{}, "", false
 	}
 	return fp, m[runpkg.KeyTestVariantLedger.Name], true

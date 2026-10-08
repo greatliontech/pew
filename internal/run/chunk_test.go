@@ -27,7 +27,7 @@ func TestChunkedRowsSplitAndJoin(t *testing.T) {
 		}
 		cfgs := []benchfmt.Config{
 			{Key: "commit", Value: []byte("abc"), File: true},
-			{Key: KeyRuntimeInputs.Name, Value: value, File: true},
+			{Key: KeyFingerprint.Name, Value: value, File: true},
 			{Key: KeyClosure.Name, Value: bytes.Repeat([]byte("z"), 2*ChunkBound), File: true},
 		}
 		split := SplitChunked(cfgs)
@@ -37,7 +37,7 @@ func TestChunkedRowsSplitAndJoin(t *testing.T) {
 			if len(c.Value) > ChunkBound && c.Key != KeyClosure.Name {
 				t.Fatalf("n=%d: part %d is %d bytes", n, k, len(c.Value))
 			}
-			if c.Key == KeyRuntimeInputs.Name || strings.HasPrefix(c.Key, KeyRuntimeInputs.Name+".") {
+			if c.Key == KeyFingerprint.Name || strings.HasPrefix(c.Key, KeyFingerprint.Name+".") {
 				parts++
 				if !IsRecordingKey(c.Key) {
 					t.Fatalf("n=%d: continuation %q is not its row", n, c.Key)
@@ -54,7 +54,7 @@ func TestChunkedRowsSplitAndJoin(t *testing.T) {
 		if err != nil {
 			t.Fatalf("n=%d: join: %v", n, err)
 		}
-		if len(joined) != 3 || joined[1].Key != KeyRuntimeInputs.Name || !bytes.Equal(joined[1].Value, value) || !bytes.Equal(joined[2].Value, cfgs[2].Value) {
+		if len(joined) != 3 || joined[1].Key != KeyFingerprint.Name || !bytes.Equal(joined[1].Value, value) || !bytes.Equal(joined[2].Value, cfgs[2].Value) {
 			t.Fatalf("n=%d: join is not the inverse: %d rows, value %d bytes", n, len(joined), len(joined[1].Value))
 		}
 	}
@@ -62,15 +62,15 @@ func TestChunkedRowsSplitAndJoin(t *testing.T) {
 	// spelling is the store's raw format check's: stale (format)).
 	row := func(key, v string) benchfmt.Config { return benchfmt.Config{Key: key, Value: []byte(v), File: true} }
 	for name, cfgs := range map[string][]benchfmt.Config{
-		"gap":    {row(KeyRuntimeInputs.Name, "a"), row(KeyRuntimeInputs.Name+".3", "c")},
-		"orphan": {row(KeyRuntimeInputs.Name+".2", "b")},
+		"gap":    {row(KeyFingerprint.Name, "a"), row(KeyFingerprint.Name+".3", "c")},
+		"orphan": {row(KeyFingerprint.Name+".2", "b")},
 	} {
 		if _, err := JoinChunked(cfgs); err == nil {
 			t.Fatalf("%s: joined without refusing", name)
 		}
 	}
 	// Continuation spellings that are not the grammar are no key.
-	for _, bad := range []string{KeyRuntimeInputs.Name + ".1", KeyRuntimeInputs.Name + ".02", KeyRuntimeInputs.Name + ".x", KeyClosure.Name + ".2", "pew-future.2"} {
+	for _, bad := range []string{KeyFingerprint.Name + ".1", KeyFingerprint.Name + ".02", KeyFingerprint.Name + ".x", KeyClosure.Name + ".2", "pew-future.2"} {
 		if IsRecordingKey(bad) {
 			t.Fatalf("%q admitted as a recording key", bad)
 		}

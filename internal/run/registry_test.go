@@ -134,7 +134,7 @@ func TestRecordingKeysMirrorSpec(t *testing.T) {
 			t.Errorf("MandatoryRecordingKeys lists %s, class %s", name, className(registered(name).Class))
 		}
 	}
-	if !IsRecordingKey(KeyClosure.Name) || IsRecordingKey("pew-unknown") || IsRecordingKey("goos") {
+	if !IsRecordingKey(KeyFingerprint.Name) || IsRecordingKey(KeyClosure.Name) || IsRecordingKey("pew-unknown") || IsRecordingKey("goos") {
 		t.Error("IsRecordingKey is not the registry's membership")
 	}
 	if !IsToolchainKey("cpu") || IsToolchainKey(KeyCommit.Name) {

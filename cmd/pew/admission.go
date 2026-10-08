@@ -39,6 +39,11 @@ type admission struct {
 // (spec §5's strategy row, §7's exclusion); the format rung applies
 // everywhere, since an unreadable recording serves no surface.
 func admitRecording(recs []*benchfmt.Result, workingTree bool) admission {
+	for _, r := range recs {
+		if !store.FormatCurrent(r.Config) {
+			return admission{class: "format"}
+		}
+	}
 	if !store.IsRecordingShape(recs) {
 		return admission{class: "format"}
 	}

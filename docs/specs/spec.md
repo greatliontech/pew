@@ -79,49 +79,87 @@ A stored result is a **canonical Go benchmark-format file** (§1 canonical spec)
 rides in-band as the format's own `key: value` **configuration lines** — the format's sanctioned
 extension point — so files stay self-describing and `benchstat`-readable.
 
-Toolchain already emits `goos`, `goarch`, `pkg`, `cpu`. pew adds, as global config lines —
-uniform per run except `buildconfig`, whose value is per-package wherever the applicable PGO
-profile differs between packages (§9):
+Toolchain already emits `goos`, `goarch`, `pkg`, `cpu`. Pew adds the following
+configuration envelope, uniform across every sample in one recording:
 
-| key                              | meaning | source-of-truth? | class         | audit? | guard? | chunked? | display                    |
-|----------------------------------|---------|------------------|---------------|--------|--------|----------|----------------------------|
-| `pew-format`                     | exact Pew recording format version, currently `3` | yes | discriminator | no     | no     | no       | format                     |
-| `commit`                         | full SHA of HEAD at run time | yes | mandatory     | no     | no     | no       | commit                     |
-| `toolchain`                      | `go version` output (compiler/runtime identity) | yes | mandatory     | no     | yes    | no       | toolchain                  |
-| `machine`                        | machine fingerprint id (§8) | yes | mandatory     | no     | yes    | no       | machine                    |
-| `buildconfig`                    | digest of build tags + relevant GOFLAGS/gcflags + cgo + PGO profile **content** | yes | mandatory     | no     | yes    | no       | buildconfig                |
-| `runtimeconfig`                  | digest of Go runtime-config env (GOGC/GODEBUG/GOMEMLIMIT/GOMAXPROCS), §7 | yes | mandatory     | no     | yes    | no       | runtimeconfig              |
-| `dirty`                          | `true` if the working tree had uncommitted changes at run, the recording store (bench-dir) excluded — pew's own outputs are never part of the measured subject | yes | mandatory     | no     | no     | no       | dirty                      |
-| `pew-runconditions`              | observed transient run conditions at run time (§9) | yes | mandatory     | yes    | no     | no       | run conditions             |
-| `pew-runtime`                    | digest of runtime-input evidence (§7.8) | derived | mandatory     | no     | no     | no       | runtime                    |
-| `pew-runtime-inputs`             | encoded runtime-input manifest or incomplete disposition (§7.8) | yes | mandatory     | no     | no     | yes      | runtime inputs             |
-| `pew-purity`                     | attributable Gofresh purity evidence used for this fingerprint | yes | omittable     | no     | no     | no       | purity                     |
-| `pew-vouches`                    | dynamic-state vouches that discharged culprits for this fingerprint (gofresh's sorted comma-joined identities) — audit riding the recording, never a validity key: verdicts derive from the current engine's own set, the line is omitted when no vouch was load-bearing, and two sides differing in it compare with a note, never fragmenting (the run-conditions precedent) | derived | omittable     | yes    | no     | no       | dynamic-state vouches      |
-| `pew-dynamic-state`              | the gofresh shared-dynamic-state derivation the fingerprint was computed under — a VALIDITY key like `pew-closure`: the engine refuses to serve a recording computed under another strategy, and a recording predating the key reads as the empty strategy and judges stale (`dynamic-state strategy`) — the clean-break shape, no back-fill. The comparison arm cuts per side: `stat` skips the **working-tree** side when its recorded strategy is not the current engine's (`stale (dynamic-state strategy)`, a warning and a distinct empty-comparison cause, §10) — that side is re-recordable and the one whose freshness verdict is computed, so `pew run` is the reachable remedy; a **ref-resolved** side (a pinned tag, auto's `HEAD`, either A/B ref) enters no verdict and cannot be re-run into, so it always compares and a strategy difference surfaces as a note (§10.1), never a refusal — measured numbers are strategy-independent | derived | omittable     | yes    | no     | no       | dynamic-state strategies   |
-| `pew-single-subject-discharges`  | package-level variables whose shared-dynamic-state discharge rested on the single-subject-process attestation for this fingerprint (gofresh's sorted comma-joined identities) — audit exactly as `pew-vouches`, omitted when empty | derived | omittable     | yes    | no     | no       | single-subject discharges  |
-| `pew-package-process-discharges` | package-level variables discharged by the package-process attestation's binary-scoped reachability judgment — audit exactly as `pew-vouches`, omitted when empty | derived | omittable     | yes    | no     | no       | package-process discharges |
-| `pew-closure`                    | the closure hash of the benchmark's package under the recorded derivation — the validity key the engine compares hash for hash (§7; rides in-band per the paragraph below) | derived | mandatory     | no     | no     | no       | closure                    |
-| `pew-closure-strategy`           | the gofresh closure identity derivation `pew-closure` and `pew-test-variants` were folded under (gofresh's `ClosureStrategy`) — derived and AUDIT, never a validity key: the engine judges the hash values themselves, so a derivation move re-measures a recording exactly when it moved that recording's hash, and a hash the move left equal is genuine evidence (both derivations agree on that source); `status --explain` names the move beside the hash rows on a non-valid verdict, and `stat`/`ab` note two sides recorded under different derivations. Omitted by recordings that predate the line, and kept absent by an in-place refresh, until the recording is re-measured | derived | omittable     | yes    | no     | no       | closure derivations        |
-| `pew-test-variants`              | test-variant compartment hash of the benchmark's package (§7.9) | derived | mandatory     | no     | no     | no       | test-variants              |
-| `pew-test-variant-ledger`        | encoded compartment declaration ledger — §7.9's diff base | derived | mandatory     | no     | no     | yes      | test-variant ledger        |
+| key | meaning | source-of-truth? | class | audit? | guard? | chunked? | display |
+|-----|---------|------------------|-------|--------|--------|----------|---------|
+| `pew-format` | exact recording format version, `4` | yes | discriminator | no | no | no | format |
+| `commit` | full measured HEAD SHA | yes | mandatory | no | no | no | commit |
+| `dirty` | whether measured sources differed from the commit | yes | mandatory | no | no | no | dirty |
+| `pew-runconditions` | observed transient conditions (§9) | yes | mandatory | yes | no | no | run conditions |
+| `pew-fingerprint` | Gofresh native JSON fingerprint, wrapped in unpadded URL-safe base64 | yes | mandatory | no | no | yes | fingerprint |
+| `pew-test-variant-ledger` | encoded compartment declaration ledger (§7.9) | derived | mandatory | no | no | yes | test-variant ledger |
 
-`pew-format` occurs exactly once as the byte-exact LF-terminated line `pew-format: 3`. A recording
+The fingerprint payload is the sole persisted fingerprint representation. Gofresh's
+native JSON encoder and decoder own its complete field set and record grammar
+([native fingerprint contract](https://github.com/greatliontech/gofresh/blob/main/docs/specs/overview.md)),
+including result kind, observation assertion and observation proof. Pew stores a
+measurement fingerprint with nonempty closure and test-variant hashes, all four
+environment guards, runtime manifest and runtime digest. Unknown, duplicate, null,
+noncanonical or otherwise native-decoder-refused JSON is stale format. Base64 must
+be canonical unpadded URL-safe encoding. Semantic proof integrity remains the shared
+freshness check's concern: structurally readable but inconsistent proof evidence
+does not become a new Pew format refusal or confer observation-based reuse.
+
+Commit, dirty, conditions and the test-variant ledger are Pew-owned facts beside
+that payload. No parallel fingerprint config lines are persisted or admitted in
+format 4. Comparison and explanation values below are projections from the admitted
+native fingerprint, never additional stored evidence. Absence remains absence;
+neither decoding nor refresh supplies historical observation or strategy evidence.
+An inert-growth refresh changes only the native fingerprint's test-variant hash
+and the companion ledger after §7.9's recheck, preserving every other field.
+
+The following vocabulary describes **non-persisted projections**. Legacy config
+spellings are display identifiers only; references elsewhere to fingerprint lines
+or keys denote these native payload fields, not parallel config lines. The four
+guards are judged in listed order; differing audit projections produce notes:
+
+| projection | meaning | audit? | guard? | display |
+|------------|---------|--------|--------|---------|
+| `toolchain` | compiler/runtime identity | no | yes | toolchain |
+| `machine` | stable machine fingerprint (§8) | no | yes | machine |
+| `buildconfig` | build-input digest, including PGO content (§7) | no | yes | buildconfig |
+| `runtimeconfig` | Go runtime-configuration digest (§7) | no | yes | runtimeconfig |
+| `pew-runtime` | runtime-input digest (§7.8) | no | no | runtime |
+| `pew-runtime-inputs` | runtime-input manifest and support disposition (§7.8) | no | no | runtime inputs |
+| `pew-purity` | attributable purity evidence | no | no | purity |
+| `pew-vouches` | load-bearing dynamic-state vouches | yes | no | dynamic-state vouches |
+| `pew-dynamic-state` | shared-dynamic-state derivation | yes | no | dynamic-state strategies |
+| `pew-single-subject-discharges` | single-subject-process discharges | yes | no | single-subject discharges |
+| `pew-package-process-discharges` | package-process discharges | yes | no | package-process discharges |
+| `pew-closure` | maximal closure hash | no | no | closure |
+| `pew-closure-strategy` | closure identity derivation | yes | no | closure derivations |
+| `pew-test-variants` | test-variant compartment hash (§7.9) | no | no | test-variants |
+
+The `guard?` column denotes comparison guards, not the whole freshness predicate.
+Dynamic-state strategy is a freshness key: `stat` skips a working-tree side whose
+native strategy differs from the current engine's, including absence, as
+`stale (dynamic-state strategy)`. Ref-resolved sides enter no freshness verdict
+and cannot be re-recorded into: they compare under any strategy, with a difference
+noted. Closure derivation is audit only: the shared engine compares hash values;
+`status --explain` names a derivation move beside hash rows on a non-valid verdict,
+and `stat`/`ab` note differing derivations. Refresh never fills an absent strategy.
+Vouches and discharge sets are the native sorted identities of load-bearing
+acceptances, absent when empty; they are audit, never comparison guards. Freshness
+judgments derive from the current engine's own vouch set. Runtime manifests are
+chunked only as part of the native fingerprint payload.
+
+`pew-format` occurs exactly once as the byte-exact LF-terminated line `pew-format: 4`. A recording
 with no discriminator, a duplicate, alternate whitespace or line endings, or another value —
-format-1 recordings included — is
+formats 1, 2 and 3 included — is
 `stale (format)` and is regenerated, never interpreted as an earlier shape. Benchmark
 output that attempts to define `pew-*` or any other Pew-owned provenance or guard key is
-refused before storage. A recording of the current format missing any field the table's `class`
-column marks mandatory is likewise `stale (format)` before guard or purity interpretation; an
-omittable line's absence is an encoding, never a shape fault. Duplicate rejection applies to every
-recording key — every row of the table — not only `pew-format`: a recording that repeats any of them
-is `stale (format)`. The `class` column is the one statement of the format's mandatory set. The
-`audit?` column marks the rows two sides may differ in with a comparison note, never a grouping key
-(§10.1); the `guard?` column marks the four comparison guards two sides must agree on (§10.1's guard
-set), judged in table order — the first guard that is mixed within a side, missing, or differing is
-the one a comparison note or an A/B refusal names; `display` is the name every face renders the row
-by — a comparison note, an explanation row. The table's order is the display and precedence order;
-a recording file's line order is the writer's and unconstrained by the table — every reader keys a
-line by its name. The rows the table's `chunked?` column marks — the values that grow with the package — are stored as
+refused before storage, including the former fingerprint config names. A recording
+missing a mandatory envelope key or native field is `stale (format)` before any
+guard or purity judgment; an optional native field's absence remains absence.
+Duplicate rejection applies to every envelope key, not only `pew-format`.
+The envelope table's `class` column states its mandatory key set. Projection
+`audit?` and `guard?` columns govern comparison notes and the four comparison
+guards (§10.1); the first guard mixed, missing or differing is the one a note or
+A/B refusal names. Projection order is display and precedence order. A file's
+line order is unconstrained; readers key lines by name. The two envelope rows
+marked `chunked?` — fingerprint payload and ledger — are stored as
 continuation lines of at most 32 KiB each: the row's own line carries the first part and `<key>.2`, `<key>.3`, … the rest in order, a
 continuation spelling being that row on the wire (closed-set and duplicate rules included: a repeated
 continuation is a repeated recording key, `stale (format)`); the reader rejoins them before any
@@ -136,7 +174,7 @@ line, is inventoried by `status`, `run`, and `stat` as `stale (format)`: its met
 parse refusal does not prevent `pew run` from measuring a replacement. The previous file remains
 untouched until the fresh recording commits. Read failures and corrupt unmarked foreign files
 are not classified as stale format by this recovery rule; their read errors remain errors.
-The explicit `--all` measurement path continues to bypass recording admission. Historical format-2
+The explicit `--all` measurement path continues to bypass recording admission. Historical earlier-format
 measurements remain excluded from comparisons; no legacy-format interpretation is performed.
 The rules only the raw bytes can decide — every recording
 key's duplicate rule, the discriminator's whitespace and line-ending rules, and the
@@ -144,7 +182,7 @@ namespace rule below — are decided there (`benchfmt` keeps one entry per parse
 repeat is visible nowhere else) and delivered to every parsed reader as one reader-side
 annotation naming the file invalid; that annotation is authoritative in any position over
 an entry the file spells itself, and one parsed judgment reads it beside the version. A
-`pew-`-prefixed key the table does not name is `stale (format)` on read — the namespace is
+`pew-`-prefixed key the envelope table does not name is `stale (format)` on read — the namespace is
 the tool's own, so a foreign spelling in it is a malformed recording, the reader's own
 annotation key among them — and, like every foreign key, warned by name at the read.
 Format governs interpretation rather than measurement identity and is projected from comparisons.
@@ -169,25 +207,27 @@ refuse the recording. Second, read paths detect what write-side enforcement pred
 recording carrying a file-configuration key outside the closed set (written before the
 enforcement, or hand-edited) is surfaced with a warning naming the key at every verdict read —
 it fragments comparison grouping silently, and regeneration is the remediation. `pew run` stores recordings whose
-configuration keys are drawn only from the closed set: the toolchain's four and every row of the §5
-table. This is a producer contract — read paths do not police historical recordings for foreign keys outside the `pew-` namespace.
-`pew-purity` is benchmark-specific despite the surrounding uniform provenance keys and is omitted
-when capture used no purity assertion; omission is the canonical no-attribution encoding.
+configuration keys are drawn only from the closed set: the toolchain's four and
+the envelope table. Former fingerprint keys, including the unprefixed guard
+names, are refused in current-format files rather than treated as foreign data.
+Other foreign keys outside the `pew-` namespace retain the warning-only read rule.
+The native purity field is benchmark-specific and absent when capture used no
+purity assertion; omission is the canonical no-attribution encoding.
 
-**The closure hash rides in-band** as a namespaced `pew-closure` config line (no sidecar index), with
-the derivation it was folded under beside it as `pew-closure-strategy` — audit, never validity: the
+**The closure hash rides in-band** inside `pew-fingerprint` (no sidecar index), with
+its native closure derivation beside it — audit, never validity: the
 engine compares hash values, so a derivation move re-measures exactly the recordings whose hashes it
-moved, and where a hash survives the move the two derivations agree on that source; the strategy line
-is what makes a move legible when it does not. The hash
+moved, and where a hash survives the move the two derivations agree on that source;
+the strategy projection makes a move legible when it does not. The hash
 is *derived*, not provenance (recomputable from commit + toolchain + build-config), so it is never
 the source of truth and recomputing it never changes a verdict (REQ-pew-derived-state). In-band is sound because
 overwrite makes each file single-block, so the key cannot fragment a benchstat projection; pew
 additionally strips `pew-*` keys from its own comparison projections (§10). The `.txt` is therefore
 fully self-describing — everything needed to evaluate its own validity lives in one file.
 
-Runtime-input evidence uses the same in-band rule: `pew-runtime-inputs` is the recorded manifest and
-`pew-runtime` is its digest. Format-1 recordings carry a canonical incomplete disposition rather than
-observed identities (§7.8).
+Runtime-input evidence lives in the native payload: `runtimeInputs` is the recorded
+manifest and `runtimeDigest` its digest. Earlier formats are never interpreted or
+upgraded; a fresh measurement supplies replacement evidence (§7.8).
 
 A `dirty` run is recorded but flagged: its `commit` does not faithfully describe its source, so
 its closure is computed from the *working tree*, and it is never usable as a pinned baseline.
@@ -275,7 +315,7 @@ avoid (see REQ-pew-sha-independence).
   filename discriminator (`BenchmarkFoo.cgo.txt`); without it the newer variant overwrites the older.
   The toolchain/machine/buildconfig guards (§7, §10) still prevent any silent *cross-variant comparison* either way — so omitting a
   label is a retention choice, never a correctness one.
-- **No sidecar index.** The only derived datum — the closure hash — rides in-band as `pew-closure`
+- **No sidecar index.** The native fingerprint and companion ledger ride in-band
   (§5), so each benchmark's `.txt` is self-describing and there is no second artifact to keep in
   sync. The recorded side of the validity check is thus in-band; `pew status` recomputes only the
   HEAD closure. If repeated `status` on an unchanged tree ever proves slow, a *gitignored* memo can
@@ -719,7 +759,7 @@ the codegen feature level (GOAMD64/GOARM/…) are build-determined, so they live
 **buildconfig** digest (§5, §7 guard 5) — code-determining inputs must hold even for a consumer
 that checks only code guards.
 
-The hash of these is the `machine` config line; a mismatch makes every result from the old
+The hash of these is the native fingerprint's `machine` guard; a mismatch makes every result from the old
 fingerprint stale. The fingerprint reflects **host** topology (cores/RAM as the OS sees the
 hardware), not cgroup/container-effective limits — consistent with the single-machine scope (§3).
 An OS without a stable implementation of these identity facts fails provenance capture rather than
@@ -1005,8 +1045,9 @@ for a zero baseline, rather than fail serialization or silently omit its row.
   discrimination): a foreign benchmark file at a layout path never inventories a comparison key on
   its own; one sitting at a key another side's genuine recording inventoried is excluded from
   comparison by the per-side check and surfaces in its warning.
-- Comparison projects *away* pew's own provenance keys (`commit`, `pew-closure`, …) so differing
-  metadata doesn't fragment the benchstat grouping, and separately requires non-empty equal
+- Comparison projects *away* Pew's envelope keys (`commit`, `pew-fingerprint`, …) so differing
+  metadata doesn't fragment the benchstat grouping, and derives guard and audit
+  values solely from each admitted native payload. It separately requires non-empty equal
   `machine`, `toolchain`, `buildconfig`, and `runtimeconfig` — never comparing across machine
   fingerprints, toolchains, build variants, or runtime-configuration variants silently (§6, §8).
 - **Run conditions are surfaced, not gated.** When the two compared sides' recorded
@@ -1215,7 +1256,7 @@ knob, and a derived-default knob.
 
 **REQ-pew-artifact-format** (behavior): **Artifact format compatibility.** Every stored `.txt` MUST be a well-formed Go benchmark-format file parseable by `benchfmt` and plain `benchstat`; a recording without the current format discriminator is `stale (format)` and regenerated, never interpreted as an earlier shape. *Violation:* a written file that `benchfmt` rejects → ecosystem lock-in, G5 broken. *Kind:* clause-explicit (§5, G5). *Anchor tests:* a runtime-input manifest and a ledger past `benchfmt`'s 64 KiB scanner bound written through the store ⇒ every stored line under the bound, a bare `benchfmt` reader parses the file, the store's reader returns the values whole; a torn chunk set ⇒ corrupt, never a shorter value; a format-2 recording ⇒ not a current recording; a non-chunked row reaching the bound ⇒ the write refuses naming the row, one byte under it writes and reads back; an earlier-format recording past the bound ⇒ refused on read naming the regenerating operation, a foreign file ⇒ the plain read error.
 
-**REQ-pew-provenance-completeness** (behavior): **Provenance completeness.** Every produced result MUST carry the current format and the provenance and manifests required to evaluate all six guards: `pew run` always writes the commit, the runtime-input manifest (completed under the §7.8 conjunction, or the canonical incomplete disposition with its reason — present for every run either way), the four environment guard lines, and the run-conditions line (§9, explicit `unknown` fields when unobserved). *Violation:* a result missing `commit` or a guard value → the guard is unevaluable → validity undecidable → must conservatively re-run, defeating G1/G2. A missing or unknown format is rejected without interpretation. A recorded `pew-runtime` digest without its manifest is corruption and stale; a recording with no runtime manifest at all violates the producer contract — absence would assert "no runtime inputs" and serve. *Kind:* entailed.
+**REQ-pew-provenance-completeness** (behavior): **Provenance completeness.** Every produced result MUST carry the current format and all evidence required to evaluate the six guards: the complete Gofresh native fingerprint encoded by its own codec, including observation assertion and proof when present, alongside Pew's commit, dirty flag, run conditions and test-variant ledger (§5). The native payload includes all four environment guards and the runtime-input manifest and digest (completed under the §7.8 conjunction, identity-only, or incomplete with its honest disposition). Decoding preserves every native field exactly without inventing historical evidence. Run conditions carry explicit `unknown` fields when unobserved (§9). *Violation:* a missing guard or dropped proof changes the recorded evidence and makes the reuse judgment unfaithful to capture. A missing or unknown format is rejected without interpretation; absent mandatory native evidence is stale format. *Kind:* entailed.
 
 **REQ-pew-derived-state** (behavior): **Derived state is never authoritative.** Persisted closure hashes MUST be a memoization keyed *only* by immutable inputs `(commit, toolchain, buildconfig)`; they are never the source of truth for provenance and recomputing/discarding them never changes a validity verdict. *Violation:* a validity check trusts a cached hash that disagrees with recomputation from source → REQ-pew-closure-soundness bypassed via a stale cache. *Kind:* entailed.
 
@@ -1231,7 +1272,7 @@ knob, and a derived-default knob.
 
 **REQ-pew-sample-completeness** (behavior): **Recording sample completeness.** A recording produced by `pew run` MUST carry exactly the demanded `--count` samples for every result row; a benchmark whose stream output shows corruption evidence (unparseable lines naming it, orphaned measurement fields, sample-count deviation) is refused rather than recorded (§9 sample floor); corruption or repository-state motion in one benchmark's arm never discards another benchmark's completed measurements — single-subject execution (§9) makes every stream and state judgment arm-local, so neither output corruption nor non-source residue refuses a whole package; only source-input or HEAD drift (the premise every fingerprint shares) aborts a package write — and no corrupt line's content is ever recorded, as measurement data or as salvage artifact. *Violation:* a dependency's logger splices one line into one result row and either (a) the whole package's completed run — ~30 minutes of untouched benchmarks — is discarded, or (b) the affected benchmark records silently with fewer samples than demanded, and `pew stat` later compares a degenerate sample set as statistics-grade while every guard holds. *Kind:* entailed (§9 statistics-grade defaults + §5 provenance honesty). *Anchor tests:* a stream captured from a real consensus-node-logging run ⇒ the affected benchmark refused with the spliced line reported verbatim, the clean benchmark recorded with its full sample set; an orphaned-fields line with no attributable benchmark ⇒ the producing arm's own benchmark refused, its sibling recorded.
 
-**REQ-pew-key-set** (behavior): **The recording key set is closed.** Every recording `pew run` stores MUST carry file-configuration keys drawn only from the closed set of §5 — every row of its key table (`pew-closure` among them) and the toolchain's four stream keys; every other stream-derived configuration key is dropped before storage with a warning. The toolchain keys' values are verified against out-of-band truth where one exists (`goos`/`goarch`/`pkg`) and against in-stream consistency for `cpu`, refusing the recording on disagreement; read paths warn on stored keys outside the closed set (§5's value arms). *Violation:* a benchmark dependency logs one `key: value`-shaped line to stdout; the key is recorded as durable configuration in this run but is absent from the baseline; §10.1's config grouping fragments and the benchmark drops out of comparison one-sided — a regression hides behind a log line while every other invariant holds. *Kind:* entailed (§5 self-describing artifacts + §10.1 grouping). *Anchor tests:* a stream carrying `raft: appending entries` ⇒ the key is stripped from every result and reported once; the composed run-path config serializes only closed-set keys.
+**REQ-pew-key-set** (behavior): **The recording key set is closed.** Every recording `pew run` stores MUST carry file-configuration keys drawn only from §5's envelope table and the toolchain's four stream keys. The native fingerprint is the sole persisted fingerprint representation; projection names never become parallel recording keys. Stream-defined reserved keys refuse; other stream-derived configuration keys are dropped with a warning. The toolchain keys' values are verified against out-of-band truth where one exists (`goos`/`goarch`/`pkg`) and against in-stream consistency for `cpu`, refusing the recording on disagreement. Read paths warn on stored keys outside the closed set; unknown namespaced keys and former fingerprint config keys also fail format admission (§5). *Violation:* a dependency's transient configuration fragments comparison grouping, or a parallel fingerprint field disagrees with the native evidence used for reuse. *Kind:* entailed (§5 self-describing artifacts + §10.1 grouping). *Anchor tests:* `raft: appending entries` is stripped and reported once; composed output carries only envelope/toolchain keys; a parallel fingerprint config key refuses admission.
 
 **REQ-pew-preparation** (behavior): **Every refusal a verb's inputs decide fires before its first measurement.** A verb MUST prepare every listed package before any package spends a build or a measurement: `run` derives, for each package after the listing, its benchmark declarations, its scratch directives, and the ones the pattern selects, and — for each package the pattern selects a benchmark in — its recording store and each recording's destination (a label the store cannot name, a malformed package or benchmark path, two recordings sharing a destination, a destination that is not a regular file), the effective GOFLAGS and PGO input, and the module's toolchain provenance — and refuses on any of them there; the two refusals its typed view decides (a measured source under the recording store, a destination overlapping a source input) fire the moment the view exists, before the warm-up build; the flag values the verb alone decides (`--label` on every verb that takes one, `--bench` on `run` and `ab`, `ab`'s `--count`) refuse at command entry. `ab` prepares every package — the module's containment in the repository, the B side's existence, the pattern selecting a benchmark on both sides, both builds (their standing binaries kept beside the repository, as the worktree is, never under a temp root that may be memory-backed), both guard captures — and refuses a guard disagreeing on any comparison key naming the guard and both values, before the first iteration of any package. *Violation:* `pew run --label 'a b'` measures every arm of the first package (`count` × `benchtime` per benchmark) and refuses at the write gate with the invalid label — every measured sample discarded; every other invariant holds. *Kind:* entailed (§9 "own the run" spends measurement only on recordings the run can keep; §12's ab refusal wording). *Anchor tests:* a run with an invalid label refuses before its first `go test`; a run whose second package's recording destination is occupied reports it before the first package measures; an ab whose B side pins a different toolchain, or different PGO bytes, refuses with the mismatch named and executes no iteration.
 

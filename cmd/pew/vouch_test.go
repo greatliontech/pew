@@ -13,9 +13,9 @@ import (
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
+	"github.com/greatliontech/pew/internal/recordingtest"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/spf13/cobra"
-	"golang.org/x/perf/benchfmt"
 )
 
 // The --vouch flags resolve through the engine's own grammar and set
@@ -38,19 +38,9 @@ func TestResolveVouchesTakesTheEnginesSet(t *testing.T) {
 	}
 }
 
-// The recorded pew-vouches line crosses both directions: the composer
-// emits it and the fingerprint parser restores it - audit riding the
-// recording (spec §5).
+// Vouches cross the native payload boundary as audit evidence (spec §5).
 func TestVouchesConfigRoundTrip(t *testing.T) {
-	cfg := []benchfmt.Config{
-		{Key: "pew-format", Value: []byte(runpkg.RecordingFormat), File: true},
-		{Key: "toolchain", Value: []byte("go"), File: true},
-		{Key: "machine", Value: []byte("m"), File: true},
-		{Key: "buildconfig", Value: []byte("b"), File: true},
-		{Key: "runtimeconfig", Value: []byte("r"), File: true},
-		{Key: "pew-closure", Value: []byte("h"), File: true},
-		runpkg.GofreshVouchesConfig("a.example/dep.Var"),
-	}
+	cfg := recordingtest.Config(recordingtest.Set(runpkg.KeyVouches, "a.example/dep.Var"))
 	fp, _, ok := fingerprintFromConfig(cfg)
 	if !ok || fp.DynamicStateVouches != "a.example/dep.Var" {
 		t.Fatalf("round trip = %+v ok=%v", fp, ok)

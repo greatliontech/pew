@@ -9,11 +9,7 @@ import (
 	runpkg "github.com/greatliontech/pew/internal/run"
 )
 
-// The writer-side enumeration (run.FingerprintConfigs + ProvenanceConfig)
-// and the reader-side map (fingerprintFromConfig) are a matched pair:
-// every recorded fingerprint field must survive the write→read round
-// trip, so a key dropped on either side fails here instead of silently
-// narrowing the verdict evidence.
+// Every native fingerprint field survives the envelope without reconstruction.
 func TestFingerprintConfigRoundTrip(t *testing.T) {
 	want := gofresh.Fingerprint{
 		MaximalClosure:     "closure-hash",
@@ -33,28 +29,27 @@ func TestFingerprintConfigRoundTrip(t *testing.T) {
 		RuntimeInputs:            "manifest-encoded",
 		RuntimeDigest:            "manifest-digest",
 		ResultKind:               gofresh.Measurement,
+		ObservationAssertion:     "observed-by-producer",
+		ObservationProof:         gofresh.ObservationProof{Strategy: "proof-strategy", Subject: gofresh.Subject{Package: "example/p", Symbol: "BenchmarkX"}, Observable: true, Evidence: "integrity-evidence"},
 	}
 
-	// Fields the recording deliberately does not carry: observation
-	// evidence is recomputed at judge time, never served from the
-	// record. Everything else must be non-zero above — a new
-	// gofresh.Fingerprint field lands here unset, fails this walk, and
-	// forces the record-or-exempt decision instead of a silent gap.
-	exempt := map[string]bool{"ObservationAssertion": true, "ObservationProof": true}
+	// A new native field must join this full-field seed, including evidence
+	// whose semantic integrity is judged later by the shared checker.
 	v := reflect.ValueOf(want)
 	for i := range v.NumField() {
 		name := v.Type().Field(i).Name
-		if exempt[name] {
-			continue
-		}
 		if v.Field(i).IsZero() {
-			t.Errorf("fingerprint field %s is zero in the round-trip seed: record it (writer+reader+this test) or exempt it here with the reason", name)
+			t.Errorf("fingerprint field %s is zero in the round-trip seed", name)
 		}
 	}
 
+	fpcfg, err := runpkg.FingerprintConfigs(want, "ledger-encoded")
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg := append(
-		runpkg.ProvenanceConfig("c1", false, want.Guards, runpkg.Conditions{}),
-		runpkg.FingerprintConfigs(want, "ledger-encoded", want.RuntimeDigest, want.RuntimeInputs)...,
+		runpkg.ProvenanceConfig("c1", false, runpkg.Conditions{}),
+		fpcfg...,
 	)
 	got, ledger, ok := fingerprintFromConfig(cfg)
 	if !ok {

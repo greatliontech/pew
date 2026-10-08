@@ -6,8 +6,7 @@ close-out convention.
 
 | slug | summary | Lands |
 |------|---------|-------|
-| [fingerprint-encoding-ownership](fingerprint-encoding-ownership.md) | pew's parallel fingerprint encoding conflicts with the shared native-record contract; reconcile the artifact boundary before adding observation evidence | performance-evidence plan chunk 7 |
-| [train-riders-for-the-performance-evidence-plan](train-riders-for-the-performance-evidence-plan.md) | remaining cross-tool riders for freshness, comparisons, profiles and A/B; residual dependency bump tracked by the train | performance-evidence plan chunks 7–12 as named inside |
+| [train-riders-for-the-performance-evidence-plan](train-riders-for-the-performance-evidence-plan.md) | remaining cross-tool riders for freshness, comparisons, profiles and A/B; residual dependency bump tracked by the train | performance-evidence plan chunks 8–12 as named inside |
 | [ab-control-process-cancellation](ab-control-process-cancellation.md) | native Git preparation/cleanup can ignore A/B cancellation and cleanup cannot report its failure | performance-evidence plan chunk 11 |
 | [mutation-oracle-observation](mutation-oracle-observation.md) | changed-code measurement banks kills but cwd-sensitive integration observations are non-reusable and final evidence work reaches its deadline | performance-evidence plan chunk 8 |
 | [guidance-purpose-column-second-enumeration](guidance-purpose-column-second-enumeration.md) | §12's opt-in purpose column restates the document's knob prose in its own words, pinned to nothing | performance-evidence plan chunk 12.2 (audit 335) |

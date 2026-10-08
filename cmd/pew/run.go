@@ -713,10 +713,15 @@ func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitSta
 		}
 	}
 	recs := m.recs
-	for _, cfg := range run.ProvenanceConfig(commit, dirty, fp.Guards, m.conditions) {
+	for _, cfg := range run.ProvenanceConfig(commit, dirty, m.conditions) {
 		recs = withConfig(recs, cfg)
 	}
-	for _, cfg := range run.FingerprintConfigs(fp, encodedLedger, m.digest, m.manifest) {
+	fp.RuntimeDigest, fp.RuntimeInputs = m.digest, m.manifest
+	fingerprintConfigs, err := run.FingerprintConfigs(fp, encodedLedger)
+	if err != nil {
+		return err
+	}
+	for _, cfg := range fingerprintConfigs {
 		recs = withConfig(recs, cfg)
 	}
 	// A new GOMAXPROCS variant lineage records loudly, not silently:
@@ -1170,11 +1175,21 @@ func refreshRecording(st *store.Store, pkgRel, bench, label, pin, ledger string)
 	if err != nil {
 		return err
 	}
+	admitted := admitRecording(recs, false)
+	if !admitted.ok {
+		return fmt.Errorf("refresh: recording is stale (%s)", admitted.class)
+	}
+	fp := admitted.fp
+	fp.TestVariantClosure = pin
+	encoded, err := run.EncodeFingerprint(fp)
+	if err != nil {
+		return err
+	}
 	for _, r := range recs {
 		for i := range r.Config {
 			switch r.Config[i].Key {
-			case run.KeyTestVariants.Name:
-				r.Config[i].Value = []byte(pin)
+			case run.KeyFingerprint.Name:
+				r.Config[i].Value = []byte(encoded)
 			case run.KeyTestVariantLedger.Name:
 				r.Config[i].Value = []byte(ledger)
 			}

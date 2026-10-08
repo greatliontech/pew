@@ -188,7 +188,7 @@ func TestRunGCRemovesOldShapeOrphanInStoreOnlyPackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(orphan, bytes.ReplaceAll(data, []byte("pew-runtime-inputs: manifest1\n"), nil), 0o644); err != nil {
+	if err := os.WriteFile(orphan, bytes.ReplaceAll(data, []byte("pew-format: "+runpkg.RecordingFormat+"\n"), []byte("pew-format: 3\n")), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)

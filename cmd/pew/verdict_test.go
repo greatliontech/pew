@@ -11,23 +11,9 @@ import (
 	"golang.org/x/perf/benchfmt"
 )
 
-// TestFingerprintFromConfig pins the config-line ↔ fingerprint mapping (spec §5:
-// pew owns the serialization; gofresh owns the semantics).
+// TestFingerprintFromConfig pins native fingerprint admission through the envelope.
 func TestFingerprintFromConfig(t *testing.T) {
-	cfg := []benchfmt.Config{
-		{Key: "pew-format", Value: []byte(runpkg.RecordingFormat)},
-		{Key: "commit", Value: []byte("c1")},
-		{Key: "toolchain", Value: []byte("tc")},
-		{Key: "machine", Value: []byte("m")},
-		{Key: "buildconfig", Value: []byte("bc")},
-		{Key: "runtimeconfig", Value: []byte("rc")},
-		{Key: "pew-closure", Value: []byte("cl")},
-		{Key: "pew-test-variants", Value: []byte("tv")},
-		{Key: "pew-test-variant-ledger", Value: []byte("ledger-encoded")},
-		{Key: "pew-runtime", Value: []byte("rd")},
-		{Key: "pew-runtime-inputs", Value: []byte("manifest")},
-		{Key: "pew-purity", Value: []byte("source directive")},
-	}
+	cfg := recordingtest.Config(recordingtest.Set(runpkg.KeyToolchain, "tc"), recordingtest.Set(runpkg.KeyMachine, "m"), recordingtest.Set(runpkg.KeyBuildConfig, "bc"), recordingtest.Set(runpkg.KeyRuntimeConfig, "rc"), recordingtest.Set(runpkg.KeyClosure, "cl"), recordingtest.Set(runpkg.KeyTestVariants, "tv"), recordingtest.Set(runpkg.KeyTestVariantLedger, "ledger-encoded"), recordingtest.Set(runpkg.KeyRuntime, "rd"), recordingtest.Set(runpkg.KeyRuntimeInputs, "manifest"), recordingtest.Set(runpkg.KeyPurity, "source directive"))
 	fp, recordedLedger, ok := fingerprintFromConfig(cfg)
 	if !ok {
 		t.Fatal("current recording format rejected")

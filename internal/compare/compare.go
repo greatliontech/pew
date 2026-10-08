@@ -46,7 +46,13 @@ import (
 // separately by compareGuards. Derived from the producer's single
 // registry, so a new recorded key can never fragment grouping by
 // omission here.
-var pewIgnore = strings.Join(run.RecordingConfigKeys, " ")
+var pewIgnore = func() string {
+	names := append([]string{}, run.RecordingConfigKeys...)
+	for _, k := range run.FingerprintProjectionKeys {
+		names = append(names, k.Name)
+	}
+	return strings.Join(names, " ")
+}()
 
 var compareGuards = func() []string {
 	var names []string
@@ -234,6 +240,7 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 
 	add := func(rs []*benchfmt.Result, isBase bool) {
 		for _, r := range rs {
+			value := run.ComparisonValues(r)
 			gk := gkey{configBy.Project(r), rowBy.Project(r)}
 			g := groups[gk]
 			if g == nil {
@@ -254,7 +261,7 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 				g.hasNew = true
 			}
 			for _, key := range compareGuards {
-				guards[key] = recordGuard(guards[key], r.GetConfig(key))
+				guards[key] = recordGuard(guards[key], value(key))
 			}
 			if isBase {
 				g.baseConds = recordGuard(g.baseConds, r.GetConfig(run.KeyRunConditions.Name))
@@ -262,7 +269,7 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 					g.baseAudit = map[string]guardValue{}
 				}
 				for _, k := range auditNoteKeys {
-					g.baseAudit[k.Name] = recordGuard(g.baseAudit[k.Name], r.GetConfig(k.Name))
+					g.baseAudit[k.Name] = recordGuard(g.baseAudit[k.Name], value(k.Name))
 				}
 			} else {
 				g.newConds = recordGuard(g.newConds, r.GetConfig(run.KeyRunConditions.Name))
@@ -270,7 +277,7 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 					g.newAudit = map[string]guardValue{}
 				}
 				for _, k := range auditNoteKeys {
-					g.newAudit[k.Name] = recordGuard(g.newAudit[k.Name], r.GetConfig(k.Name))
+					g.newAudit[k.Name] = recordGuard(g.newAudit[k.Name], value(k.Name))
 				}
 			}
 			for _, v := range r.Values {

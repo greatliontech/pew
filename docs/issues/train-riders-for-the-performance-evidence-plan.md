@@ -1,6 +1,6 @@
 # Handoff: the train's pew riders for the performance-evidence plan
 
-Lands: performance-evidence plan chunk 7, with the later-chunk items
+Lands: performance-evidence plan chunk 8, with the later-chunk items
 named below landing at their stated chunks.
 
 The cross-tool train (gofresh docs/plans/cross-tool-train.md) held pew
@@ -10,7 +10,7 @@ chunk 319, 2026-10-06) dissolved the train's pew tail into this plan
 and moves every rider here. Each item is a derived fact, not a wish;
 its source tick is named so the derivation can be read.
 
-## At chunks 7 and 8 — evidence encoding and recorded-observation freshness
+## At chunk 8 — recorded-observation freshness
 
 - One verdict path: `checkOne` is test-only; `checkPackage`,
   `verdictForRecs` and `inertGrownRecheck` beside it; admission
@@ -25,10 +25,6 @@ its source tick is named so the derivation can be read.
   itself reordered stat's resolveVouches): one threaded value with
   engine construction, preserving REQ-pew-vouch-source (file ∪
   flags; flags never remove a vouch).
-- The canonical fingerprint boundary lands at 7: settle its envelope
-  and clean format cutover before emitting it, preserving the current
-  regeneration-only policy and making the remeasurement consequence
-  explicit. Missing historical evidence is never filled in on read.
 - The two covered gaps with no scheduled work
   (`.stipulator/gaps/pew-closure-noncall`, `pew-mutable-local`): the
   spec's anchors (a const flip, a struct-field change, an embed edit;
@@ -69,12 +65,11 @@ pew 320 (the residual bump: the releases this plan does not take,
 spellings, two module resolvers, the vestige set — `ExecuteBinary`,
 `run.Execute`, `gitblob.State` — the stretch literals, the
 declared-benchmarks rule, stat's partial pkgMeta; audit 335 struck
-`recordingFromPath` and `equalExcept` (deleted) and `checkOne` → 8.3,
-the writer census → 7.2; `isPewRecording` is live), 232r (`--explain`'s
+`recordingFromPath` and `equalExcept` (deleted) and `checkOne` → 8.3;
+`isPewRecording` is live), 232r (`--explain`'s
 stream, REQ-pew-derived-state's payload list, the REQ home rule with
-its two new pairs; the `pew-format-invalid` key → 7), 276r (§9's
-corruption grammar, the conditions grammar — the ledger round trip →
-7.3,
+its two new pairs), 276r (§9's
+corruption grammar, the conditions grammar,
 the pin ladder, the eleven uncited ids, the self-oracle pins in
 guidance_test.go and knobs_test.go, the six bare `gofresh.New()`
 engines in tests).
@@ -104,10 +99,7 @@ Findings the sixth re-audit band routes here rather than to a train chunk:
   recorded strategy; if @41 is your "versioned judgment",
   REQ-closure-outcome-inventory should say recorded proofs are what it
   versions.
-- §5's three stale format sentences (:657 vs :139/:1201; :189; the
-  artifact-format anchor vs the stale(format) inventory) → 7.1; §7.8's
-  two normative statements (no invented support vs the ingest "with the
-  completed-process options") → 6.2; guidance-purpose-column → 12.2.
+- guidance-purpose-column → 12.2.
 - The four gofresh gap records citing this plan's chunks 5/6/8 retarget
   when it closes; the inputs-outcome-method gap's reason ("no
   outcome-support capability is claimed") is stale now that

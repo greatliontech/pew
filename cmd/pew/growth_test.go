@@ -113,8 +113,9 @@ func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
 	for _, c := range recs[0].Config {
 		rewritten[c.Key] = string(c.Value)
 	}
-	if rewritten["pew-test-variants"] != servedFP.TestVariantClosure || rewritten["pew-test-variant-ledger"] == encoded {
-		t.Fatalf("run path did not rewrite the recording under the refreshed pin: %q", rewritten["pew-test-variants"])
+	refreshed, _, ok := fingerprintFromConfig(recs[0].Config)
+	if !ok || refreshed.TestVariantClosure != servedFP.TestVariantClosure || rewritten["pew-test-variant-ledger"] == encoded {
+		t.Fatalf("run path did not rewrite the recording under the refreshed pin: %q", refreshed.TestVariantClosure)
 	}
 	v, reason, _, grown, err = checkOne(context.Background(), st, e, pkg, "", tmp, bench, "")
 	if err != nil || v != verdictValid || grown != "" {

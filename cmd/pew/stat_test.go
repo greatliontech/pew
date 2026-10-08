@@ -385,12 +385,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := store.New(filepath.Join(dir, "benchmarks"))
-	cfg := append(runpkg.ProvenanceConfig("c1", false, fp.Guards, runpkg.Conditions{}), runpkg.ClosureConfig(fp.MaximalClosure))
-	cfg = append(cfg, runpkg.DynamicStateStrategyConfig(fp.DynamicStateStrategy))
-	cfg = append(cfg, runpkg.TestVariantConfig(fp.TestVariantClosure))
-	cfg = append(cfg, runpkg.TestVariantLedgerConfig("ledger-placeholder"))
-	cfg = append(cfg, runpkg.RuntimeConfig(observation.Digest, observation.Manifest)...)
-	cfg = append(cfg, runpkg.GofreshPurityConfig(fp.PurityAssertion))
+	cfg := recordingtest.Config(recordingtest.Measured(fp, "ledger-placeholder", observation.Digest, observation.Manifest))
 	recs := []*benchfmt.Result{{Name: benchfmt.Name("PureRead"), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
 	if err := st.Write("", "BenchmarkPureRead", "", recs); err != nil {
 		t.Fatal(err)
@@ -475,12 +470,7 @@ func TestStatRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := store.New(filepath.Join(dir, "benchmarks"))
-	cfg := append(runpkg.ProvenanceConfig("c1", false, fp.Guards, runpkg.Conditions{}), runpkg.ClosureConfig(fp.MaximalClosure))
-	cfg = append(cfg, runpkg.DynamicStateStrategyConfig(fp.DynamicStateStrategy))
-	cfg = append(cfg, runpkg.TestVariantConfig(fp.TestVariantClosure))
-	cfg = append(cfg, runpkg.TestVariantLedgerConfig("ledger-placeholder"))
-	cfg = append(cfg, runpkg.RuntimeConfig(observation.Digest, observation.Manifest)...)
-	cfg = append(cfg, runpkg.GofreshPurityConfig(fp.PurityAssertion))
+	cfg := recordingtest.Config(recordingtest.Measured(fp, "ledger-placeholder", observation.Digest, observation.Manifest))
 	recs := []*benchfmt.Result{{Name: benchfmt.Name("Nop"), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: cfg}}
 	if err := st.Write("", "BenchmarkNop", "", recs); err != nil {
 		t.Fatal(err)
@@ -495,12 +485,10 @@ func TestStatRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	strategyLine := "pew-dynamic-state: " + fp.DynamicStateStrategy + "\n"
-	predating := bytes.Replace(recording, []byte(strategyLine), nil, 1)
-	if bytes.Equal(predating, recording) {
-		t.Fatalf("recording lacks the strategy line %q:\n%s", strategyLine, recording)
-	}
-	if err := os.WriteFile(recordingPath, predating, 0o644); err != nil {
+	withoutStrategy := fp
+	withoutStrategy.DynamicStateStrategy = ""
+	recs[0].Config = recordingtest.Config(recordingtest.Measured(withoutStrategy, "ledger-placeholder", observation.Digest, observation.Manifest))
+	if err := st.Write("", "BenchmarkNop", "", recs); err != nil {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
@@ -1389,7 +1377,29 @@ func TestStatExplainShowsSideBySideGuards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, path, strings.Replace(string(data), "buildconfig: b1", "buildconfig: b2", 1))
+	rows, err := store.Parse(bytes.NewReader(data), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		fp, err := runpkg.RecordedFingerprint(row.Config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fp.Guards.BuildConfig = "b2"
+		encoded, err := runpkg.EncodeFingerprint(fp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range row.Config {
+			if row.Config[i].Key == runpkg.KeyFingerprint.Name {
+				row.Config[i] = runpkg.KeyFingerprint.Config(encoded)
+			}
+		}
+	}
+	if err := st.Write("pkg", "BenchmarkGuard", "", rows); err != nil {
+		t.Fatal(err)
+	}
 	refB := commitAll(t, repo, "b")
 
 	withWorkingDir(t, dir)

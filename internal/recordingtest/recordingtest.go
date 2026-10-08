@@ -1,11 +1,6 @@
-// Package recordingtest builds test recordings through the one writer:
-// run.ProvenanceConfig and run.FingerprintConfigs over the registry's
-// rows, so the §5 provenance and fingerprint lines of a test recording
-// are the ones `pew run` composes, in the writer's order, and a key
-// added to the registry reaches every fixture without a hand edit. Set
-// feeds a row's value to the writer's own input (never a line edit);
-// Omit removes an emitted row afterwards — a recording predating a
-// line, a malformed historical file. Outside the builder's claim: the
+// Package recordingtest builds test recordings through the native fingerprint
+// writer and Pew's envelope. Set adjusts a writer input; Omit removes an
+// envelope key or clears a native field to model absent evidence. Outside the builder's claim: the
 // toolchain's four stream keys (goos, goarch, pkg, cpu) and a result
 // name's GOMAXPROCS suffix are the caller's, and Conditions takes the
 // line verbatim, well-formed or not. Test support only: no production
@@ -29,14 +24,12 @@ const QuietConditions = "governor=performance turbo=off load1=0.03 throttled=fal
 // Recording is the writer's inputs for one test recording; Defaults
 // fills placeholders every value-blind test accepts.
 type Recording struct {
-	Commit          string
-	Dirty           bool
-	Conditions      string
-	Fingerprint     gofresh.Fingerprint
-	Ledger          string
-	RuntimeDigest   string
-	RuntimeManifest string
-	omitted         []run.RecordingKey
+	Commit      string
+	Dirty       bool
+	Conditions  string
+	Fingerprint gofresh.Fingerprint
+	Ledger      string
+	omitted     []run.RecordingKey
 }
 
 // omitted rows are removed after composition, in option order.
@@ -51,24 +44,27 @@ func Defaults() Recording {
 		Commit:     "c1",
 		Conditions: QuietConditions,
 		Fingerprint: gofresh.Fingerprint{
+			ResultKind:           gofresh.Measurement,
 			MaximalClosure:       "cl1",
 			ClosureStrategy:      gofresh.ClosureStrategy,
 			DynamicStateStrategy: gofresh.DynamicStateStrategy,
 			TestVariantClosure:   "tv1",
 			Guards:               guard.Guards{Toolchain: "go-test", Machine: "m1", BuildConfig: "b1", RuntimeConfig: "r1"},
+			RuntimeDigest:        "rt1",
+			RuntimeInputs:        "manifest1",
 		},
-		Ledger:          "ledger1",
-		RuntimeDigest:   "rt1",
-		RuntimeManifest: "manifest1",
+		Ledger: "ledger1",
 	}
 }
 
 // Measured records the fingerprint a capture answered, with its ledger
 // and runtime-input evidence — the shape a verdict test feeds back to
-// the engine that computed it.
+// the engine that computed it. The supplied runtime values replace the
+// fingerprint's runtime fields, including when the supplied values are empty.
 func Measured(fp gofresh.Fingerprint, ledger, runtimeDigest, runtimeManifest string) Option {
 	return func(r *Recording) {
-		r.Fingerprint, r.Ledger, r.RuntimeDigest, r.RuntimeManifest = fp, ledger, runtimeDigest, runtimeManifest
+		r.Fingerprint, r.Ledger = fp, ledger
+		r.Fingerprint.RuntimeDigest, r.Fingerprint.RuntimeInputs = runtimeDigest, runtimeManifest
 	}
 }
 
@@ -111,9 +107,9 @@ func Set(key run.RecordingKey, value string) Option {
 		case run.KeyRunConditions.Name:
 			r.Conditions = value
 		case run.KeyRuntime.Name:
-			r.RuntimeDigest = value
+			fp.RuntimeDigest = value
 		case run.KeyRuntimeInputs.Name:
-			r.RuntimeManifest = value
+			fp.RuntimeInputs = value
 		case run.KeyPurity.Name:
 			fp.PurityAssertion = value
 		case run.KeyVouches.Name:
@@ -138,10 +134,8 @@ func Set(key run.RecordingKey, value string) Option {
 	}
 }
 
-// Omit removes one emitted row after composition: a recording predating
-// the line, or a historical file missing a mandatory field. Omitting a
-// row the writer did not emit panics — a fixture claiming to predate a
-// line the writer never wrote would otherwise be a silent no-op.
+// Omit removes an envelope row or clears a native field. Omitting a value
+// already absent panics so an absence fixture cannot silently be a no-op.
 func Omit(key run.RecordingKey) Option {
 	return func(r *Recording) { r.omitted = append(r.omitted, key) }
 }
@@ -154,8 +148,19 @@ func Config(opts ...Option) []benchfmt.Config {
 	for _, opt := range opts {
 		opt(&r)
 	}
-	cfgs := append(run.ProvenanceConfig(r.Commit, r.Dirty, r.Fingerprint.Guards, run.Conditions{}),
-		run.FingerprintConfigs(r.Fingerprint, r.Ledger, r.RuntimeDigest, r.RuntimeManifest)...)
+	for _, key := range r.omitted {
+		if !run.IsRecordingKey(key.Name) {
+			if run.FingerprintValue(r.Fingerprint, key.Name) == "" {
+				panic("recordingtest: omitted absent fingerprint field " + key.Name)
+			}
+			Set(key, "")(&r)
+		}
+	}
+	fpcfg, err := run.FingerprintConfigs(r.Fingerprint, r.Ledger)
+	if err != nil {
+		panic(err)
+	}
+	cfgs := append(run.ProvenanceConfig(r.Commit, r.Dirty, run.Conditions{}), fpcfg...)
 	// The conditions line is the writer's from a Conditions value; the
 	// fixture's is the caller's verbatim text in the same position.
 	for i := range cfgs {
@@ -164,7 +169,9 @@ func Config(opts ...Option) []benchfmt.Config {
 		}
 	}
 	for _, key := range r.omitted {
-		cfgs = without(cfgs, key)
+		if run.IsRecordingKey(key.Name) {
+			cfgs = without(cfgs, key)
+		}
 	}
 	return cfgs
 }

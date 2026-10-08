@@ -14,6 +14,15 @@ campaign close-out. Keep those facts distinct. The existing targeted ephemeral
 probes remain specific kill evidence, not a substitute claim of exhaustive campaign
 coverage.
 
+The native-fingerprint changed-code campaign also requires remeasurement. Run
+`82f26be60d13cf04` selected 22 targets and 1,064 candidates with the complete
+derived oracles. Its 30-second freshness-proof budgets left subjects unproven;
+the 30-minute command deadline arrived after three candidate attempts and before
+any target committed. It banked no kills or survivor judgments. The deadline
+returned normally with an explicit timeout, unlike the earlier silent close-out
+below. Resume this selection without claiming that its focused envelope,
+comparison and refresh probe kills establish campaign coverage.
+
 At observed-capture integration, determine which refusal belongs to the test's
 actual runtime-input contract and which belongs to shared observation/containment
 or campaign close-out. Fix shared faults in their owning tool. Do not exclude

@@ -62,9 +62,10 @@ func TestRecordingBuilderIsTheWritersShape(t *testing.T) {
 	set := recordingtest.Config(recordingtest.Set(runpkg.KeyClosure, "other"))
 	seen := 0
 	for _, c := range set {
-		if c.Key == runpkg.KeyClosure.Name {
+		if c.Key == runpkg.KeyFingerprint.Name {
 			seen++
-			if string(c.Value) != "other" {
+			fp, err := runpkg.DecodeFingerprint(string(c.Value))
+			if err != nil || fp.MaximalClosure != "other" {
 				t.Fatalf("Set did not replace the row: %q", c.Value)
 			}
 		}
@@ -72,21 +73,11 @@ func TestRecordingBuilderIsTheWritersShape(t *testing.T) {
 	if seen != 1 {
 		t.Fatalf("Set left %d closure rows, want one", seen)
 	}
-	// Set of an omittable row the defaults leave unemitted lands at the
-	// writer's position — before the vouches, as GofreshEvidenceConfigs
-	// orders the evidence — never appended.
+	// Optional native fields set independently survive the same payload.
 	withPurity := recordingtest.Config(recordingtest.Set(runpkg.KeyPurity, "p"), recordingtest.Set(runpkg.KeyVouches, "v"))
-	purityAt, vouchesAt := -1, -1
-	for i, c := range withPurity {
-		switch c.Key {
-		case runpkg.KeyPurity.Name:
-			purityAt = i
-		case runpkg.KeyVouches.Name:
-			vouchesAt = i
-		}
-	}
-	if purityAt < 0 || vouchesAt < 0 || purityAt > vouchesAt {
-		t.Fatalf("Set placed purity at %d and vouches at %d; want the writer's order", purityAt, vouchesAt)
+	purityFP, _, ok := fingerprintFromConfig(withPurity)
+	if !ok || purityFP.PurityAssertion != "p" || purityFP.DynamicStateVouches != "v" {
+		t.Fatalf("native evidence lost: %+v", purityFP)
 	}
 	// Omit of a row the writer never emitted is refused, never a silent
 	// no-op claiming a predating shape.

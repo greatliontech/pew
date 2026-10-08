@@ -632,7 +632,7 @@ func TestRunPackagePGOContentMovesBuildconfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		bc := recs[0].GetConfig("buildconfig")
+		bc := runpkg.ComparisonValue(recs[0], "buildconfig")
 		if bc == "" {
 			t.Fatal("recording missing buildconfig")
 		}
@@ -748,7 +748,7 @@ func TestRunPackageDefaultPGOMovesBuildconfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return recs[0].GetConfig("buildconfig")
+		return runpkg.ComparisonValue(recs[0], "buildconfig")
 	}
 
 	bcA := record(filepath.Join(t.TempDir(), "benchmarks"))

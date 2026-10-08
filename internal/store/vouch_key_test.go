@@ -6,12 +6,11 @@ import (
 	"github.com/greatliontech/pew/internal/run"
 )
 
-// pew-vouches is a recognized recording key: a vouched recording must
-// never read as stale-format - the write path emits the line, so the
-// read path admits it (spec §5).
+// Vouches live in the native payload, with a display projection but no parallel
+// recording key. The projection vocabulary cannot enlarge the file's closed set.
 func TestRecordingConfigKeyAdmitsVouches(t *testing.T) {
-	if !run.IsRecordingKey("pew-vouches") {
-		t.Fatal("pew-vouches refused as a recording config key")
+	if run.IsRecordingKey("pew-vouches") || !run.IsFingerprintProjection("pew-vouches") {
+		t.Fatal("vouches must be a native-payload projection, never a parallel recording key")
 	}
 	if run.IsRecordingKey("pew-unknown") {
 		t.Fatal("unknown pew key admitted")

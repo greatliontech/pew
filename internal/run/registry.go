@@ -70,26 +70,27 @@ const RecordingKeyNamespace = "pew-"
 // file.
 const FormatInvalidAnnotation = "pew-format-invalid"
 
-// RecordingKeys is spec §5's key table, row for row and in its order —
-// the one registry of every provenance, guard, derived, and purity
-// line a pew recording may carry beyond the toolchain benchmark keys.
-// Every producer line is constructed from a row, and the store's
-// shape and closed-set checks, admission, compare's grouping
-// projection and audit notes, and the stream's reserved-key refusal
-// derive from the rows, so a key or a mark spelled anywhere else is
-// unrepresentable; TestRecordingKeysMirrorSpec binds the rows to the
-// table, marks included.
+// RecordingKeys is spec §5's envelope table, in order: the complete persisted
+// configuration set beyond the toolchain's benchmark keys. Shape checks,
+// continuation encoding, closed-set checks and grouping exclusion use this set.
 var RecordingKeys = []RecordingKey{
 	{Name: "pew-format", Class: KeyDiscriminator, Display: "format"},
 	{Name: "commit", Class: KeyMandatory, Display: "commit"},
+	{Name: "dirty", Class: KeyMandatory, Display: "dirty"},
+	{Name: "pew-runconditions", Class: KeyMandatory, Audit: true, Display: "run conditions"},
+	{Name: "pew-fingerprint", Class: KeyMandatory, Display: "fingerprint", Chunked: true},
+	{Name: "pew-test-variant-ledger", Class: KeyMandatory, Display: "test-variant ledger", Chunked: true},
+}
+
+// FingerprintProjectionKeys name derived, non-persisted display and comparison
+// values. The native fingerprint payload is their sole source of truth.
+var FingerprintProjectionKeys = []RecordingKey{
 	{Name: "toolchain", Class: KeyMandatory, Guard: true, Display: "toolchain"},
 	{Name: "machine", Class: KeyMandatory, Guard: true, Display: "machine"},
 	{Name: "buildconfig", Class: KeyMandatory, Guard: true, Display: "buildconfig"},
 	{Name: "runtimeconfig", Class: KeyMandatory, Guard: true, Display: "runtimeconfig"},
-	{Name: "dirty", Class: KeyMandatory, Display: "dirty"},
-	{Name: "pew-runconditions", Class: KeyMandatory, Audit: true, Display: "run conditions"},
 	{Name: "pew-runtime", Class: KeyMandatory, Display: "runtime"},
-	{Name: "pew-runtime-inputs", Class: KeyMandatory, Display: "runtime inputs", Chunked: true},
+	{Name: "pew-runtime-inputs", Class: KeyMandatory, Display: "runtime inputs"},
 	{Name: "pew-purity", Class: KeyOmittable, Display: "purity"},
 	{Name: "pew-vouches", Class: KeyOmittable, Audit: true, Display: "dynamic-state vouches"},
 	{Name: "pew-dynamic-state", Class: KeyOmittable, Audit: true, Display: "dynamic-state strategies"},
@@ -98,13 +99,13 @@ var RecordingKeys = []RecordingKey{
 	{Name: "pew-closure", Class: KeyMandatory, Display: "closure"},
 	{Name: "pew-closure-strategy", Class: KeyOmittable, Audit: true, Display: "closure derivations"},
 	{Name: "pew-test-variants", Class: KeyMandatory, Display: "test-variants"},
-	{Name: "pew-test-variant-ledger", Class: KeyMandatory, Display: "test-variant ledger", Chunked: true},
 }
 
-// The rows by name — views over RecordingKeys, never a second
-// definition: a name absent from the table refuses at init.
+// Names resolve against the envelope or projection vocabulary, never another
+// spelling table. Only RecordingKeys admits persisted configuration keys.
 var (
 	KeyFormat                   = registered("pew-format")
+	KeyFingerprint              = registered("pew-fingerprint")
 	KeyCommit                   = registered("commit")
 	KeyToolchain                = registered("toolchain")
 	KeyMachine                  = registered("machine")
@@ -126,7 +127,7 @@ var (
 )
 
 func registered(name string) RecordingKey {
-	for _, k := range RecordingKeys {
+	for _, k := range append(append([]RecordingKey{}, RecordingKeys...), FingerprintProjectionKeys...) {
 		if k.Name == name {
 			return k
 		}
@@ -297,7 +298,7 @@ var MandatoryRecordingKeys = func() []string {
 // notes render in.
 var AuditRecordingKeys = func() []RecordingKey {
 	var keys []RecordingKey
-	for _, k := range RecordingKeys {
+	for _, k := range append(append([]RecordingKey{}, RecordingKeys...), FingerprintProjectionKeys...) {
 		if k.Audit {
 			keys = append(keys, k)
 		}
@@ -309,7 +310,7 @@ var AuditRecordingKeys = func() []RecordingKey {
 // agree on to compare at all (spec §10.1), in table order.
 var GuardRecordingKeys = func() []RecordingKey {
 	var keys []RecordingKey
-	for _, k := range RecordingKeys {
+	for _, k := range FingerprintProjectionKeys {
 		if k.Guard {
 			keys = append(keys, k)
 		}
