@@ -29,7 +29,7 @@
   - [ ] 6.1 Triage all affected gomutant, stipulator and pew producer paths against the published outcome-support contract and their actual result-contributing processes.
   - [ ] 6.2 Supply supported evidence through the shared facade or an honest incomplete disposition; preserve process identity, interruption, per-unit publication and explicit purity semantics, with no health-to-outcome inference.
     - [x] Migrate pew's per-arm preparation, receipt, identity-only fallback and publication validation to the released shared contract.
-    - [ ] Migrate stipulator's package-process preparation and witness publication, preserving invocation-owned roots and the actual contributing subject set.
+    - [x] Migrate stipulator's package-process preparation and witness publication, preserving invocation-owned roots and the actual contributing subject set.
     - [ ] Migrate gomutant's baseline and transformed-executable observations without borrowing unsupported evidence from another execution model.
   - [ ] 6.3 Verify completed failure, abnormal termination, unsupported outcomes and historical-evidence refusal across the adapters; converge review and publish each completed consumer migration.
 - [ ] 7. Establish one canonical persisted fingerprint boundary in pew.
