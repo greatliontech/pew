@@ -88,7 +88,7 @@ func IngestObservation(ctx context.Context, frame ObservationFrame, logPath, ide
 	} else {
 		// Identity guards remain useful under the ordinary freshness policy.
 		// This explicit path emits no outcome claim and cannot enable a lift.
-		observation, err = frame.ObserveInputs(ctx, logPath, ingest)
+		observation, _, err = frame.ObserveInputs(ctx, logPath, ingest)
 	}
 	if err != nil {
 		return runtimeinput.Observation{}, err
