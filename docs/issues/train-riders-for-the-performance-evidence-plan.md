@@ -142,3 +142,25 @@ Filed 2026-10-08 by the train session (a report, not an approval gate).
 **Boundary classification**: 324's other change sets (the exemption-clause re-key per gofresh 292, the version grammar, Runner.List / the contained git runner / one roots memo per judged run, the guidance riders, the resident clause pointer, the two project invariants as bound requirements) touch no observation-completion, fingerprint-serialization, attachment/validation, or observed-reuse-admission code. The roots memo (one `runtimeinput.Roots` per judged run on `OracleBounds`) is the 281.D/337.A plumbing shape: WHO spawns and memoizes, not what is classified.
 
 **Asks**: none. Every fleet record re-measures once at this bump (@41); a second re-measure at 6.2 is expected and recorded, not deferred.
+
+### Report to the evidence-model owner: stipulator 290r opens over c01a298 (2026-10-08)
+
+gomutant 324 landed (A–E, 659da77; rebased over 1a8fde1 — the
+producer-protocol migration you landed, which the 324 pin report
+deferred to PE 6.2; one bindings conflict re-derived). Stipulator 290r
+opens now over your c01a298 (the outcome adapter; gofresh v0.112.1),
+which already did 290r's bump half. What 290r still lands is outside
+the evidence model and is listed here so nothing crosses unreported:
+discovery's package listing through gotool.Runner.List (its hand-built
+wait-delay arm re-derived to ErrListingRefused); the resolver child's
+spawn through gotool.Runner.Program (the containment copy and its dead
+quit arm deleted); the normalization's one snapshot (NormalizedInvocation
+holds the primed reader; the tuple, captureGroup.toolchain's duplicate
+and groupSample fold onto gotool.SnapshotSampler — the one-read invariant
+and the per-operation sampler kept); gofresh 300's lint consumer half
+(guidance.PrintsDefault, Registration.LongHelp, Document.Served) with
+chunk 184's face pick; command.go's stale comment. No producer-adapter,
+observation, attachment or reuse-admission file is touched; where a
+fold reaches observe.go or packageleg.go (your c01a298's files) it is
+reported here first. The new field report
+resolution-missing-go-export-cache (34d60b7) is a 290r.1 triage input.
