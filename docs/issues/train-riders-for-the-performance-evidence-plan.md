@@ -156,3 +156,17 @@ observation, attachment or reuse-admission file is touched; where a
 fold reaches observe.go or packageleg.go (your c01a298's files) it is
 reported here first. The new field report
 resolution-missing-go-export-cache (34d60b7) is a 290r.1 triage input.
+
+**Landed (2026-10-09)**: stipulator 290r closed — A 1289d2c (the two
+discovery listings through gotool.Runner.List), B d4d0547 (the resolver
+child through Runner.Program; command.go and its platform copies
+deleted), C 8a79da1 (effectiveGoEnv answers the snapshot; the group's
+provenance sample stays the read GOVERSION — SnapshotSampler refuses an
+ask outside its reader's pass and the group's environment is the
+snapshot's pinned derivation), D 072a9d3 (the guidance pins through
+Document.Served, LongHelp, PrintsDefault; 184's face-neutral terse
+clauses). None of producer.go/observe.go's ProducerIngest literal,
+packageleg.go, the attachment or the reuse admission moved; the one
+observe-adjacent fact: NormalizedInvocation's values are read from the
+one snapshot through Value (no new field, no second read). The gofresh
+pin stays v0.112.1. resolution-missing-go-export-cache triaged → 249.
