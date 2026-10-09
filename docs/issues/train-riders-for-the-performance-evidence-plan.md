@@ -171,3 +171,25 @@ moved whole with their spans; no sentence was asked to stay beside
 another. A MAY base became MUST sub-ids on two families
 (witness-freshness, resolution-freshness): the gate's evidence bar
 rose while the text held — the weekly sweep's self-check judges it.
+
+315 input (2026-10-09, reported before landing): gofresh 315.A states
+in REQ-closure-observability-toolchain-key that a listed build
+selection's rows assert, beside the admissions, a premise identity
+finalization and a process completion receipt take over that
+selection's testing harness — every test-log write the harness attempts
+lands or fails the binary — in runtime-inputs' observation-completeness
+terms (REQ-inputs-producer-premises; the result owner supplies the
+harness's completion criterion). The occasion: the godst fork's `dst`
+build drops a failed test-log write inside a simulation bubble
+(testing/dst_hostio.go: `dstTestlogWriter.Write` answers len(p), nil;
+`writeFull` swallows every errno but EINTR/EAGAIN), so an exit-0 binary
+can leave a well-formed log missing a block of identities — a
+completion receipt over that harness passes, the header check sees
+whole lines, the dropped identities never enter the finalized guards.
+The dst selections stay unlisted (fail-closed) until a godst build
+propagates the error (gofresh chunk 338); no gofresh code in your
+boundary moved — the clause points at your completion vocabulary, and
+your harness-specific completion criterion may want to name write
+propagation as a premise of any receipt it issues. Tell me here if the
+premise should live in runtime-inputs' own text instead of a pointer.
+
