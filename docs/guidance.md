@@ -40,6 +40,8 @@ HEAD while tuning a hot path.
 - `bench-dir` — stored-recordings directory, `<module>/benchmarks` unless given.
 - `count` — measurement runs per benchmark (default 10).
 - `benchtime` — duration or iterations per measurement (default 1s).
+- `profile` — capture cpu, alloc or cpu,alloc diagnostics separately from statistical samples; bare --profile selects both. A served measurement can receive a missing or stale requested diagnostic without remeasurement. Profile failures retain published measurements and make the request fail; nonempty identity-only captures retain explicitly unverified evidence.
+- `profile-benchtime` — positive duration or iteration budget for each single-kind diagnostic process (default 1s).
 - `bench` — benchmark name pattern (default .).
 - `pin` — pin the measurement to one CPU set derived from the host's topology (taskset): the isolated set when the kernel has one, else one whole physical core, the fastest the kernel ranks, outside CPU 0's; the set and its derivation are reported first, and a host it cannot be derived on, or without taskset to apply it, refuses. The pin's width is the measured process's GOMAXPROCS, a guarded runtime configuration: a pinned recording and an unpinned one stale each other and share a destination, so keep both under distinct labels. A run minting a new GOMAXPROCS variant lineage for a benchmark already on record warns at record time — grouping never bridges the suffix, and the operator must not learn that from a later comparison after the measurement time is spent.
 - `strict` — treat quiesce warnings as fatal.
@@ -75,6 +77,11 @@ non-valid without re-deriving anything by hand. Read or analysis failures leave
 independent rows visible and make the command exit nonzero; stale, unrecorded
 and unverifiable verdicts alone are successful reporting. Check the exit status
 before treating a filtered report as complete.
+Indexed profiles have independent integrity, freshness, relation and identity-only
+outcome fields in text and JSON. Explain includes symbol weights and exact-source
+attribution where supported; cumulative weights overlap, and unresolved weights
+are retained. Empty profiles prove no absence of work. Profile read/integrity
+failures make reporting incomplete while leaving the measurement verdict visible.
 **example:** a stale-filtered status over ./... before deciding what
 to re-measure.
 

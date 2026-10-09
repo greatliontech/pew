@@ -1,6 +1,6 @@
 # Handoff: the train's pew riders for the performance-evidence plan
 
-Lands: performance-evidence plan chunk 10, with the later-chunk items
+Lands: performance-evidence plan chunk 11, with the later-chunk items
 named below landing at their stated chunks.
 
 The cross-tool train (gofresh docs/plans/cross-tool-train.md) held pew
@@ -10,13 +10,13 @@ chunk 319, 2026-10-06) dissolved the train's pew tail into this plan
 and moves every rider here. Each item is a derived fact, not a wish;
 its source tick is named so the derivation can be read.
 
-## At chunk 10 — profile companions
-
-- Every companion key goes through `RecordingKeys` (REQ-pew-key-set's
-  closed set); `profile-capture-attribution` lands at 10/11.
+The profile companion key is registered in `RecordingKeys`
+(REQ-pew-key-set's closed set); no key-registry work remains here.
 
 ## At chunk 11 — A/B
 
+- `profile-capture-attribution` retains both-side A/B capture and
+  historical profile comparison under the canonical §6.2 contract.
 - ab's seven bare `exec.Command` git stages break REQ-pew-interruption
   ("any stage on the verb's path"): the containment, with completed
   units preserved on interruption; `ab-out-multi-package` lands here.

@@ -11,6 +11,7 @@ package store
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -122,6 +123,12 @@ func (s *Store) Path(pkgRel, bench, label string) (string, error) {
 // not fsync-durable against power loss, which is acceptable since recordings are
 // regenerable, git-committed artifacts (§6.1).
 func (s *Store) Write(pkgRel, bench, label string, results []*benchfmt.Result) error {
+	ctx, cancel := publicationContext()
+	defer cancel()
+	return s.ReplaceContext(ctx, Key{pkgRel, bench, label}, nil, results)
+}
+
+func (s *Store) writeUnlocked(pkgRel, bench, label string, results []*benchfmt.Result) error {
 	if len(results) == 0 {
 		return fmt.Errorf("store: refusing to write empty recording for %s", bench)
 	}
@@ -131,6 +138,9 @@ func (s *Store) Write(pkgRel, bench, label string, results []*benchfmt.Result) e
 	}
 	dir := filepath.Dir(path)
 	if err := s.ensureDir(dir); err != nil {
+		return err
+	}
+	if err := checkRegularFile(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	encoded, err := encodeRecording(bench, results)
@@ -160,6 +170,20 @@ func (s *Store) Write(pkgRel, bench, label string, results []*benchfmt.Result) e
 // recordings; it never exposes a torn file as a recording.
 func (s *Store) WriteBatch(requests []WriteRequest) error {
 	return s.writeBatch(requests, nil)
+}
+
+// WriteBatchContext bounds lock waiting by the producer's publication context.
+func (s *Store) WriteBatchContext(ctx context.Context, requests []WriteRequest) error {
+	unlock, err := s.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if len(requests) == 1 {
+		r := requests[0]
+		return s.writeUnlocked(r.PkgRel, r.Bench, r.Label, r.Results)
+	}
+	return s.writeBatchUnlocked(requests, nil)
 }
 
 // ValidateLabel refuses a variant label the store cannot name; the
@@ -216,6 +240,21 @@ func (s *Store) Destinations(keys []Key) ([]Destination, error) {
 }
 
 func (s *Store) writeBatch(requests []WriteRequest, beforeInstall func()) error {
+	ctx, cancel := publicationContext()
+	defer cancel()
+	unlock, err := s.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if len(requests) == 1 && beforeInstall == nil {
+		r := requests[0]
+		return s.writeUnlocked(r.PkgRel, r.Bench, r.Label, r.Results)
+	}
+	return s.writeBatchUnlocked(requests, beforeInstall)
+}
+
+func (s *Store) writeBatchUnlocked(requests []WriteRequest, beforeInstall func()) error {
 	type stagedWrite struct {
 		path, temp, backup string
 		existed            bool
@@ -578,6 +617,13 @@ func IsRecordingShape(recs []*benchfmt.Result) bool {
 // Remove deletes a recording and prunes empty package directories up to the store
 // root. The path is recomputed from the recording key rather than trusted.
 func (s *Store) Remove(r Recording) error {
+	ctx, cancel := publicationContext()
+	defer cancel()
+	unlock, err := s.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	path, err := s.Path(r.PkgRel, r.Bench, r.Label)
 	if err != nil {
 		return err

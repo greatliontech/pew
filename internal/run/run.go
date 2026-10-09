@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -34,7 +35,7 @@ type Options struct {
 
 // RecordingFormat identifies the native-fingerprint benchmark envelope.
 // Earlier formats regenerate without interpreting or upgrading their evidence.
-const RecordingFormat = "4"
+const RecordingFormat = "5"
 
 // TestArgs builds the `go test` argument list for benchmarking pkg.
 func TestArgs(pkg string, o Options) []string {
@@ -100,6 +101,10 @@ const killGrace = 2 * time.Second
 // go, taskset and standing benchmark binaries. Pew retains its directory and
 // environment admission and its benchmark-output/error presentation.
 func runCommand(ctx context.Context, dir string, env gotool.Environment, name string, full []string) ([]byte, error) {
+	return runCommandDiagnostic(ctx, dir, env, name, full, nil)
+}
+
+func runCommandDiagnostic(ctx context.Context, dir string, env gotool.Environment, name string, full []string, diagnostics io.Writer) ([]byte, error) {
 	runner := gotool.Runner(nil)
 	// Quit is intentionally absent: SIGQUIT would write goroutine stacks into
 	// the measured stream, contaminating its sample-completeness evidence.
@@ -110,7 +115,13 @@ func runCommand(ctx context.Context, dir string, env gotool.Environment, name st
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
+	runErr := cmd.Run()
+	if diagnostics != nil && stderr.Len() != 0 {
+		if _, err := diagnostics.Write(stderr.Bytes()); err != nil {
+			return nil, err
+		}
+	}
+	if err := runErr; err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -124,6 +135,16 @@ func runCommand(ctx context.Context, dir string, env gotool.Environment, name st
 			name, strings.Join(full, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
+}
+
+// ExecuteDiagnostic preserves successful profiler diagnostics as well as failures.
+// The caller owns isolated output files and never uses these rows as measurements.
+func ExecuteDiagnostic(ctx context.Context, dir, pin string, env gotool.Environment, bin string, args []string, diagnostics io.Writer) ([]byte, error) {
+	name, full := bin, args
+	if pin != "" {
+		name, full = "taskset", append([]string{"-c", pin, bin}, args...)
+	}
+	return runCommandDiagnostic(ctx, dir, env, name, full, diagnostics)
 }
 
 // A CorruptLine is one line of the transient `go test` stream that carried

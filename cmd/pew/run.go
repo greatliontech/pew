@@ -17,6 +17,7 @@ import (
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/gitblob"
 	"github.com/greatliontech/pew/internal/gotool"
+	"github.com/greatliontech/pew/internal/profiles"
 	"github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 	"github.com/spf13/cobra"
@@ -24,6 +25,9 @@ import (
 )
 
 type runConfig struct {
+	profile, profileBenchtime string
+	// diagnostic is the contained profiler process seam; nil uses ExecuteDiagnostic.
+	diagnostic      func(context.Context, string, string, gotool.Environment, string, []string, io.Writer) ([]byte, error)
 	writeGateBound  time.Duration
 	vouches         []string
 	benchDir, label string
@@ -70,6 +74,12 @@ func newRunCmd() *cobra.Command {
 		Short: guidanceShort("run"),
 		Long:  guidanceHelp("run"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if _, err := profiles.Kinds(rc.profile); err != nil {
+				return err
+			}
+			if err := profiles.ValidateBudget(rc.profileBenchtime); err != nil {
+				return err
+			}
 			// A label the store cannot name is a flag value: it refuses
 			// here, before any listing or measurement (spec
 			// REQ-pew-preparation).
@@ -105,10 +115,22 @@ func newRunCmd() *cobra.Command {
 	f.StringVar(&rc.label, "label", "", "")
 	f.BoolVar(&rc.all, "all", false, "")
 	f.StringArrayVar(&rc.vouches, "vouch", nil, "")
+	f.StringVar(&rc.profile, "profile", "", "")
+	f.Lookup("profile").NoOptDefVal = "cpu,alloc"
+	f.StringVar(&rc.profileBenchtime, "profile-benchtime", "1s", "")
 	return cmd
 }
 
 func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []string) error {
+	if _, err := profiles.Kinds(rc.profile); err != nil {
+		return err
+	}
+	if rc.profileBenchtime == "" {
+		rc.profileBenchtime = "1s"
+	}
+	if err := profiles.ValidateBudget(rc.profileBenchtime); err != nil {
+		return err
+	}
 	ctx, invocation, err := beginInvocation(ctx, rc.benchDir, rc.vouches, errw)
 	if err != nil {
 		return err
@@ -493,7 +515,7 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 		served := len(runBenches) - len(need)
 		if len(need) == 0 {
 			fmt.Fprintf(w, "%-12s %s: %d valid, nothing to run\n", "served", p.ImportPath, served)
-			return nil
+			return runProfiles(ctx, w, errw, rc, gc, prep, envs, conditions, view, prep.runBenches)
 		}
 		if served > 0 {
 			fmt.Fprintf(w, "%-12s %s: %d valid, measuring %d\n", "served", p.ImportPath, served, len(need))
@@ -644,9 +666,17 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 			len(refused), strings.Join(details, " | ")))
 	}
 	if len(problems) > 0 {
-		return fmt.Errorf("%s (%d recorded)", strings.Join(problems, "; "), len(written))
+		// Successful siblings may still fulfill explicitly requested diagnostics.
+		var eligible []string
+		for _, name := range prep.runBenches {
+			if armFailed[name] == nil && len(armRefused[name]) == 0 {
+				eligible = append(eligible, name)
+			}
+		}
+		profileErr := runProfiles(ctx, w, errw, rc, gc, prep, envs, conditions, view, eligible)
+		return errors.Join(fmt.Errorf("%s (%d recorded)", strings.Join(problems, "; "), len(written)), profileErr)
 	}
-	return nil
+	return runProfiles(ctx, w, errw, rc, gc, prep, envs, conditions, view, prep.runBenches)
 }
 
 // armWriteGateBound bounds a measured arm's write gate — the view
@@ -754,7 +784,7 @@ func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitSta
 	if stateAtWrite.Commit != commit {
 		return fmt.Errorf("repository HEAD moved during the benchmark run")
 	}
-	if err := st.WriteBatch([]store.WriteRequest{{PkgRel: pkgRel, Bench: name, Label: rc.label, Results: recs}}); err != nil {
+	if err := st.WriteBatchContext(gate, []store.WriteRequest{{PkgRel: pkgRel, Bench: name, Label: rc.label, Results: recs}}); err != nil {
 		return err
 	}
 	fmt.Fprintf(w, "%-12s %s.%s\n", "recorded", p.ImportPath, name)
@@ -1172,7 +1202,12 @@ func publishRefresh(st *store.Store, pkgRel, bench, label string, admitted admis
 			}
 		}
 	}
-	return st.Write(pkgRel, bench, label, rows)
+	if admitted.raw == nil {
+		return fmt.Errorf("refresh: exact recording revision unavailable")
+	}
+	gate, cancel := context.WithTimeout(context.Background(), armWriteGateBound)
+	defer cancel()
+	return st.ReplaceContext(gate, store.Key{PkgRel: pkgRel, Bench: bench, Label: label}, admitted.raw, rows)
 }
 
 // warnNewVariantLineage compares the GOMAXPROCS suffixes of the rows

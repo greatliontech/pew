@@ -254,7 +254,13 @@ func TestRefreshPreservesNativeHistoricalEvidence(t *testing.T) {
 		}
 		refreshed := fp
 		refreshed.InertTestVariantApplicability = gofresh.InertTestVariantApplicability{Strategy: gofresh.InertTestVariantExtension, TestVariantClosure: "new-variant"}
-		if err := publishRefresh(st, "", "BenchmarkX", "", admitRecording(rows, false), refreshed, "new-ledger"); err != nil {
+		original := admitRecording(rows, false)
+		var err error
+		original.raw, err = st.ReadBytes(store.Key{Bench: "BenchmarkX"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := publishRefresh(st, "", "BenchmarkX", "", original, refreshed, "new-ledger"); err != nil {
 			t.Fatal(err)
 		}
 		back, err := st.Read("", "BenchmarkX", "")
@@ -284,8 +290,8 @@ func TestRefreshPreservesNativeHistoricalEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, version := range []string{"1", "2", "3"} {
-			legacy := bytes.Replace(data, []byte("pew-format: 4"), []byte("pew-format: "+version), 1)
+		for _, version := range []string{"1", "2", "3", "4"} {
+			legacy := bytes.Replace(data, []byte("pew-format: "+runpkg.RecordingFormat), []byte("pew-format: "+version), 1)
 			if err := os.WriteFile(path, legacy, 0o644); err != nil {
 				t.Fatal(err)
 			}

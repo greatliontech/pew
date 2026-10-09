@@ -80,6 +80,7 @@ var RecordingKeys = []RecordingKey{
 	{Name: "pew-runconditions", Class: KeyMandatory, Audit: true, Display: "run conditions"},
 	{Name: "pew-fingerprint", Class: KeyMandatory, Display: "fingerprint", Chunked: true},
 	{Name: "pew-test-variant-ledger", Class: KeyMandatory, Display: "test-variant ledger", Chunked: true},
+	{Name: "pew-profiles", Class: KeyOmittable, Display: "profiles", Chunked: true},
 }
 
 // FingerprintProjectionKeys name derived, non-persisted display and comparison
@@ -106,6 +107,7 @@ var FingerprintProjectionKeys = []RecordingKey{
 var (
 	KeyFormat                   = registered("pew-format")
 	KeyFingerprint              = registered("pew-fingerprint")
+	KeyProfiles                 = registered("pew-profiles")
 	KeyCommit                   = registered("commit")
 	KeyToolchain                = registered("toolchain")
 	KeyMachine                  = registered("machine")

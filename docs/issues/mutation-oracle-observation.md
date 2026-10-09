@@ -17,9 +17,9 @@ Gomutant's parent `-coverprofile` does not collect a self-reexecuted child's
 counters. When other test batches reach the target, narrowing can incorrectly
 use the missing child counters as negative coverage and exempt a mandatory
 subprocess testcase. The shared coverage model needs its own design fix before
-this selection can support a final mutation judgment. The read-only diagnosis
-is session `ses_ee11e73c3ffe1Rw2GG7WM1jzno`; the owning-tool issue is being filed
-by the main agent for the performance-evidence chunk 12 final mutation gate.
+this selection can support a final mutation judgment. The owning-tool issue is
+gomutant `docs/issues/child-coverage-cannot-authorize-negative-exemptions.md`,
+slotted before the performance-evidence chunk 12 final mutation gate.
 
 ## Outstanding campaign evidence
 
@@ -65,6 +65,14 @@ Earlier incomplete selections also require reconciliation at the final gate:
   and sound remeasurement requirement.
 
 ## Required resolution
+
+The profile-boundary selection `9eeabef27df54358` requested four candidates each
+for `internal/profiles.Analyze` and `Decode`, retaining both derived oracle
+packages. The 30-second proof budget left 224 subjects unproven. The baseline
+completed and four of eight candidate attempts finished before the 30-minute
+command deadline, but no target committed. There are no banked kills or survivor
+judgments from that selection; the remaining profile delta was not selected.
+Its named invariant-breaking probes remain separate evidence.
 
 Fix shared oracle-coverage faults in gomutant, preserving the mandatory
 integration testcase. Reconcile and remeasure the incomplete selections with

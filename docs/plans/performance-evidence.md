@@ -41,13 +41,13 @@
   - [x] 8.2 Bind environment, store/vouches and preparation resources to one invocation; share immutable analysis facts while giving every arm its own capture, attachment, validation and publication transaction.
   - [x] 8.3 Unify recording admission and verdict derivation; select observed capture/checking only with supported completion premises, retain unsupported observation evidence as incomplete/unverifiable while deriving final verdicts under ordinary guards and explicit purity, and preserve inert test growth's justified applicability transformation.
   - [x] 8.4 Verify source/runtime-input movement, proof rejection, old-record non-upgrade, sibling isolation and every verdict surface; complete gates and mutation evidence, converge review, close resolved issues, commit and push.
-- [ ] 9. Supply complete and auditable comparison policies.
+- [x] 9. Supply complete and auditable comparison policies.
   - [x] 9.1 Triage comparison and rendering issues; specify requested benchmark/unit coverage, missing or skipped comparisons, condition compatibility and freshness admission separately from informational comparison, obtaining consent for any breaking default change.
   - [x] 9.2 Implement shared metric definitions, typed coverage/disposition reporting and enforceable comparison policies, including non-finite samples and zero-baseline metrics, with text/JSON parity.
-  - [ ] 9.3 Verify partial/empty/new/missing-arm cases and condition mismatches, run gates and mutations, converge review, commit and push.
+  - [x] 9.3 Verify partial/empty/new/missing-arm cases and condition mismatches, run gates and mutations, converge review, commit and push.
 - [ ] 10. Add provenance-bound profile capture and subject attribution.
-  - [ ] 10.1 Triage profile-companion requirements and specify CPU/allocation capture, integrity, ownership, persistence, attribution and failure behavior under the evidence contract, using the approved github.com/google/pprof/profile dependency.
-  - [ ] 10.2 Capture diagnostic profiles separately from statistical timing samples, bound to their actual executions and matched source/build/runtime identities; report empty, incomplete or unattributable captures without fabricated certainty.
+  - [x] 10.1 Triage profile-companion requirements and specify CPU/allocation capture, integrity, ownership, persistence, attribution and failure behavior under the evidence contract, using the approved github.com/google/pprof/profile dependency.
+  - [x] 10.2 Capture diagnostic profiles separately from statistical timing samples, bound to their actual executions and matched source/build/runtime identities; report empty, incomplete or unattributable captures without fabricated certainty.
   - [ ] 10.3 Integrate profile freshness/integrity and cleanup with recording admission and status; verify drift/interruption/corruption, run gates and mutations, converge review, commit and push.
 - [ ] 11. Complete A/B execution and historical profile comparison.
   - [ ] 11.1 Triage A/B issues and specify both-side profile comparison over compatible sample kinds and provenance, lossless multi-package output, cancellable Git control processes and bounded truthful worktree cleanup.
@@ -56,5 +56,6 @@
 - [ ] 12. Close the complete performance-evidence workflow.
   - [ ] 12.1 Triage remaining clean-baseline, per-arm noise-floor, machine-readable/progress and cross-tool items against implemented capabilities; retain only justified, checkably triggered deferrals.
     - [ ] Repair shared negative-coverage admission for self-reexecuting child oracles and remeasure affected survivor records before the final mutation gate.
+    - [ ] Enforce observation-premise isolation with generated producer-boundary evidence and close its invariant-coverage gap before final verification.
   - [ ] 12.2 Reconcile canonical guidance with the complete measurement/profile/comparison workflow and settle final format numbering after the schema is stable, preserving provenance and supported evidence classes.
   - [ ] 12.3 Run the applicable final gates and mutation campaign, converge review, close issues and the plan, commit and push, then install only the clean committed tool.

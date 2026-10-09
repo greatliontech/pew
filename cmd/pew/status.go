@@ -339,24 +339,33 @@ func statusPackage(ctx context.Context, w, errw io.Writer, getEngine func() (*go
 		if label != "" {
 			name += "." + label
 		}
+		profileRows, profileErr := profileStatuses(ctx, st, bv.admitted, bv.view, p.ImportPath, b)
+		if profileErr != nil {
+			failures = append(failures, fmt.Errorf("%s.%s profiles: %w", p.ImportPath, b, profileErr))
+		}
 		if bv.err != nil {
 			failures = append(failures, fmt.Errorf("%s.%s: %w", p.ImportPath, b, bv.err))
 			if jsonOut {
-				if err := writeJSONLine(w, statusJSONRow{Package: p.ImportPath, Benchmark: b, Label: label, Error: bv.err.Error()}); err != nil {
+				if err := writeJSONLine(w, statusJSONRow{Package: p.ImportPath, Benchmark: b, Label: label, Error: bv.err.Error(), Profiles: profileRows}); err != nil {
 					return err
 				}
 			} else if _, err := fmt.Fprintf(w, "%-12s %s.%s  (%v)\n", "error", p.ImportPath, name, bv.err); err != nil {
 				return err
 			}
+			if !jsonOut {
+				if err := renderProfiles(w, profileRows, explain); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		v, reason, fp := bv.v, bv.reason, bv.fp
 		warnForeignKeys(errw, p.ImportPath, b, bv.foreign)
-		if staleOnly && v == verdictValid {
+		if staleOnly && v == verdictValid && profileErr == nil {
 			continue
 		}
 		if jsonOut {
-			if err := writeJSONLine(w, statusJSONRow{Package: p.ImportPath, Benchmark: b, Label: label, Verdict: string(v), Reason: reason}); err != nil {
+			if err := writeJSONLine(w, statusJSONRow{Package: p.ImportPath, Benchmark: b, Label: label, Verdict: string(v), Reason: reason, Profiles: profileRows}); err != nil {
 				return err
 			}
 			continue
@@ -366,6 +375,9 @@ func statusPackage(ctx context.Context, w, errw io.Writer, getEngine func() (*go
 			line += "  (" + reason + ")"
 		}
 		if _, err := fmt.Fprintln(w, line); err != nil {
+			return err
+		}
+		if err := renderProfiles(w, profileRows, explain); err != nil {
 			return err
 		}
 		// fp.MaximalClosure is non-empty iff the recording decoded: the
@@ -442,9 +454,13 @@ type benchVerdict struct {
 func checkPackage(ctx context.Context, st *store.Store, buildView func([]gofresh.Subject) (*gofresh.View, error), pkgPath, pkgRel, moduleDir string, benches []string, label string, view *gofresh.View) (map[string]*benchVerdict, error) {
 	out := map[string]*benchVerdict{}
 	for _, b := range benches {
-		recs, err := st.Read(pkgRel, b, label)
+		raw, err := st.ReadBytes(store.Key{PkgRel: pkgRel, Bench: b, Label: label})
+		var recs []*benchfmt.Result
+		if err == nil {
+			recs, err = store.Parse(bytes.NewReader(raw), b)
+		}
 		switch {
-		case errors.Is(err, store.ErrNotRecorded):
+		case errors.Is(err, store.ErrNotRecorded), errors.Is(err, os.ErrNotExist):
 			out[b] = &benchVerdict{v: verdictUnrecorded}
 			continue
 		case errors.Is(err, store.ErrInvalidRecording):
@@ -457,6 +473,7 @@ func checkPackage(ctx context.Context, st *store.Store, buildView func([]gofresh
 		bv := &benchVerdict{foreign: store.ForeignConfigKeys(recs)}
 		out[b] = bv
 		adm := admitRecording(recs, true)
+		adm.raw = raw
 		bv.admitted = adm
 		if !adm.ok {
 			// A strategy-refused recording decoded: its fingerprint rides

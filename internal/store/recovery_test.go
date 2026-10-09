@@ -7,6 +7,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/greatliontech/pew/internal/run"
 )
 
 func FuzzCorruptRecordingNeverBecomesEvidence(f *testing.F) {
@@ -34,7 +36,7 @@ func TestParseIdentifiesUnusablePewRecordings(t *testing.T) {
 	for name, text := range map[string]string{
 		"oversized legacy": "pew-format: 2\npew-test-variant-ledger: " + strings.Repeat("A", bufio.MaxScanTokenSize+1) + "\nBenchmarkProbe-8 1 5 ns/op\n",
 		"current syntax":   "pew-format: 3\nBenchmarkProbe-8 not-a-count 5 ns/op\n",
-		"broken chunks":    "pew-format: 4\npew-fingerprint.2: abc\nBenchmarkProbe-8 1 5 ns/op\n",
+		"broken chunks":    "pew-format: " + run.RecordingFormat + "\npew-fingerprint.2: abc\nBenchmarkProbe-8 1 5 ns/op\n",
 		"no samples":       "pew-format: 3\n",
 		"valid prefix":     "pew-format: 3\nBenchmarkProbe-8 1 5 ns/op\nBenchmarkProbe-8 not-a-count 5 ns/op\n",
 		"tab separator":    "pew-format:\t2\nBenchmarkProbe-8 not-a-count 5 ns/op\n",

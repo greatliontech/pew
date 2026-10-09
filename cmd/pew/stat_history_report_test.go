@@ -190,7 +190,7 @@ func TestStatBlockedAuditNotesHaveTextJSONParity(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					writeFile(t, path, strings.Replace(string(data), "pew-format: 4", "pew-format: 3", 1))
+					writeFile(t, path, strings.Replace(string(data), "pew-format: "+run.RecordingFormat, "pew-format: 3", 1))
 				}
 				refs := []string{a}
 				if blocker != "strategy" {

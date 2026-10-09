@@ -16,12 +16,13 @@ import (
 
 // statusJSONRow is one `pew status -json` line.
 type statusJSONRow struct {
-	Package   string `json:"package"`
-	Benchmark string `json:"benchmark,omitempty"`
-	Label     string `json:"label,omitempty"`
-	Verdict   string `json:"verdict,omitempty"`
-	Reason    string `json:"reason,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Package   string          `json:"package"`
+	Benchmark string          `json:"benchmark,omitempty"`
+	Label     string          `json:"label,omitempty"`
+	Verdict   string          `json:"verdict,omitempty"`
+	Reason    string          `json:"reason,omitempty"`
+	Error     string          `json:"error,omitempty"`
+	Profiles  []profileStatus `json:"profiles,omitempty"`
 }
 
 func writeJSONLine(w io.Writer, v any) error {

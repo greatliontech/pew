@@ -94,7 +94,7 @@ func TestIsRecordingRequiresCurrentFormat(t *testing.T) {
 // TestRawFormatRejectsDuplicateRecordingKeys: §5's duplicate rejection covers
 // every recording key, not only the format discriminator.
 func TestRawFormatRejectsDuplicateRecordingKeys(t *testing.T) {
-	base := "commit: c1\npew-format: 4\nBenchmarkRun-8 1000000 1234 ns/op\n"
+	base := "commit: c1\npew-format: " + run.RecordingFormat + "\nBenchmarkRun-8 1000000 1234 ns/op\n"
 	if !rawFormatValid([]byte(base)) {
 		t.Fatal("well-formed recording rejected")
 	}
@@ -522,11 +522,11 @@ func TestParseFromContent(t *testing.T) {
 }
 
 // TestRawFormatRequiresLFTermination: §5 requires the byte-exact LF-terminated
-// line "pew-format: 3"; a recording whose final bytes are the discriminator with
+// current discriminator; a recording whose final bytes are the discriminator with
 // no terminating newline is format-stale, and the same bytes plus the newline
 // are accepted (the termination is the only difference under test).
 func TestRawFormatRequiresLFTermination(t *testing.T) {
-	unterminated := "BenchmarkRun-8 1000000 1234 ns/op\npew-format: 4"
+	unterminated := "BenchmarkRun-8 1000000 1234 ns/op\npew-format: " + run.RecordingFormat
 	if rawFormatValid([]byte(unterminated)) {
 		t.Error("unterminated pew-format discriminator accepted")
 	}

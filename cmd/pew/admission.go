@@ -25,6 +25,7 @@ type admission struct {
 	fp     gofresh.Fingerprint
 	ledger string
 	rows   []*benchfmt.Result
+	raw    []byte
 }
 
 // admitRecording climbs the ladder over the WHOLE recording: every row
@@ -85,7 +86,7 @@ func admitRecording(recs []*benchfmt.Result, workingTree bool) admission {
 func closedSetValues(cfg []benchfmt.Config) map[string]string {
 	values := map[string]string{}
 	for _, c := range cfg {
-		if runpkg.IsRecordingKey(c.Key) {
+		if runpkg.IsRecordingKey(c.Key) && c.Key != runpkg.KeyProfiles.Name {
 			values[c.Key] = string(c.Value)
 		}
 	}

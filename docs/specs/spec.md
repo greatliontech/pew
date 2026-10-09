@@ -84,12 +84,13 @@ configuration envelope, uniform across every sample in one recording:
 
 | key | meaning | source-of-truth? | class | audit? | guard? | chunked? | display |
 |-----|---------|------------------|-------|--------|--------|----------|---------|
-| `pew-format` | exact recording format version, `4` | yes | discriminator | no | no | no | format |
+| `pew-format` | exact recording format version, `5` | yes | discriminator | no | no | no | format |
 | `commit` | full measured HEAD SHA | yes | mandatory | no | no | no | commit |
 | `dirty` | whether measured sources differed from the commit | yes | mandatory | no | no | no | dirty |
 | `pew-runconditions` | observed transient conditions (§9) | yes | mandatory | yes | no | no | run conditions |
 | `pew-fingerprint` | Gofresh native JSON fingerprint, wrapped in unpadded URL-safe base64 | yes | mandatory | no | no | yes | fingerprint |
 | `pew-test-variant-ledger` | encoded compartment declaration ledger (§7.9) | derived | mandatory | no | no | yes | test-variant ledger |
+| `pew-profiles` | diagnostic companion index (§6.2), unpadded URL-safe base64 JSON | yes | omittable | no | no | yes | profiles |
 
 The fingerprint payload is the sole persisted fingerprint representation. Gofresh's
 native JSON encoder and decoder own its complete field set and record grammar
@@ -104,7 +105,7 @@ does not become a new Pew format refusal or confer observation-based reuse.
 
 Commit, dirty, conditions and the test-variant ledger are Pew-owned facts beside
 that payload. No parallel fingerprint config lines are persisted or admitted in
-format 4. Comparison and explanation values below are projections from the admitted
+format 5. Comparison and explanation values below are projections from the admitted
 native fingerprint, never additional stored evidence. Absence remains absence;
 neither decoding nor refresh supplies historical observation or strategy evidence.
 An inert-growth refresh changes only the native fingerprint's versioned
@@ -148,9 +149,9 @@ acceptances, absent when empty; they are audit, never comparison guards. Freshne
 judgments derive from the current engine's own vouch set. Runtime manifests are
 chunked only as part of the native fingerprint payload.
 
-`pew-format` occurs exactly once as the byte-exact LF-terminated line `pew-format: 4`. A recording
+`pew-format` occurs exactly once as the byte-exact LF-terminated line `pew-format: 5`. A recording
 with no discriminator, a duplicate, alternate whitespace or line endings, or another value —
-formats 1, 2 and 3 included — is
+formats 1 through 4 included — is
 `stale (format)` and is regenerated, never interpreted as an earlier shape. Benchmark
 output that attempts to define `pew-*` or any other Pew-owned provenance or guard key is
 refused before storage, including the former fingerprint config names. A recording
@@ -161,8 +162,8 @@ The envelope table's `class` column states its mandatory key set. Projection
 `audit?` and `guard?` columns govern comparison notes and the four comparison
 guards (§10.1); the first guard mixed, missing or differing is the one a note or
 A/B refusal names. Projection order is display and precedence order. A file's
-line order is unconstrained; readers key lines by name. The two envelope rows
-marked `chunked?` — fingerprint payload and ledger — are stored as
+line order is unconstrained; readers key lines by name. The envelope rows
+marked `chunked?` — fingerprint payload, ledger and profile index — are stored as
 continuation lines of at most 32 KiB each: the row's own line carries the first part and `<key>.2`, `<key>.3`, … the rest in order, a
 continuation spelling being that row on the wire (closed-set and duplicate rules included: a repeated
 continuation is a repeated recording key, `stale (format)`); the reader rejoins them before any
@@ -345,6 +346,120 @@ made by `git worktree add` — a linked worktree, whose objects and refs live in
 common directory behind a `.git` file — reads committed recordings and snapshots its repository
 state exactly as a plain clone does: recording a baseline at an older ref in a worktree is the A/B
 shape.
+
+### 6.2 Diagnostic profile companions
+
+**REQ-pew-profile-capture** (behavior): Pew MUST capture requested diagnostics in
+independent single-subject processes without changing statistical evidence.
+`run --profile=cpu|alloc|cpu,alloc` requests diagnostics; bare `--profile` requests
+both. `--profile-benchtime` defaults to `1s` and accepts a positive duration or
+positive iteration count with the `x` suffix. Without a profile request there is
+no diagnostic build, execution, capture or source inventory. Statistical defaults
+and measurement rows are unchanged. A valid measurement serves while a requested
+missing, stale or unusable diagnostic is captured independently. `--all` replaces
+both requested diagnostics and measurements.
+
+Each kind executes separately, with count one and exactly one top-level subject,
+preserving sub-benchmark selection. CPU profiling and sampled allocation profiling
+never share a process. Allocation profiling uses the runtime's default sampling;
+the profile's native period and sample types describe its samples. The capture
+scope is the process profiling window, including harness/setup work, not a claim
+of per-operation cost or child-specific attribution. Each capture owns its build
+and source span, effective environment, observation frame, normal-completion
+receipt, native fingerprint, ledger, repository bracket and conditions. The
+profile-instrumented harness is not an outcome-admitted execution model: profiling
+can start before testlog and flush afterwards. It always uses the identity-only
+observation lane with that reason, never ordinary outcome-support preparation.
+Normal exit cannot strengthen this evidence. Purity retains its separate meaning.
+
+The optional index is independently admitted: malformed benchmark framing,
+duplicate keys or broken continuation framing invalidate the main recording;
+malformed companion JSON, inconsistent index values across rows, and missing or
+corrupt objects are profile faults without discarding readable measurement evidence.
+Absence means not captured, never an empty or valid profile. The index is canonical
+JSON, rejects unknown/duplicate fields, and contains version 1 and captures keyed
+by kind. A capture carries its subject, selected workload, actual child names and
+iteration counts, positive budget, protocol and sampling scope, commit, dirty
+state, conditions, executable SHA-256, native fingerprint and encoded ledger,
+profile object SHA-256 and length, and optional exact source snapshots. It stores
+no duplicate native sample table, derived attribution totals or dominance verdict.
+
+**REQ-pew-profile-attribution** (behavior): Attribution MUST conserve sampled
+weights and admit source mappings only from exact producing evidence.
+Source snapshots contain only known build-selected mutable Go input files read
+inside the validated source/build span. They are not a complete debug-file map.
+Profile filenames are data, never filesystem read instructions. Exact filename,
+symbol and line evidence may map to captured source; trimpath guesses, line
+directives, ambiguous mappings, cgo, generated symbols and unsupported mappings
+remain unresolved with their symbol weights retained. Flat attribution chooses
+one leaf frame per sample and conserves all weights including unknown leaves;
+cumulative attribution overlaps and is labelled as such. Empty profiles prove no
+absence of work; sampled functions prove no intended-subject dominance.
+
+**REQ-pew-profile-publication** (behavior): Profile objects MUST be immutable and
+recording attachment conditional and atomic across cooperating processes.
+Object paths derive solely from lowercase SHA-256 under
+`<bench-dir>/.profiles/sha256`; index entries contain no storage paths. Objects are
+immutable; an existing object is read and verified before reuse. All reads and
+writes enforce regular files and symlink-free store paths. Objects install before
+the atomic index-bearing recording replacement. Unreferenced objects may remain
+after failure or interruption; automatic object collection is not performed.
+
+Measurements publish before diagnostics. Attachment compares the exact expected
+recording bytes and replaces under the same cross-process lock used by every
+measurement writer, refresh and remover. Lock waiting is context-bounded, including
+detached publication after cancellation. Byte equality prevents lost updates but
+does not establish evidence compatibility: source, guards, known runtime inputs
+and actual child selection must agree with the measurement. Known disagreement
+refuses attachment; unavailable evidence leaves the relation explicitly unverified.
+The target measurement revision, diagnostic freshness and compatibility relation
+are distinct claims. Failed attachment preserves the complete prior recording.
+
+For a measurement extended under §7.9, variant compatibility compares the
+measurement's proven applicability endpoint with the diagnostic's producing
+variant, not the measurement's older producing variant. The exact recorded
+measurement must pass the shared native semantic validity check and its checking
+view must validate before that endpoint is consumed. An accessor value alone,
+an unknown applicability strategy, or a provisional/unverifiable verdict supplies
+no such proof. Both producing fingerprints and their original observation support
+remain unchanged; profile attachment does not extend either fingerprint itself.
+
+**REQ-pew-profile-report** (behavior): Profile failures MUST remain independently
+visible without erasing completed measurement evidence.
+Requested failed, corrupt or empty captures make `run` unsuccessful without
+discarding published measurements. A nonempty identity-only capture may publish
+as an unverifiable diagnostic. Signals exit 130 and preserve completed units;
+completed captures finalize under a bounded detached gate. Successful stderr
+diagnostics remain visible, including profiling startup/flush errors, which are
+not misreported as empty samples. Status reports integrity, freshness, relation
+and attribution separately in text and additive JSON fields. Ordinary stale,
+unverifiable or empty states are successful reporting; read/integrity/report
+failures exit 1 while independent measurements and rows remain visible.
+
+The index's JSON fields are `version` and `captures`. Each capture carries `kind`,
+`package`, `benchmark`, `selection`, `children` (`name`, `iterations`), `budget`,
+`protocol` (`go-test-binary-profile/1`), `scope` (`process profiling window including
+harness and setup; children aggregated`), `sampling` (`runtime-default`), `commit`,
+`dirty`, `conditions`, `binarySHA256`, `measurementRevision`, `fingerprint` (native
+JSON), `ledger` (the existing encoded ledger), `sha256`, `size`, and optional
+`sources`. Source entries carry `filename` (evidence, never a read path), optional
+`moduleRelative` and `package`, and `bytes` (JSON's base64 byte encoding).
+`measurementRevision` is SHA-256 of the benchmark-format writer's rendering of
+the admitted rows with only the profile index removed, distinct from publication's
+exact-file-byte comparison. It binds measurement rows and their provenance, not
+merely a mutable destination name. Each kind occurs at most once. All index JSON
+uses the producer's canonical field ordering and omits only designated optional
+fields; decoding never fills absent mandatory fields. Full profile bytes, including
+native period/sample tables, are stored unchanged under their content hash.
+
+Status JSON adds `profiles`, whose entries carry `kind` when known, `integrity`
+(`verified`, `invalid`, `unavailable`), `freshness` (native verdict or `unavailable`),
+`relation` (`unverified`, `mismatch`), `outcome` (`identity-only`, `unavailable`),
+optional `empty` (only when the samples were admitted), `reason`, `error`, `metrics`. Metric entries carry native
+`type`, `unit`, `total` and `weights`; a weight carries `symbol`, optional `source`,
+`attribution` (`exact-source`, `unresolved`), `flat` and `cumulative`. An absent
+profile index omits `profiles`. Integrity failure cannot produce a usable metric
+or imply empty samples. No profile verdict changes a statistical verdict or gate.
 
 ## 7. Staleness contract
 
@@ -1186,7 +1301,8 @@ go-git keeps pew self-contained (`go install` works with no external binary beyo
   §7.4; VTA a documented upgrade path, §7.4); `go/types`, `go/ast` via `go/packages`.
   (`golang.org/x/perf/benchseries` is a candidate later for across-commit trends.)
 - **Imported (third-party, deliberate):** `github.com/go-git/go-git/v5` as the **git access layer**,
-  and `github.com/spf13/cobra` as the CLI command/flag layer.
+  `github.com/spf13/cobra` as the CLI command/flag layer, and
+  `github.com/google/pprof/profile` for native profile parsing and validation.
   pew is a pure git *reader* (HEAD, commit metadata, ref resolution, blob reads for
   baselines, file-scoped log for trends — §6.1, §9). Every `git show <ref>:<path>` /
   `git log -- <path>` in this spec is performed via go-git's object API, **never** by shelling to a
@@ -1199,7 +1315,7 @@ go-git keeps pew self-contained (`go install` works with no external binary beyo
   cannot produce a false-`valid`.
 - **Subprocesses (the Go toolchain only):** `go test -bench` (run), `go list -json` (Tier-1 file
   sets / build-config resolution); `go/packages` drives the same toolchain for Tier-2 loads.
-- Per project policy, go-git and cobra are the deliberately-added third-party deps (user-approved);
+- Per project policy, go-git, cobra and pprof are deliberately-added third-party deps (user-approved);
   any *further* third-party dependency is flagged and asked before adding.
 
 ## 12. CLI surface
@@ -1322,7 +1438,7 @@ shape of the one text line that carries a count.
 
 | verb | default behaviour and output | defaults | opt-ins (purpose) |
 |------|------------------------------|----------|-------------------|
-| `run` | serve what is proven, measure the rest, every package prepared first; one `recorded` line per measured benchmark, one `served` line per package that served anything, counting the valid recordings not re-measured (`served <pkg>: N valid, measuring M` / `N valid, nothing to run`; the row label is padded to the `recorded` column), refusals and errors as lines, progress on stderr on the cadence; judged under the store's reviewed vouch file | `--count=10` `--benchtime=1s` `--bench=.` | `--all` (a fresh baseline after a change nothing guards), `--pin` (cut scheduler variance), `--strict` (a CI gate on hygiene), `--label` (a variant lineage), `--vouch` (a one-off acceptance extending the store's reviewed vouch file), `--bench-dir` (a store outside the module) |
+| `run` | serve what is proven, measure the rest, every package prepared first; one `recorded` line per measured benchmark, one `served` line per package that served anything, counting the valid recordings not re-measured (`served <pkg>: N valid, measuring M` / `N valid, nothing to run`; the row label is padded to the `recorded` column), refusals and errors as lines, progress on stderr on the cadence; judged under the store's reviewed vouch file | `--count=10` `--benchtime=1s` `--bench=.` `--profile-benchtime=1s` | `--all` (a fresh baseline after a change nothing guards), `--pin` (cut scheduler variance), `--strict` (a CI gate on hygiene), `--label` (a variant lineage), `--vouch` (a one-off acceptance extending the store's reviewed vouch file), `--bench-dir` (a store outside the module), `--profile` (separate cpu, alloc or cpu,alloc diagnostics; bare selects both) |
 | `status` | every selected benchmark's verdict with its reason — the inventory shows coverage, not only work | — | `--stale` (the actionable set, scriptable), `--explain` (why a verdict is non-valid), `--json` (machine rows), `--label`, `--vouch`, `--bench-dir` |
 | `stat` | compare recorded results, the baseline mode by argument count; the text table | `--alpha=0.05` `--confidence=0.95` `--threshold=3` `--gate=sec/op` `--coverage=partial` `--freshness=report` `--conditions=report` | `--fail-on-regression` (a CI exit), `--json` (machine comparison rows and notes), `--explain` (the values behind a skip), `--label`, `--vouch`, `--bench-dir` |
 | `ab` | interleaved A/B of the working tree against a ref, nothing stored; the per-benchmark delta table | `--count=6` `--ref=HEAD` `--bench=.` | `--benchtime` (a budget other than go's default), `--out` (both raw streams for offline analysis), `--pin` (cut scheduler variance on both sides), `--strict` (refuse a noisy machine), `--worktree-dir` (a same-filesystem placement where the repository's parent is unwritable or on another device) |
