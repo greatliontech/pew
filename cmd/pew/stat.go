@@ -17,6 +17,7 @@ import (
 	"github.com/greatliontech/pew/internal/gitblob"
 	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/metric"
+	"github.com/greatliontech/pew/internal/profiles"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 	"github.com/spf13/cobra"
@@ -25,6 +26,7 @@ import (
 )
 
 type statConfig struct {
+	profile          string
 	vouches          []string
 	benchDir         string
 	label            string
@@ -67,6 +69,8 @@ func newStatCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
+	f.StringVar(&sc.profile, "profile", "", "compare requested diagnostic profiles")
+	f.Lookup("profile").NoOptDefVal = "cpu,alloc"
 	f.StringVar(&sc.benchDir, "bench-dir", "", "")
 	f.StringVar(&sc.label, "label", "", "")
 	f.Float64Var(&sc.opts.Alpha, "alpha", sc.opts.Alpha, "")
@@ -206,6 +210,11 @@ func (b baseline) historicalRefs() []string {
 }
 
 func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []string) error {
+	kinds, err := profiles.Kinds(sc.profile)
+	if err != nil {
+		return err
+	}
+	var profileReports []profileComparison
 	if err := sc.opts.Policies.Validate(); err != nil {
 		return err
 	}
@@ -238,10 +247,26 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 	if err != nil {
 		return err
 	}
+	repo, err = repo.SnapshotRefs(bl.historicalRefs()...)
+	if err != nil {
+		return err
+	}
 
 	modules, err := statModules(pkgs, sc, errw)
 	if err != nil {
 		return err
+	}
+	frozenRepos := map[string]*gitblob.Repo{repo.Root(): repo}
+	for _, m := range modules {
+		frozen := frozenRepos[m.repo.Root()]
+		if frozen == nil {
+			frozen, err = m.repo.SnapshotRefs(bl.historicalRefs()...)
+			if err != nil {
+				return err
+			}
+			frozenRepos[m.repo.Root()] = frozen
+		}
+		m.repo = frozen
 	}
 	scanRoots, err := historicalScanRoots(modules)
 	if err != nil {
@@ -263,12 +288,10 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 	// per-package PGO build input exactly as status and run do (§7.5, §9).
 	// Engines are cached per (module, PGO input): packages of one module whose
 	// effective profiles differ need different guard inputs.
-	type engineKey struct{ moduleDir, pgo string }
-	engines := map[engineKey]*gofresh.Engine{}
+	analysis := newStatAnalysis(env)
 	judgments := map[string]map[string]*benchVerdict{}
 	projections := map[*benchfmt.Result]gofresh.Fingerprint{}
 	subjects := map[*benchfmt.Result]compare.Subject{}
-	goflagsByModule := map[string]string{}
 	freshness := map[*benchfmt.Result]string{}
 	freshnessReason := map[*benchfmt.Result]string{}
 
@@ -334,6 +357,7 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 			// the format rung on both sides, the strategy rung on the
 			// working-tree side alone.
 			baseAdm, newAdm := m.admission(bl.baseRef, key), m.admission(bl.newRef, key)
+			profileReports = append(profileReports, compareStatProfiles(ctx, m, key, bl, kinds, resolved, analysis)...)
 			var causes []compare.Cause
 			for _, side := range []struct {
 				name       string
@@ -458,48 +482,21 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 					// Best-effort: a check failure warns but never blocks the
 					// comparison. The per-side stale-format gate above already
 					// guarantees a decodable fingerprint on this side.
-					goflags, ok := goflagsByModule[cur.moduleDir]
-					if !ok {
-						reader, readerErr := preparationReader(ctx, cur.moduleDir, env)
-						err = readerErr
-						if err == nil {
-							goflags, err = runpkg.EffectiveGoflags(ctx, reader)
-						}
-						if cancelledBy(ctx, err) {
-							return stoppedAt()
-						}
-						if err != nil {
-							fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, err)
-							for _, r := range newRecs {
-								freshnessReason[r] = "effective build flags unavailable"
-							}
-							baseAll = append(baseAll, baseRecs...)
-							newAll = append(newAll, newRecs...)
-							continue
-						}
-						goflagsByModule[cur.moduleDir] = goflags
+					prepared := analysis.prepare(ctx, cur)
+					if cancelledBy(ctx, prepared.err) {
+						return stoppedAt()
 					}
-					pgo, pgoErr := runpkg.PGOInput(cur.moduleDir, cur.pkgDir, cur.mainPkg, goflags)
-					if pgoErr != nil {
-						fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, pgoErr)
+					if prepared.err != nil {
+						if prepared.fatal {
+							return prepared.err
+						}
+						fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, prepared.err)
 						for _, r := range newRecs {
-							freshnessReason[r] = "PGO input unavailable"
+							freshnessReason[r] = prepared.reason
 						}
 						baseAll = append(baseAll, baseRecs...)
 						newAll = append(newAll, newRecs...)
 						continue
-					}
-					ek := engineKey{moduleDir: cur.moduleDir, pgo: pgo}
-					engine := engines[ek]
-					if engine == nil {
-						engine, err = buildEngine(ctx, cur.moduleDir, env, nil, pgo)
-						if cancelledBy(ctx, err) {
-							return stoppedAt()
-						}
-						if err != nil {
-							return err
-						}
-						engines[ek] = engine
 					}
 					// The shared verdict core applies the inert-growth rule
 					// exactly as status and run (its default filter) do (spec §7.9); stat
@@ -509,7 +506,7 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 					batchKey := cur.moduleDir + "\x00" + cur.importPath + "\x00" + key.label
 					batch := judgments[batchKey]
 					if batch == nil {
-						batch, err = m.judgePackage(ctx, engine, cur, key.label)
+						batch, err = m.judgePackage(ctx, analysis, cur, key.label)
 						if cancelledBy(ctx, err) {
 							return stoppedAt()
 						}
@@ -598,17 +595,34 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 	} else if err := writeStatReportText(w, res, coverage); err != nil {
 		return err
 	}
+	if err := writeProfileComparisons(w, profileReports, sc.jsonOut); err != nil {
+		return err
+	}
+	for _, report := range profileReports {
+		if report.failure != nil {
+			reportErrors = append(reportErrors, report.failure)
+		}
+	}
 	if err := interruptedAfterLastUnit(ctx, "stat: interrupted after the last comparison; the comparison shown is complete"); err != nil {
 		return err
 	}
 	if len(reportErrors) > 0 {
 		return errors.Join(reportErrors...)
 	}
+	if sc.failOnRegression && res.Regressed() {
+		return errors.New("regression detected")
+	}
+	if len(kinds) != 0 {
+		fulfilled := len(profileReports) != 0
+		for _, r := range profileReports {
+			fulfilled = fulfilled && r.Compared
+		}
+		if !fulfilled {
+			return &profileUnfulfilledError{}
+		}
+	}
 	if !sc.failOnRegression {
 		return nil
-	}
-	if res.Regressed() {
-		return errors.New("regression detected")
 	}
 	// The gate never passes vacuously (spec §10.1): with zero gated-unit
 	// comparisons there is nothing for Regressed() to judge, so a clean exit

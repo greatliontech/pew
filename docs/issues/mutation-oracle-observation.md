@@ -23,6 +23,12 @@ slotted before the performance-evidence chunk 12 final mutation gate.
 
 ## Outstanding campaign evidence
 
+- Chunk 11's A/B execution and historical profile-comparison delta also
+  requires campaign measurement after the confirmed negative-child-coverage
+  fault above is fixed. This is blocked campaign scope, not a recorded
+  invocation or a campaign pass. Its passed named mutation probes do not
+  discharge that obligation; include the entire delta in sound remeasurement
+  before the chunk 12 final mutation gate.
 - Full campaign `1e11674dc9cefba4`, budget 4: 44 targets, 171 selected
   candidates. It stopped without a summary at 75m30s, with 6 targets banked,
   24 generated candidates, 11 kills, 1 discard and 12 open survivors.
@@ -75,8 +81,9 @@ judgments from that selection; the remaining profile delta was not selected.
 Its named invariant-breaking probes remain separate evidence.
 
 Fix shared oracle-coverage faults in gomutant, preserving the mandatory
-integration testcase. Reconcile and remeasure the incomplete selections with
-sound full-oracle attribution; disposition every remaining survivor and report
+integration testcase. Reconcile and remeasure all incomplete selections and
+the blocked chunk 11 scope with sound full-oracle attribution;
+disposition every remaining survivor and report
 the campaign's actual completion and freshness-proof state. Unsupported
 observations remain explicitly unsupported. Focused kills cannot stand in for
 unmeasured targets or a missing final summary.

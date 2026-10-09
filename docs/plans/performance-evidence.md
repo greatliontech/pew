@@ -45,13 +45,13 @@
   - [x] 9.1 Triage comparison and rendering issues; specify requested benchmark/unit coverage, missing or skipped comparisons, condition compatibility and freshness admission separately from informational comparison, obtaining consent for any breaking default change.
   - [x] 9.2 Implement shared metric definitions, typed coverage/disposition reporting and enforceable comparison policies, including non-finite samples and zero-baseline metrics, with text/JSON parity.
   - [x] 9.3 Verify partial/empty/new/missing-arm cases and condition mismatches, run gates and mutations, converge review, commit and push.
-- [ ] 10. Add provenance-bound profile capture and subject attribution.
+- [x] 10. Add provenance-bound profile capture and subject attribution.
   - [x] 10.1 Triage profile-companion requirements and specify CPU/allocation capture, integrity, ownership, persistence, attribution and failure behavior under the evidence contract, using the approved github.com/google/pprof/profile dependency.
   - [x] 10.2 Capture diagnostic profiles separately from statistical timing samples, bound to their actual executions and matched source/build/runtime identities; report empty, incomplete or unattributable captures without fabricated certainty.
-  - [ ] 10.3 Integrate profile freshness/integrity and cleanup with recording admission and status; verify drift/interruption/corruption, run gates and mutations, converge review, commit and push.
+  - [x] 10.3 Integrate profile freshness/integrity and cleanup with recording admission and status; verify drift/interruption/corruption, run gates and mutations, converge review, commit and push.
 - [ ] 11. Complete A/B execution and historical profile comparison.
-  - [ ] 11.1 Triage A/B issues and specify both-side profile comparison over compatible sample kinds and provenance, lossless multi-package output, cancellable Git control processes and bounded truthful worktree cleanup.
-  - [ ] 11.2 Implement both-side capture/comparison through shared transaction and admission mechanisms; preserve completed units, explicit derivation artifacts and missing/incompatible profile outcomes.
+  - [x] 11.1 Triage A/B issues and specify both-side profile comparison over compatible sample kinds and provenance, lossless multi-package output, cancellable Git control processes and bounded truthful worktree cleanup.
+  - [x] 11.2 Implement both-side capture/comparison through shared transaction and admission mechanisms; preserve completed units, explicit derivation artifacts and missing/incompatible profile outcomes.
   - [ ] 11.3 Complete gates and mutation evidence, converge review, retire resolved profile/A-B issues and cross-tool references, commit and push.
 - [ ] 12. Close the complete performance-evidence workflow.
   - [ ] 12.1 Triage remaining clean-baseline, per-arm noise-floor, machine-readable/progress and cross-tool items against implemented capabilities; retain only justified, checkably triggered deferrals.

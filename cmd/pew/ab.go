@@ -2,29 +2,38 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/spf13/cobra"
 
 	"github.com/greatliontech/pew/internal/compare"
+	"github.com/greatliontech/pew/internal/gitblob"
 	"github.com/greatliontech/pew/internal/gotool"
+	"github.com/greatliontech/pew/internal/profiles"
 	"github.com/greatliontech/pew/internal/run"
+	"golang.org/x/perf/benchfmt"
 )
 
 // abConfig carries pew ab's seams, mirroring runConfig's: tests observe
 // build/execute ordering without real toolchain work.
 type abConfig struct {
-	bench     string
-	count     int
-	benchtime string
-	ref       string
-	pin       run.Pin // the derived CPU set both sides run on; unpinned when empty
+	diagnostic                func(context.Context, string, string, gotool.Environment, string, []string, io.Writer) ([]byte, error)
+	profile, profileBenchtime string
+	jsonOut                   bool
+	artifact                  *abArtifact
+	bench                     string
+	count                     int
+	benchtime                 string
+	ref                       string
+	pin                       run.Pin // the derived CPU set both sides run on; unpinned when empty
 	// worktreeDir is the operator's placement for side B's worktree and
 	// both sides' binaries — a same-device directory named where the
 	// default sibling placement is unavailable (an unwritable parent, a
@@ -64,15 +73,9 @@ func (ac abConfig) sideGuards(ctx context.Context, moduleDir, pkgDir string, mai
 	if pgo != "" {
 		buildInputs = append(buildInputs, pgo)
 	}
-	// The runtime environment is the analysis environment here: ab's
-	// guards are compared between the two sides and never recorded, and
-	// both sides measure under the same pin, so the comparative capture
-	// reads the shared analysis env for the runtime guard as well. The
-	// capture's own go children ride the pass reader above, built under
-	// pew's policy (gotool.Reader: the module's coordinate, the
-	// environment inherited and refused as pew's class — here env is the
-	// analysis environment, never nil).
-	return guard.Capture(ctx, reader, env.Values(), guard.Measurement, buildInputs...)
+	// Build readers use the analysis environment; runtime guards describe the
+	// actual measured environment, including the selected pin's GOMAXPROCS.
+	return guard.Capture(ctx, reader, newEnvironments(env, ac.pin).measured().Values(), guard.Measurement, buildInputs...)
 }
 
 // abPackageName resolves a package directory's package name with the same
@@ -83,6 +86,16 @@ func abPackageName(ctx context.Context, dir string, env gotool.Environment) (str
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func abPackageMetadata(ctx context.Context, dir string, env gotool.Environment) (pkgMeta, error) {
+	data, err := gotool.List(ctx, dir, env, "-json", ".")
+	if err != nil {
+		return pkgMeta{}, err
+	}
+	var p pkgMeta
+	err = json.Unmarshal(data, &p)
+	return p, err
 }
 
 func (ac abConfig) snapshotThrottle() run.ThrottleSnapshot {
@@ -139,6 +152,10 @@ func newABCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
+	f.StringVar(&ac.profile, "profile", "", "capture independent diagnostics on both sides")
+	f.Lookup("profile").NoOptDefVal = "cpu,alloc"
+	f.StringVar(&ac.profileBenchtime, "profile-benchtime", "1s", "diagnostic execution budget")
+	f.BoolVar(&ac.jsonOut, "json", false, "emit typed comparison reports")
 	f.StringVar(&ac.bench, "bench", ".", "")
 	f.IntVar(&ac.count, "count", 6, "")
 	f.StringVar(&ac.benchtime, "benchtime", "", "")
@@ -150,7 +167,27 @@ func newABCmd() *cobra.Command {
 	return cmd
 }
 
-func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []string) error {
+func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []string) (result error) {
+	defer func() {
+		if ctx.Err() != nil {
+			var stopped *interruptedError
+			if !errors.As(result, &stopped) {
+				result = errors.Join(interrupted("ab: interrupted; completed units retained"), result)
+			}
+		}
+	}()
+	if _, err := profiles.Kinds(ac.profile); err != nil {
+		return err
+	}
+	if ac.profile != "" {
+		if ac.profileBenchtime == "" {
+			ac.profileBenchtime = "1s"
+		}
+		if err := profiles.ValidateBudget(ac.profileBenchtime); err != nil {
+			return err
+		}
+	}
+	ac.artifact = &abArtifact{path: ac.out}
 	analysis, err := gotool.NewEnvironment(nil)
 	if err != nil {
 		return err
@@ -169,6 +206,15 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 	if len(pkgs) == 0 {
 		return fmt.Errorf("ab: no packages matched")
 	}
+	output, err := prepareABOutput(ctx, ac.out, ac.profile != "", pkgs, analysis)
+	if err != nil {
+		return err
+	}
+	if output != nil {
+		ac.out = output.path
+		ac.artifact.path = output.path
+		ac.artifact.ownership = output
+	}
 	// The machine-prep gate is the recording protocol's (spec §9): the
 	// derivation loop deserves the same floor, and --strict the same
 	// teeth.
@@ -185,7 +231,8 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 	if moduleDir == "" {
 		return fmt.Errorf("ab: packages outside a module cannot be compared")
 	}
-	repoRoot, err := gitTopLevel(moduleDir)
+	control := abGitControl{env: analysis}
+	repoRoot, err := control.topLevel(ctx, moduleDir)
 	if err != nil {
 		return err
 	}
@@ -196,19 +243,47 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 	// A killed run's side-B worktree is durable residue beside the
 	// repository: swept here, before this run mints its own, by the same
 	// cross-check `git worktree prune` trusts.
-	for _, swept := range sweepStaleWorktrees(repoRoot, placement) {
+	sweptPaths, err := control.sweep(ctx, repoRoot, placement)
+	if err != nil {
+		return err
+	}
+	for _, swept := range sweptPaths {
 		fmt.Fprintf(errw, "pew: swept a stale side-B worktree %s (a killed run's residue)\n", swept)
 	}
 	// B side: the ref materialized in a disposable worktree - never a
 	// stash, never a mutation of the working tree; a crash leaves a
 	// removable directory and a writable repository.
-	worktree, cleanup, err := addWorktree(repoRoot, placement, ac.ref)
+	worktree, cleanup, err := control.add(ctx, repoRoot, placement, ac.ref)
+	if cleanup != nil {
+		defer func() {
+			gate, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			result = errors.Join(result, cleanup(gate))
+		}()
+	}
 	if err != nil {
 		return err
 	}
-	defer cleanup()
 	envs := newEnvironments(analysis, ac.pin)
 	env := envs.analysis
+	if output != nil {
+		reportPhase(ctx, "checking reference output ownership")
+		var reference []pkgMeta
+		for _, p := range pkgs {
+			_, dir, err := abReferenceDirs(p, repoRoot, worktree, ac.ref)
+			if err != nil {
+				return err
+			}
+			b, err := abPackageMetadata(ctx, dir, env)
+			if err != nil {
+				return err
+			}
+			reference = append(reference, b)
+		}
+		if err := output.includePackages(ctx, reference, env); err != nil {
+			return err
+		}
+	}
 	// Every package prepares before any package measures (spec
 	// REQ-pew-preparation): containment, the B side's existence, both
 	// trees' benchmark declarations against the pattern, both builds,
@@ -227,7 +302,11 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 		reportPhase(ctx, fmt.Sprintf("preparing %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
 		prep, err := prepareABPackage(ctx, ac, p, repoRoot, worktree, placement, env)
 		if prep != nil && prep.tmp != "" {
-			defer os.RemoveAll(prep.tmp)
+			defer func() {
+				if err := os.RemoveAll(prep.tmp); err != nil {
+					result = errors.Join(result, fmt.Errorf("ab: binary cleanup %s: %w", prep.tmp, err))
+				}
+			}()
 		}
 		if cancelledBy(ctx, err) {
 			return preparing()
@@ -237,11 +316,21 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 		}
 		preps = append(preps, prep)
 	}
+	if output != nil {
+		if err := output.validate(); err != nil {
+			return err
+		}
+	}
 	for i, prep := range preps {
 		if err := ctx.Err(); err != nil {
 			return interrupted("ab: interrupted before %s (%d of %d packages compared)", prep.pkg.ImportPath, i, len(preps))
 		}
 		if err := abPackage(ctx, w, errw, ac, prep, i+1, len(preps), envs); err != nil {
+			return err
+		}
+	}
+	if ac.profile != "" {
+		if err := captureABProfiles(ctx, w, errw, ac, preps, envs, conditions); err != nil {
 			return err
 		}
 	}
@@ -252,6 +341,8 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 // located, built, and guard-captured, the guards agreeing on every
 // comparison key, before the first iteration.
 type abPreparation struct {
+	diagnostics      [2]*abProfileSide
+	rows             [2][]*benchfmt.Result
 	pkg              pkgMeta
 	sideBPkgDir      string
 	tmp, binA, binB  string
@@ -262,21 +353,13 @@ type abPreparation struct {
 // every refusal the two trees decide before any iteration; a returned
 // record with a temp dir owns it even when the error is non-nil.
 func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, worktree, placement string, env gotool.Environment) (*abPreparation, error) {
-	// Each package's own module maps into the worktree - a go.work
-	// pattern can resolve packages from several modules, and a
-	// module outside this repository has no B side to compare.
-	moduleRel, err := filepath.Rel(repoRoot, p.Module.Dir)
-	if err != nil || strings.HasPrefix(moduleRel, "..") {
-		return nil, fmt.Errorf("ab: package %s lives in a module outside this repository (%s)", p.ImportPath, p.Module.Dir)
+	sideBModule, sideBPkgDir, err := abReferenceDirs(p, repoRoot, worktree, ac.ref)
+	if err != nil {
+		return nil, err
 	}
 	pkgRelToModule, err := filepath.Rel(p.Module.Dir, p.Dir)
 	if err != nil {
 		return nil, err
-	}
-	sideBModule := filepath.Join(worktree, moduleRel)
-	sideBPkgDir := filepath.Join(sideBModule, pkgRelToModule)
-	if _, err := os.Stat(sideBPkgDir); err != nil {
-		return nil, fmt.Errorf("ab: package %s does not exist at %s: %w", p.ImportPath, ac.ref, err)
 	}
 	// The pattern must name a benchmark on both sides: the declarations
 	// are parseable from source before any build or run.
@@ -298,6 +381,40 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 	prep.tmp = tmp
 	prep.binA = filepath.Join(tmp, "a.test")
 	prep.binB = filepath.Join(tmp, "b.test")
+	beforeA, err := gitblob.Snapshot(p.Module.Dir)
+	if err != nil {
+		return prep, err
+	}
+	beforeB, err := gitblob.Snapshot(sideBModule)
+	if err != nil {
+		return prep, err
+	}
+	nameB, err := abPackageName(ctx, sideBPkgDir, env)
+	if err != nil {
+		return prep, err
+	}
+	guardsA, err := ac.sideGuards(ctx, p.Module.Dir, p.Dir, p.Name == "main", env)
+	if err != nil {
+		return prep, err
+	}
+	guardsB, err := ac.sideGuards(ctx, sideBModule, sideBPkgDir, nameB == "main", env)
+	if err != nil {
+		return prep, err
+	}
+	if ac.profile != "" {
+		prep.diagnostics, err = prepareABProfiles(ctx, ac, p, sideBPkgDir, newEnvironments(env, ac.pin))
+		if err != nil {
+			return prep, err
+		}
+		if ac.artifact != nil && ac.artifact.ownership != nil {
+			for _, side := range prep.diagnostics {
+				ac.artifact.ownership.sources = append(ac.artifact.ownership.sources, side.view.SourceFiles()...)
+			}
+			if err := ac.artifact.ownership.validate(); err != nil {
+				return prep, err
+			}
+		}
+	}
 	// Builds run at each side's MODULE root with a relative package
 	// target, exactly as the recording path builds: a relative -pgo in
 	// GOFLAGS resolves against the build cwd, and the guard digest pins
@@ -321,10 +438,6 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 	// measurement spend, not after it. Side B's package kind comes from
 	// the ref's own tree: a package that is main at the ref resolves its
 	// default.pgo there regardless of what the working tree renamed.
-	nameB, err := abPackageName(ctx, sideBPkgDir, env)
-	if err != nil {
-		return prep, fmt.Errorf("ab: resolving side B package at %s: %w", ac.ref, err)
-	}
 	prep.guardsA, err = ac.sideGuards(ctx, p.Module.Dir, p.Dir, p.Name == "main", env)
 	if err != nil {
 		return prep, fmt.Errorf("ab: capturing side A guards: %w", err)
@@ -339,7 +452,44 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 	if err := abGuardsAgree(p.ImportPath, ac.ref, prep.guardsA, prep.guardsB); err != nil {
 		return prep, err
 	}
+	afterA, err := gitblob.Snapshot(p.Module.Dir)
+	if err != nil {
+		return prep, err
+	}
+	afterB, err := gitblob.Snapshot(sideBModule)
+	if err != nil {
+		return prep, err
+	}
+	if !beforeA.Equal(afterA) || !beforeB.Equal(afterB) || guardsA != prep.guardsA || guardsB != prep.guardsB {
+		return prep, fmt.Errorf("ab: source or guards moved across build")
+	}
+	for _, side := range prep.diagnostics {
+		if side != nil {
+			if err := side.view.Validate(ctx); err != nil {
+				return prep, err
+			}
+		}
+	}
 	return prep, nil
+}
+
+// abReferenceDirs is the common location mapping for reference-side ownership
+// inventory and builds. Modules outside the repository have no materialized side.
+func abReferenceDirs(p pkgMeta, repoRoot, worktree, ref string) (string, string, error) {
+	moduleRel, err := filepath.Rel(repoRoot, p.Module.Dir)
+	if err != nil || strings.HasPrefix(moduleRel, "..") {
+		return "", "", fmt.Errorf("ab: package %s lives in a module outside this repository (%s)", p.ImportPath, p.Module.Dir)
+	}
+	pkgRel, err := filepath.Rel(p.Module.Dir, p.Dir)
+	if err != nil {
+		return "", "", err
+	}
+	module := filepath.Join(worktree, moduleRel)
+	dir := filepath.Join(module, pkgRel)
+	if _, err := os.Stat(dir); err != nil {
+		return "", "", fmt.Errorf("ab: package %s does not exist at %s: %w", p.ImportPath, ref, err)
+	}
+	return module, dir, nil
 }
 
 // abPatternSelects refuses a pattern naming no benchmark on either side.
@@ -397,9 +547,8 @@ func abGuardsAgree(importPath, ref string, a, b guard.Guards) error {
 
 func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPreparation, index, total int, envs environments) error {
 	p, sideBPkgDir, binA, binB, guardsA, guardsB := prep.pkg, prep.sideBPkgDir, prep.binA, prep.binB, prep.guardsA, prep.guardsB
-	// Both sides measure under the pinned environment; the builds and
-	// guard captures stayed on the analysis one (the guards are compared
-	// between the sides, never recorded).
+	// Both sides measure under the pinned environment. Builds use the analysis
+	// environment; the reference runtime guard describes this measured one.
 	runtimeEnv := envs.measured()
 	// -test.benchmem is always on, as for run: allocation deltas ride
 	// every comparison without a second measurement (spec §9).
@@ -445,8 +594,8 @@ func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPrep
 		// The artifact is written incrementally, one rewrite per
 		// completed pair, so an interrupted comparison keeps every
 		// iteration it finished (spec REQ-pew-unit-persistence).
-		if ac.out != "" {
-			if err := writeABArtifact(ac.out, p.ImportPath, ac.ref, outA, outB); err != nil {
+		if ac.artifact != nil {
+			if err := ac.artifact.pair(p.ImportPath, ac.ref, i+1, a, b); err != nil {
 				return err
 			}
 		}
@@ -487,10 +636,19 @@ func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPrep
 	for _, cfg := range run.GuardConfig(guardsB) {
 		rowsB = withConfig(rowsB, cfg)
 	}
-	fmt.Fprintf(w, "pew ab: %s  A=working-tree  B=%s  (%d interleaved iterations)\n", p.ImportPath, ac.ref, ac.count)
+	prep.rows = [2][]*benchfmt.Result{rowsA, rowsB}
+	if !ac.jsonOut {
+		fmt.Fprintf(w, "pew ab: %s  A=working-tree  B=%s  (%d interleaved iterations)\n", p.ImportPath, ac.ref, ac.count)
+	}
 	result := compare.Compare(rowsB, rowsA, compare.DefaultOptions())
-	if err := result.WriteText(w); err != nil {
-		return err
+	var reportErr error
+	if ac.jsonOut {
+		reportErr = writeStatReportJSON(w, result, result.Coverage(compare.DefaultOptions().Policies))
+	} else {
+		reportErr = result.WriteText(w)
+	}
+	if reportErr != nil {
+		return reportErr
 	}
 	if ac.out != "" {
 		fmt.Fprintf(errw, "pew: ab artifact written to %s (derivation artifact - never a stat baseline)\n", ac.out)
@@ -502,77 +660,8 @@ func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPrep
 // artifact. The dirty mark and the pew-ab mark keep it out of every
 // stat baseline path by shape (spec §12).
 func writeABArtifact(path, importPath, ref string, outA, outB []byte) error {
-	var b strings.Builder
-	b.WriteString("pew-ab: 1\n")
-	b.WriteString("dirty: true\n")
-	b.WriteString("pkg: " + importPath + "\n")
-	b.WriteString("pew-ab-ref: " + ref + "\n\n")
-	b.WriteString("pew-ab-side: A\n")
-	b.Write(outA)
-	b.WriteString("\npew-ab-side: B\n")
-	b.Write(outB)
-	// Rewritten per completed iteration: the replacement is atomic so a
-	// reader never sees a torn artifact.
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".pew-ab-out-*")
-	if err != nil {
-		return err
-	}
-	if _, err := tmp.WriteString(b.String()); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
-		return err
-	}
-	// The artifact keeps the mode a plain write would give it, not the
-	// temp file's private one.
-	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
-		os.Remove(tmp.Name())
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
-}
-
-func gitTopLevel(dir string) (string, error) {
-	cmd := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("ab: not inside a git repository: %w", err)
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-// addWorktree materializes ref in a disposable detached worktree and
-// returns its path with a cleanup that removes it; the repository stays
-// writable throughout. The worktree is created in the placement — the
-// repository's own parent by default, or the operator's --worktree-dir
-// — on the repository's filesystem, never in the OS temp dir: a
-// benchmark keeping its media package-dir-relative (the durable-write
-// arms) measures that filesystem's storage, and an os.TempDir worktree
-// on a tmpfs host hands side B RAM-backed fsyncs while side A pays the
-// disk, an invalid experiment no interleaving can rescue. An
-// unwritable placement is a hard error, not a silent fallback to a
-// different medium.
-func addWorktree(repoRoot, placement, ref string) (string, func(), error) {
-	dir, err := os.MkdirTemp(placement, ".pew-ab-worktree-*")
-	if err != nil {
-		return "", nil, fmt.Errorf("ab: creating the side-B worktree in %s (the repository's filesystem, spec §12): %w", placement, err)
-	}
-	cmd := exec.Command("git", "-C", repoRoot, "worktree", "add", "--detach", dir, ref)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		os.RemoveAll(dir)
-		return "", nil, fmt.Errorf("ab: git worktree add %s: %w: %s", ref, err, strings.TrimSpace(string(out)))
-	}
-	cleanup := func() {
-		remove := exec.Command("git", "-C", repoRoot, "worktree", "remove", "--force", dir)
-		if err := remove.Run(); err != nil {
-			os.RemoveAll(dir)
-			_ = exec.Command("git", "-C", repoRoot, "worktree", "prune").Run()
-		}
-	}
-	return dir, cleanup, nil
+	a := &abArtifact{path: path}
+	return a.pair(importPath, ref, 1, outA, outB)
 }
 
 // abPlacement is the directory side B's worktree and both sides' binaries
@@ -612,7 +701,7 @@ func abPlacement(repoRoot, operatorDir string) (string, error) {
 		if rel, err := filepath.Rel(repoRoot, physical); err == nil && filepath.IsLocal(rel) {
 			return "", fmt.Errorf("ab: --worktree-dir %s lies inside the repository; side B must be placed outside the working tree", operatorDir)
 		}
-		placement, named = abs, "--worktree-dir "+operatorDir
+		placement, named = physical, "--worktree-dir "+operatorDir
 	}
 	same, err := sameDevice(repoRoot, placement)
 	if err != nil {
@@ -622,90 +711,6 @@ func abPlacement(repoRoot, operatorDir string) (string, error) {
 		return "", fmt.Errorf("ab: %s (%s) is on a different filesystem than the repository — side B's media would not match side A's; name a same-filesystem --worktree-dir (spec §12)", named, placement)
 	}
 	return placement, nil
-}
-
-// sweepStaleWorktrees removes the `.pew-ab-worktree-*` directories in the
-// placement that THIS repository minted — its `.git` file's gitdir lies
-// under the repository's common directory, or the directory is empty, a
-// mint git never populated — and that `git worktree list` no longer
-// registers: a killed run's residue, self-healed on the next
-// run instead of accumulating beside the repository, then the stale
-// registrations pruned, the cross-check `git worktree prune` itself
-// trusts. A registered worktree (a run in flight) is never touched, and
-// neither is a worktree another repository owns: sibling repositories
-// share the default placement, and a shared --worktree-dir is
-// legitimate, so ownership is read from the residue itself, never
-// inferred from the placement. Returns the swept directories.
-func sweepStaleWorktrees(repoRoot, placement string) []string {
-	entries, err := os.ReadDir(placement)
-	if err != nil {
-		return nil
-	}
-	commonDir, err := gitCommonDir(repoRoot)
-	if err != nil {
-		return nil
-	}
-	registered := map[string]bool{}
-	if out, err := exec.Command("git", "-C", repoRoot, "worktree", "list", "--porcelain").Output(); err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
-			if path, ok := strings.CutPrefix(line, "worktree "); ok {
-				if resolved, err := filepath.EvalSymlinks(path); err == nil {
-					path = resolved
-				}
-				registered[path] = true
-			}
-		}
-	} else {
-		// Without the registry no residue can be told from a run in
-		// flight: sweep nothing.
-		return nil
-	}
-	var swept []string
-	for _, entry := range entries {
-		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), ".pew-ab-worktree-") {
-			continue
-		}
-		path := filepath.Join(placement, entry.Name())
-		// This repository's residue, or an empty directory — a run
-		// killed between minting the directory and git writing its
-		// .git file leaves the latter; empty, it can be nobody's live
-		// worktree (a sibling's in-flight mint is re-created by its own
-		// `git worktree add`). Anything else is another repository's.
-		if !worktreeOwnedBy(path, commonDir) && !emptyDir(path) {
-			continue
-		}
-		resolved := path
-		if r, err := filepath.EvalSymlinks(path); err == nil {
-			resolved = r
-		}
-		if registered[resolved] {
-			continue
-		}
-		if err := os.RemoveAll(path); err == nil {
-			swept = append(swept, path)
-		}
-	}
-	if len(swept) > 0 {
-		_ = exec.Command("git", "-C", repoRoot, "worktree", "prune").Run()
-	}
-	return swept
-}
-
-// gitCommonDir is the repository's common git directory, resolved —
-// the one directory every worktree the repository owns points into.
-func gitCommonDir(repoRoot string) (string, error) {
-	out, err := exec.Command("git", "-C", repoRoot, "rev-parse", "--git-common-dir").Output()
-	if err != nil {
-		return "", err
-	}
-	dir := strings.TrimSpace(string(out))
-	if !filepath.IsAbs(dir) {
-		dir = filepath.Join(repoRoot, dir)
-	}
-	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
-		dir = resolved
-	}
-	return dir, nil
 }
 
 // emptyDir reports whether dir holds no entries at all.
@@ -721,7 +726,7 @@ func emptyDir(dir string) bool {
 // and counts as owned by no repository — never swept on ownership
 // grounds alone.
 func worktreeOwnedBy(dir, commonDir string) bool {
-	data, err := os.ReadFile(filepath.Join(dir, ".git"))
+	data, err := readProfileFile(filepath.Join(dir, ".git"))
 	if err != nil {
 		return false
 	}
@@ -736,6 +741,15 @@ func worktreeOwnedBy(dir, commonDir string) bool {
 	if resolved, err := filepath.EvalSymlinks(gitdir); err == nil {
 		gitdir = resolved
 	}
-	rel, err := filepath.Rel(commonDir, gitdir)
-	return err == nil && filepath.IsLocal(rel)
+	rel, err := filepath.Rel(filepath.Join(commonDir, "worktrees"), gitdir)
+	if err != nil || rel == "." || !filepath.IsLocal(rel) || filepath.Base(rel) != rel {
+		return false
+	}
+	if _, err := os.Lstat(gitdir); errors.Is(err, os.ErrNotExist) {
+		return true
+	} else if err != nil {
+		return false
+	}
+	back, err := readProfileFile(filepath.Join(gitdir, "gitdir"))
+	return err == nil && filepath.Clean(strings.TrimSpace(string(back))) == filepath.Join(dir, ".git")
 }

@@ -25,6 +25,30 @@ import (
 type Repo struct {
 	repo *gogit.Repository
 	root string // absolute worktree root, for repo-relative path resolution
+	refs map[string]plumbing.Hash
+}
+
+// SnapshotRefs returns an invocation-owned reader whose named refs resolve to
+// fixed commits. Recording indexes and their objects cannot cross a moving ref.
+// The original reader remains unchanged.
+func (r *Repo) SnapshotRefs(refs ...string) (*Repo, error) {
+	copy := *r
+	copy.refs = make(map[string]plumbing.Hash, len(refs))
+	for _, ref := range refs {
+		h, err := r.resolve(ref)
+		if err != nil {
+			return nil, err
+		}
+		copy.refs[ref] = *h
+	}
+	return &copy, nil
+}
+
+func (r *Repo) resolve(ref string) (*plumbing.Hash, error) {
+	if h, ok := r.refs[ref]; ok {
+		return &h, nil
+	}
+	return r.repo.ResolveRevision(plumbing.Revision(ref))
 }
 
 // Root returns the repository worktree root used for absolute path resolution.
@@ -58,7 +82,7 @@ func (r *Repo) ReadAt(ref, absPath string) (content []byte, ok bool, err error) 
 	if err != nil {
 		return nil, false, err
 	}
-	h, err := r.repo.ResolveRevision(plumbing.Revision(ref))
+	h, err := r.resolve(ref)
 	if err != nil {
 		return nil, false, fmt.Errorf("gitblob: resolve ref %q: %w", ref, err)
 	}
@@ -90,7 +114,7 @@ func (r *Repo) ListAt(ref, absDir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	h, err := r.repo.ResolveRevision(plumbing.Revision(ref))
+	h, err := r.resolve(ref)
 	if err != nil {
 		return nil, fmt.Errorf("gitblob: resolve ref %q: %w", ref, err)
 	}

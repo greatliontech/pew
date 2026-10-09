@@ -427,6 +427,20 @@ func EffectiveGoflags(ctx context.Context, reader *gofreshtool.EnvReader) (strin
 // cover the exact bytes the compile consumes, and a guessed or partial value
 // could hold a buildconfig digest still while generated code moves.
 func PGOInput(moduleDir, pkgDir string, mainPkg bool, goflags string) (string, error) {
+	path, err := PGOPath(moduleDir, pkgDir, mainPkg, goflags)
+	if err != nil || path == "" {
+		return "", err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("run: reading PGO profile %s: %w", path, err)
+	}
+	return fmt.Sprintf("pgo:%x", sha256.Sum256(data)), nil
+}
+
+// PGOPath resolves the build-selected PGO source using the same rules as its
+// provenance digest. Output ownership checks must protect that actual input.
+func PGOPath(moduleDir, pkgDir string, mainPkg bool, goflags string) (string, error) {
 	profile := ""
 	found := false
 	// The last -pgo flag wins, matching the go command's own resolution.
@@ -465,11 +479,7 @@ func PGOInput(moduleDir, pkgDir string, mainPkg bool, goflags string) (string, e
 		}
 		path = candidate
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("run: reading PGO profile %s: %w", path, err)
-	}
-	return fmt.Sprintf("pgo:%x", sha256.Sum256(data)), nil
+	return path, nil
 }
 
 // BuildArgs compiles a package's test binary into out without running it —

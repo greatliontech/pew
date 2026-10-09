@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -120,6 +121,25 @@ func TestABWorktreeDirPlacesSideBWhereTheOperatorNames(t *testing.T) {
 func TestABSweepsStaleSideBWorktrees(t *testing.T) {
 	dir := abFixtureRepo(t)
 	placement := filepath.Dir(dir)
+	control := abGitControl{env: testEnvironment(t, nil)}
+	common, err := control.common(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dead := exec.Command("git", "--version")
+	if err := dead.Run(); err != nil {
+		t.Fatal(err)
+	}
+	markOwned := func(path string) {
+		t.Helper()
+		b, err := json.Marshal(abOwner{Repository: common, PID: dead.Process.Pid})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path+".owner", b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	git := func(repo string, args ...string) {
 		t.Helper()
 		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
@@ -135,6 +155,7 @@ func TestABSweepsStaleSideBWorktrees(t *testing.T) {
 			t.Fatal(err)
 		}
 		git(dir, "worktree", "add", "-q", "--detach", stale, "HEAD")
+		markOwned(stale)
 		// The registration lives under a sanitized name: find it by the
 		// gitdir it records, then drop it as a crash would.
 		entries, err := filepath.Glob(filepath.Join(dir, ".git", "worktrees", "*"))
@@ -177,13 +198,13 @@ func TestABSweepsStaleSideBWorktrees(t *testing.T) {
 	}
 	git(sibling, "worktree", "add", "-q", "--detach", foreign, "HEAD")
 	defer exec.Command("git", "-C", sibling, "worktree", "remove", "--force", foreign).Run()
-	// A run killed after minting its directory and before git wrote the
-	// .git file leaves an empty directory: nobody's, and swept. A
-	// non-empty directory with no .git file is someone else's.
+	// An empty directory is swept only with this repository's persisted owner
+	// record and a dead owner. An unowned non-empty directory is retained.
 	minted := filepath.Join(placement, ".pew-ab-worktree-minted")
 	if err := os.MkdirAll(minted, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	markOwned(minted)
 	nobodys := filepath.Join(placement, ".pew-ab-worktree-nobodys")
 	if err := os.MkdirAll(nobodys, 0o755); err != nil {
 		t.Fatal(err)
@@ -191,7 +212,10 @@ func TestABSweepsStaleSideBWorktrees(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(nobodys, "keep"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	swept := sweepStaleWorktrees(dir, placement)
+	swept, err := control.sweep(t.Context(), dir, placement)
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := []string{minted, stale}
 	sort.Strings(swept)
 	sort.Strings(want)

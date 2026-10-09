@@ -18,7 +18,7 @@ func (m *statModule) admission(ref string, key statKey) admission {
 	return *side.admitted
 }
 
-func (m *statModule) judgePackage(ctx context.Context, engine *gofresh.Engine, current currentBench, label string) (map[string]*benchVerdict, error) {
+func (m *statModule) judgePackage(ctx context.Context, analysis *statAnalysis, current currentBench, label string) (map[string]*benchVerdict, error) {
 	rows := map[string]*benchVerdict{}
 	var benches []string
 	for key, cur := range m.current {
@@ -35,6 +35,10 @@ func (m *statModule) judgePackage(ctx context.Context, engine *gofresh.Engine, c
 	}
 	sort.Strings(benches)
 	return judgeRecordings(ctx, func(subjects []gofresh.Subject) (*gofresh.View, error) {
-		return newViewFor(engine, ctx, subjects, current.moduleDir, gofresh.Measurement)
+		parent, err := analysis.view(ctx, m, current, label)
+		if err != nil {
+			return nil, err
+		}
+		return parent.Sibling(subjects)
 	}, current.importPath, benches, rows, nil)
 }

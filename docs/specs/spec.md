@@ -452,8 +452,9 @@ uses the producer's canonical field ordering and omits only designated optional
 fields; decoding never fills absent mandatory fields. Full profile bytes, including
 native period/sample tables, are stored unchanged under their content hash.
 
-Status JSON adds `profiles`, whose entries carry `kind` when known, `integrity`
-(`verified`, `invalid`, `unavailable`), `freshness` (native verdict or `unavailable`),
+Status JSON adds `profiles`, whose entries carry `kind` when known, optional
+producing `package` and `benchmark` identities, `integrity` (`verified`, `invalid`,
+`unavailable`), `freshness` (native verdict or `unavailable`),
 `relation` (`unverified`, `mismatch`), `outcome` (`identity-only`, `unavailable`),
 optional `empty` (only when the samples were admitted), `reason`, `error`, `metrics`. Metric entries carry native
 `type`, `unit`, `total` and `weights`; a weight carries `symbol`, optional `source`,
@@ -1290,11 +1291,121 @@ Each recording-level audit difference is reported once, not once per matched
 child. This does not pair numerical results across differing child identities or
 configurations. Transient A/B streams retain their result-group audit reporting.
 
+### 10.2 Historical diagnostic comparison and A/B artifacts
+
+**REQ-pew-historical-profile-evidence** (behavior): Historical diagnostic comparison
+MUST keep each side's evidence in its invocation-pinned ref tree.
+`stat --profile=cpu|alloc|cpu,alloc` requests the named diagnostics; bare
+`--profile` requests both. Each historical side reads its index, embedded source
+snapshots and content-addressed objects from the same selected recording ref.
+Missing historical evidence never falls back to the working tree. Historical
+refs are resolved once per invocation, so concurrent ref movement cannot mix an
+index and its objects from different trees. Historical profiles receive no
+current-tree freshness claim.
+
+**REQ-pew-profile-comparison-compatibility** (behavior): Cross-side diagnostics
+MUST be compared only under compatible workload and sampling evidence.
+Compatibility requires equal
+nonempty ordinary comparison guards, subject and selected workload, child names,
+budget, protocol, scope, sampling method and native sampling period/type. Child
+iteration counts remain producing facts, not a normalization divisor. Source
+closures and binary identities may differ: comparing source revisions is the
+purpose of the operation. Each diagnostic's relation to its own measurement is
+admitted independently of cross-side comparison.
+
+**REQ-pew-profile-comparison-metrics** (behavior): Profile differences MUST match
+sample types by exact native type and unit, independently of table order.
+CPU means `cpu/nanoseconds`; allocation means `alloc_space/bytes` and
+`alloc_objects/count`. Reports retain raw totals and flat/cumulative weights on
+both sides, and separately report normalized flat shares. A zero total has an
+undefined share, represented as null in JSON. Functions found on only one side
+remain in the union. Flat attribution conserves all sampled weight, including
+unknown frames; cumulative weights overlap. No report claims per-operation
+cost, statistical significance or causation from profile differences.
+
+**REQ-pew-profile-comparison-report** (behavior): Text and JSON MUST carry the
+same independent per-side integrity, freshness, measurement
+relation, outcome support and errors, plus a comparison disposition. JSON profile
+objects use `kind: profile`, `package`, `basePackage`, `newPackage`, `benchmark`, `profile`, `base`, `new`,
+`compared`, optional `reason` and `differences`. Difference entries carry `type`,
+`unit`, `baseTotal`, `newTotal`, and `functions`; each function carries `symbol`,
+`baseFlat`, `newFlat`, `baseCumulative`, `newCumulative`, `baseShare`, `newShare`.
+Package contexts use the ref-local subject resolution of §10.1, including root
+packages and module renames; differing side contexts do not acquire today's
+module name as a shared package identity. Empty side contexts remain absent.
+An explicit unfulfilled profile request, including two successfully captured but
+incompatible A/B diagnostics, exits 2; an eligible statistical
+regression with its gate enabled exits 1 ahead of it; interruption exits 130
+ahead of both. A missing requested object is unfulfilled evidence, not an
+integrity failure. Malformed indexes, corrupt objects, native profile parse or
+integrity failures, and capture/publication/read operational failures exit 1,
+with completed statistical and independent diagnostic reports preserved.
+An operational finalization failure joined to an unfulfilled comparison retains
+both diagnostics and exits 1; interruption still takes precedence with exit 130.
+
+**REQ-pew-ab-profile-transactions** (behavior): A/B diagnostics MUST own their
+producing evidence and publish completed sides independently.
+`ab --profile` and `--profile-benchtime` use the same independent diagnostic
+transactions as `run`, on each side's actual environment, source and binary.
+Each transaction retains its own completion, native identity-only fingerprint
+and source snapshots. Profiling does not create a persisted fingerprint for the
+timed rows. Reference source/build facts are bracketed around the timed build;
+they do not establish outcome support. All statistical pairs publish before
+diagnostics; each completed diagnostic side publishes independently.
+
+**REQ-pew-ab-artifact** (behavior): A/B output MUST retain every completed unit in
+the benchmark-format derivation grammar below.
+The A/B derivation wire discriminator is `pew-ab: 2`, a clean extension of
+version 1. The artifact remains Go benchmark-format text, accumulating every
+completed package/pair. Each block resets prior configuration and explicitly
+sets `dirty: true`, `pkg`, `pew-ab-ref`, `pew-ab-side` (A or B), `pew-ab-pair`
+(one-based for measurement pairs, zero for diagnostic blocks), and
+`pew-ab-section` (`measurement` or `profile`). Measurement sections retain the
+raw compatible benchmark streams. Profile sections contain the shared encoded
+`pew-profiles` index with the existing 32 KiB continuation grammar and no new
+statistical rows. Objects use the shared confined store rooted at
+`<out>.profiles`, hence `<out>.profiles/.profiles/sha256/<digest>`. Index entries
+contain no temporary paths as object references. Without `--out`, diagnostic
+nonretention is reported.
+
+**REQ-pew-ab-output-ownership** (behavior): A/B MUST never replace normal
+recordings, their permanent lock files or selected source inputs with its outputs.
+Before either side builds, `--out` and its requested companion home are checked
+against both materialized sides' known recording-store roots and selected
+source/build-input paths, whether or not profiling is requested. Reference-only
+mutable dependencies remain protected inputs. Cached or standard package status
+does not exempt a selected source path from output protection.
+Overlap with those stores or inputs, symlink destinations or path
+components, and incompatible file/directory shapes are refused. Publication
+rechecks that admitted ownership and topology. Ownership is derived from the
+selected module/store contexts and build-selected inputs, not from filename
+guesses about unrelated locations.
+
 ## 11. Architecture & dependencies
 
-**Everything in-process via imported libraries; the only subprocesses are the Go toolchain itself,
-where it *is* the API.** No fork of x/perf (importable, Go-team-maintained); **no `git` binary** —
-go-git keeps pew self-contained (`go install` works with no external binary beyond `go`).
+**REQ-pew-ab-control-lifecycle** (behavior): A/B control operations MUST be
+context-bound, with cleanup failures remaining visible.
+**Analysis and historical reads use imported libraries.** No fork of x/perf
+(importable, Go-team-maintained). Native Git is permitted only for A/B worktree
+lifecycle operations, including repository discovery, registration inspection,
+creation and removal. Every such process uses the invocation's context-bound
+owned runner. Cleanup uses one bounded detached budget, joins failures into the
+operation result, and reports uncertain residue after interrupted creation.
+The detached native-Git cleanup budget is 30 seconds in total.
+
+**REQ-pew-ab-cleanup-ownership** (behavior): Worktree deletion MUST require
+validated ownership and registration, retaining uncertain or foreign residue.
+A regular
+`<worktree>.owner` sidecar records JSON fields `Repository` (the resolved common
+Git directory) and `PID` (the creating process). Cleanup validates its original
+owner bytes and the registration; sweep additionally requires a demonstrably
+dead owner. A linked worktree's administrative path must be a direct child of
+that repository's `worktrees` directory, with the matching reverse pointer when
+the registration exists. Failure to establish ownership or liveness retains
+the directory. Owner markers are removed only after successful cleanup.
+Deletion requires ownership and registration validation; a name prefix or an
+empty directory alone never proves ownership. Live and foreign worktrees are
+not swept. Historical recording, profile and source reads remain go-git reads.
 
 - **Imported (Go-team / stdlib-tier):** `golang.org/x/perf/{benchfmt,benchproc,benchmath,benchunit}`;
   `golang.org/x/tools/go/{packages,ssa,callgraph,callgraph/rta}` (RTA — CHA rejected as too imprecise,
@@ -1313,7 +1424,7 @@ go-git keeps pew self-contained (`go install` works with no external binary beyo
   correctness-bearing "is this result faithful to commit C?" does **not** rely on Status(): it is
   derived from the closure comparison (working-tree closure hash vs C's, §7), so this weakness
   cannot produce a false-`valid`.
-- **Subprocesses (the Go toolchain only):** `go test -bench` (run), `go list -json` (Tier-1 file
+- **Subprocesses:** the narrowly permitted A/B Git lifecycle above; `go test -bench` (run), `go list -json` (Tier-1 file
   sets / build-config resolution); `go/packages` drives the same toolchain for Tier-2 loads.
 - Per project policy, go-git, cobra and pprof are deliberately-added third-party deps (user-approved);
   any *further* third-party dependency is flagged and asked before adding.
@@ -1336,9 +1447,8 @@ purpose is a parent that is unwritable or on another filesystem, but
 it is honoured unconditionally); the placement must be on the
 repository's filesystem and outside the repository — either
 violation is refused, never degraded to — sweeping at its start the
-`.pew-ab-worktree-*` residue in that placement that this repository
-minted (its `.git` file points into this repository's common
-directory, or it is empty — a mint git never populated) and `git
+`.pew-ab-worktree-*` residue in that placement with validated ownership by
+this repository and no live owner, and which `git
 worktree list` no longer registers (a registered worktree, a run in
 flight, is never touched; a sibling repository's residue is never
 this run's to remove), builds both sides before
@@ -1440,8 +1550,8 @@ shape of the one text line that carries a count.
 |------|------------------------------|----------|-------------------|
 | `run` | serve what is proven, measure the rest, every package prepared first; one `recorded` line per measured benchmark, one `served` line per package that served anything, counting the valid recordings not re-measured (`served <pkg>: N valid, measuring M` / `N valid, nothing to run`; the row label is padded to the `recorded` column), refusals and errors as lines, progress on stderr on the cadence; judged under the store's reviewed vouch file | `--count=10` `--benchtime=1s` `--bench=.` `--profile-benchtime=1s` | `--all` (a fresh baseline after a change nothing guards), `--pin` (cut scheduler variance), `--strict` (a CI gate on hygiene), `--label` (a variant lineage), `--vouch` (a one-off acceptance extending the store's reviewed vouch file), `--bench-dir` (a store outside the module), `--profile` (separate cpu, alloc or cpu,alloc diagnostics; bare selects both) |
 | `status` | every selected benchmark's verdict with its reason — the inventory shows coverage, not only work | — | `--stale` (the actionable set, scriptable), `--explain` (why a verdict is non-valid), `--json` (machine rows), `--label`, `--vouch`, `--bench-dir` |
-| `stat` | compare recorded results, the baseline mode by argument count; the text table | `--alpha=0.05` `--confidence=0.95` `--threshold=3` `--gate=sec/op` `--coverage=partial` `--freshness=report` `--conditions=report` | `--fail-on-regression` (a CI exit), `--json` (machine comparison rows and notes), `--explain` (the values behind a skip), `--label`, `--vouch`, `--bench-dir` |
-| `ab` | interleaved A/B of the working tree against a ref, nothing stored; the per-benchmark delta table | `--count=6` `--ref=HEAD` `--bench=.` | `--benchtime` (a budget other than go's default), `--out` (both raw streams for offline analysis), `--pin` (cut scheduler variance on both sides), `--strict` (refuse a noisy machine), `--worktree-dir` (a same-filesystem placement where the repository's parent is unwritable or on another device) |
+| `stat` | compare recorded results, the baseline mode by argument count; the text table | `--alpha=0.05` `--confidence=0.95` `--threshold=3` `--gate=sec/op` `--coverage=partial` `--freshness=report` `--conditions=report` | `--fail-on-regression` (a CI exit), `--profile` (requested historical diagnostics), `--json` (machine comparison rows and notes), `--explain` (the values behind a skip), `--label`, `--vouch`, `--bench-dir` |
+| `ab` | interleaved A/B of the working tree against a ref, nothing stored; the per-benchmark delta table | `--count=6` `--ref=HEAD` `--bench=.` `--profile-benchtime=1s` | `--profile` (independent diagnostics on both sides), `--json` (typed comparison reports), `--benchtime` (a budget other than go's default), `--out` (completed streams and diagnostic indexes for offline analysis), `--pin` (cut scheduler variance on both sides), `--strict` (refuse a noisy machine), `--worktree-dir` (a same-filesystem placement where the repository's parent is unwritable or on another device) |
 | `gc` | remove the recordings of benchmarks gone from the source, each removal reported as it happens | — | `--bench-dir` |
 | `guidance` | the decision map | — | a verb argument (that verb's full section) |
 

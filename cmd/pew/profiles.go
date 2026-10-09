@@ -22,6 +22,8 @@ import (
 
 // profileStatus keeps independent claims independent in both renderers.
 type profileStatus struct {
+	Package   string            `json:"package,omitempty"`
+	Benchmark string            `json:"benchmark,omitempty"`
 	Kind      string            `json:"kind,omitempty"`
 	Integrity string            `json:"integrity"`
 	Freshness string            `json:"freshness"`
@@ -33,8 +35,12 @@ type profileStatus struct {
 	Error     string            `json:"error,omitempty"`
 }
 
-func inspectProfile(ctx context.Context, st *store.Store, c profiles.Capture, rows []*benchfmt.Result, view *gofresh.View) (profileStatus, error) {
-	r := profileStatus{Kind: c.Kind, Integrity: "unavailable", Freshness: "unavailable", Relation: "unverified", Outcome: "identity-only", Reason: profiles.UnsupportedReason}
+type profileObjectReader interface {
+	ReadObject(string, int64) ([]byte, error)
+}
+
+func inspectProfile(ctx context.Context, st profileObjectReader, c profiles.Capture, rows []*benchfmt.Result, view *gofresh.View) (profileStatus, error) {
+	r := profileStatus{Package: c.Package, Benchmark: c.Benchmark, Kind: c.Kind, Integrity: "unavailable", Freshness: "unavailable", Relation: "unverified", Outcome: "identity-only", Reason: profiles.UnsupportedReason}
 	fault := func(err error) (profileStatus, error) { r.Error = err.Error(); return r, err }
 	b, err := st.ReadObject(c.SHA256, c.Size)
 	if err != nil {
@@ -73,7 +79,7 @@ func inspectProfile(ctx context.Context, st *store.Store, c profiles.Capture, ro
 	if err != nil {
 		return fault(err)
 	}
-	vs, err := child.CheckObservedBatch(ctx, map[gofresh.Subject]gofresh.Fingerprint{subject: c.Fingerprint})
+	vs, err := child.CheckBatch(ctx, map[gofresh.Subject]gofresh.Fingerprint{subject: c.Fingerprint})
 	if err != nil {
 		return fault(err)
 	}
@@ -119,6 +125,11 @@ func profileStatuses(ctx context.Context, st *store.Store, adm admission, view *
 
 func renderProfiles(w io.Writer, rows []profileStatus, explain bool) error {
 	for _, r := range rows {
+		if r.Package != "" {
+			if _, err := fmt.Fprintf(w, "    subject: %s.%s\n", r.Package, r.Benchmark); err != nil {
+				return err
+			}
+		}
 		empty := "unknown"
 		if r.Empty != nil {
 			empty = fmt.Sprint(*r.Empty)
@@ -222,6 +233,44 @@ func captureProfile(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gi
 			}
 		}
 	}
+	return captureDiagnostic(ctx, errw, rc, gc, prep, envs, conditions, parent, name, kind, budget, selection, rows, &adm, func(gate context.Context, c profiles.Capture, blob []byte) error {
+		if err := profiles.CheckedRelation(gate, c, rows, adm.fp, parent); err != nil {
+			return fmt.Errorf("profile attachment refused: %w", err)
+		}
+		kept := index.Captures[:0]
+		for _, old := range index.Captures {
+			if old.Kind != kind {
+				kept = append(kept, old)
+			}
+		}
+		index.Captures = append(kept, c)
+		sort.Slice(index.Captures, func(i, j int) bool { return index.Captures[i].Kind < index.Captures[j].Kind })
+		encoded, err := profiles.Encode(index)
+		if err != nil {
+			return err
+		}
+		if _, err := st.PutObject(gate, blob); err != nil {
+			return err
+		}
+		for _, r := range rows {
+			r.SetConfig(run.KeyProfiles.Name, encoded)
+			i, _ := r.ConfigIndex(run.KeyProfiles.Name)
+			r.Config[i].File = true
+		}
+		if err := st.ReplaceContext(gate, key, expected, rows); err != nil {
+			return err
+		}
+		fmt.Fprintf(errw, "pew: profile %s.%s %s identity-only; relation unverified: %s\n", p.ImportPath, name, kind, profiles.UnsupportedReason)
+		_, err = fmt.Fprintf(w, "%-12s %s.%s %s\n", "profiled", p.ImportPath, name, kind)
+		return err
+	})
+}
+
+// captureDiagnostic owns one independent execution. The publication callback
+// receives only validated evidence, under the same bounded finalization context.
+// A/B has no persisted timed fingerprint; only recording attachment supplies adm.
+func captureDiagnostic(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStateCache, prep *packagePreparation, envs environments, conditions run.Conditions, parent *gofresh.View, name, kind, budget, selection string, rows []*benchfmt.Result, adm *admission, publish func(context.Context, profiles.Capture, []byte) error) error {
+	p := prep.pkg
 	subject := gofresh.Subject{Package: p.ImportPath, Symbol: name}
 	view, err := parent.Sibling([]gofresh.Subject{subject})
 	if err != nil {
@@ -237,8 +286,10 @@ func captureProfile(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gi
 	if err != nil {
 		return err
 	}
-	if err := profileInputRelation(ctx, adm.fp, p.Module.Dir, p.Dir, envs.measured()); err != nil {
-		return err
+	if adm != nil {
+		if err := profileInputRelation(ctx, adm.fp, p.Module.Dir, p.Dir, envs.measured()); err != nil {
+			return err
+		}
 	}
 	sources, err := profileSources(view.SourceFiles(), p)
 	if err != nil {
@@ -332,8 +383,10 @@ func captureProfile(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gi
 	if err := view.Validate(gate); err != nil {
 		return err
 	}
-	if err := profileInputRelation(gate, adm.fp, p.Module.Dir, p.Dir, envs.measured()); err != nil {
-		return err
+	if adm != nil {
+		if err := profileInputRelation(gate, adm.fp, p.Module.Dir, p.Dir, envs.measured()); err != nil {
+			return err
+		}
 	}
 	end, err := gc.snapshot(p.Module.Dir)
 	if err != nil {
@@ -372,35 +425,7 @@ func captureProfile(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gi
 		return err
 	}
 	c := profiles.Capture{Kind: kind, Package: p.ImportPath, Benchmark: name, Selection: selection, Children: children, Budget: budget, Protocol: profiles.Protocol, Scope: profiles.Scope, Sampling: "runtime-default", Commit: start.Commit, Dirty: start.Dirty || dirty, Conditions: conditions.String(), BinarySHA256: profiles.Digest(binary), MeasurementRevision: profiles.Revision(rows), Fingerprint: fp, Ledger: encodedLedger, SHA256: profiles.Digest(blob), Size: int64(len(blob)), Sources: sources}
-	if err := profiles.CheckedRelation(gate, c, rows, adm.fp, parent); err != nil {
-		return fmt.Errorf("profile attachment refused: %w", err)
-	}
-	kept := index.Captures[:0]
-	for _, old := range index.Captures {
-		if old.Kind != kind {
-			kept = append(kept, old)
-		}
-	}
-	index.Captures = append(kept, c)
-	sort.Slice(index.Captures, func(i, j int) bool { return index.Captures[i].Kind < index.Captures[j].Kind })
-	encoded, err := profiles.Encode(index)
-	if err != nil {
-		return err
-	}
-	if _, err := st.PutObject(gate, blob); err != nil {
-		return err
-	}
-	for _, r := range rows {
-		r.SetConfig(run.KeyProfiles.Name, encoded)
-		i, _ := r.ConfigIndex(run.KeyProfiles.Name)
-		r.Config[i].File = true
-	}
-	if err := st.ReplaceContext(gate, key, expected, rows); err != nil {
-		return err
-	}
-	fmt.Fprintf(errw, "pew: profile %s.%s %s identity-only; relation unverified: %s\n", p.ImportPath, name, kind, profiles.UnsupportedReason)
-	_, err = fmt.Fprintf(w, "%-12s %s.%s %s\n", "profiled", p.ImportPath, name, kind)
-	return err
+	return publish(gate, c, blob)
 }
 
 func profileInputRelation(ctx context.Context, fp gofresh.Fingerprint, module, directory string, env gotool.Environment) error {

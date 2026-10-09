@@ -33,11 +33,35 @@ func exitCode(err error) int {
 	if errors.As(err, &stopped) {
 		return 130
 	}
-	var empty *nothingComparedError
-	if errors.As(err, &empty) {
+	if onlyUnfulfilled(err) {
 		return 2
 	}
 	return 1
+}
+
+// onlyUnfulfilled classifies the complete error tree. A joined operational
+// failure (including finalization) cannot be hidden by an unfulfilled sibling.
+// Wrapping keeps a cause's classification; interruption is handled first above.
+func onlyUnfulfilled(err error) bool {
+	switch e := err.(type) {
+	case *nothingComparedError, *profileUnfulfilledError:
+		return true
+	case interface{ Unwrap() []error }:
+		children := e.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !onlyUnfulfilled(child) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		return onlyUnfulfilled(e.Unwrap())
+	default:
+		return false
+	}
 }
 
 func newRootCmd() *cobra.Command {

@@ -205,8 +205,8 @@ func TestABStampsGuardProvenance(t *testing.T) {
 	// identity lives at the ref's worktree), and captured at BUILD time:
 	// the repository stays writable during measurement, so a stamp taken
 	// afterwards could describe an edit the standing binaries never saw.
-	if len(sharedDirs) != 2 || sharedDirs[0] == sharedDirs[1] {
-		t.Fatalf("guard capture dirs = %v, want one per side in distinct trees", sharedDirs)
+	if len(sharedDirs) != 4 || sharedDirs[0] == sharedDirs[1] || sharedDirs[0] != sharedDirs[2] || sharedDirs[1] != sharedDirs[3] {
+		t.Fatalf("guard capture dirs = %v, want before/after build brackets in each distinct tree", sharedDirs)
 	}
 	// The invariant is that the STAMPED captures precede measurement — a
 	// future post-measurement revalidation capture would be legal, so the
@@ -430,7 +430,7 @@ func TestABArtifactIsDirtyMarked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"pew-ab: 1", "dirty: true", "pew-ab-side: A", "pew-ab-side: B"} {
+	for _, want := range []string{"pew-ab: 2", "dirty: true", "pew-ab-side: A", "pew-ab-side: B"} {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("artifact missing %q:\n%s", want, data)
 		}

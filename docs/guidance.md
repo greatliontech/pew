@@ -8,12 +8,15 @@
 **knobs:**
 - `bench` — benchmark pattern (go test -bench syntax) (default .).
 - `count` — interleaved iterations per side (default 6).
+- `profile` — capture cpu, alloc or cpu,alloc in independent single-subject diagnostic processes on each side after statistical pairs; bare selects both. Diagnostics carry identity-only evidence, never per-operation or causal estimates. Completed sides survive later failures. Successfully captured but incompatible profiles leave the request unfulfilled (exit 2); capture/publication failures exit 1, and interruption takes precedence with exit 130.
+- `profile-benchtime` — positive duration or iteration budget per diagnostic process (default 1s).
+- `json` — emit typed statistical and per-side diagnostic comparison reports.
 - `benchtime` — per-benchmark time or iteration budget (go test -benchtime).
 - `ref` — B side: any git rev the repository resolves (default HEAD).
 - `pin` — pin both sides to one CPU set derived from the host's topology (taskset): the isolated set when the kernel has one, else one whole physical core, the fastest the kernel ranks, outside CPU 0's; the set and its derivation are reported first, and a host it cannot be derived on, or without taskset to apply it, refuses.
 - `strict` — refuse to measure under noisy machine conditions.
-- `worktree-dir` — directory for side B's worktree and both binaries, the repository's parent unless given; its purpose is a repository parent that is unwritable or on another filesystem. A placement on another device, or inside the repository, is refused. At the next run's start the placement's `.pew-ab-worktree-*` residue that this repository minted and git no longer registers is swept (an empty mint too); another repository's residue is left alone.
-- `out` — also write both sides' raw benchmark streams to this file, marked pew-ab/dirty — a derivation artifact, by shape never a stat baseline.
+- `worktree-dir` — directory for side B's worktree and both binaries, the repository's parent unless given; a placement on another device or inside the repository is refused. Residue is swept only with validated ownership, a dead owner and no Git registration. Cleanup is bounded and failures report retained paths.
+- `out` — retain every completed package/pair in a versioned Go benchmark-format derivation artifact marked pew-ab/dirty, never a stat baseline. Before either side builds, refuse overlap with either side's selected recording stores (including permanent locks) or source/build inputs, and unsafe symlink destinations. This protection also applies without profiling and includes dependencies selected only by the ref. Diagnostic objects use the shared confined store rooted at <out>.profiles (objects beneath its .profiles/sha256); without out diagnostics are reported but not retained.
 **when:** use ab while a design or curve is still moving — the
 uncommitted working tree (side A) measures against the ref (side B)
 materialized in a disposable detached worktree beside the
@@ -89,6 +92,7 @@ to re-measure.
 **surfaces:** cli
 **does:** Compare recorded benchmarks across git refs and flag regressions.
 **knobs:**
+- `profile` — compare requested cpu, alloc or cpu,alloc diagnostics; bare selects both. Each historical index, source snapshot and object is read at its recording ref, without current-tree fallback; package contexts are ref-local. Raw totals and normalized shares remain separate. Missing, empty or incompatible requested profiles exit 2 unless interruption or a statistical regression takes precedence; malformed indexes, corrupt or unparseable profiles, and operational read failures exit 1 while completed statistical reports remain visible.
 - `bench-dir` — stored-recordings directory, `<module>/benchmarks` unless given.
 - `label` — variant label to compare; empty means the unlabeled recording.
 - `alpha` — finite significance level for the Mann-Whitney U test (default 0.05); outside (0,1) refuses.
