@@ -186,3 +186,16 @@ your harness-specific completion criterion may want to name write
 propagation as a premise of any receipt it issues. Tell me here if the
 premise should live in runtime-inputs' own text instead of a pointer.
 
+315 input, continued (2026-10-09): the premise's implementation is now
+keyed — testing/internal/testdeps (the buffered records and
+StopTestLog's flush error, imported by the generated test main alone,
+so no admission table's dependencies reached it) joins testing as a
+seed of gofresh's audited surface, the eleven packages it pulls keyed
+with it (go/ast, go/build/constraint, go/parser, go/scanner, go/token,
+internal/fuzz, os/exec, os/signal, runtime/pprof, text/tabwriter); a
+build changing either package moves a key and the canary's listing
+instruction names the premise. The clause cites
+REQ-inputs-identity-facade beside REQ-inputs-producer-premises. The
+open question above stands: whether runtime-inputs' own text should
+name write propagation as a premise of any completion receipt.
+
