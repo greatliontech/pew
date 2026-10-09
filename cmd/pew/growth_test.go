@@ -78,7 +78,7 @@ func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
 	}
 	write(fp.Guards.Toolchain)
 
-	v, reason, _, grown, err := checkOne(context.Background(), st, e, pkg, "", tmp, bench, "")
+	v, reason, _, grown, err := storedVerdict(context.Background(), st, e, pkg, "", tmp, bench, "")
 	if err != nil || v != verdictValid || grown != "" {
 		t.Fatalf("baseline verdict = {%s %q grown=%q}, %v; want plainly valid", v, reason, grown, err)
 	}
@@ -89,11 +89,11 @@ func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
 		[]byte("package grow\n\nimport \"testing\"\n\nfunc TestMore(t *testing.T) {\n\tif Value() != 42 {\n\t\tt.Fail()\n\t}\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	v, reason, servedFP, grown, err := checkOne(context.Background(), st, e, pkg, "", tmp, bench, "")
+	v, reason, servedFP, grown, err := storedVerdict(context.Background(), st, e, pkg, "", tmp, bench, "")
 	if err != nil || v != verdictValid || grown == "" {
 		t.Fatalf("grown verdict = {%s %q grown=%q}, %v; want valid through the inert-growth rule", v, reason, grown, err)
 	}
-	if servedFP.TestVariantClosure == fp.TestVariantClosure {
+	if servedFP.EffectiveTestVariantClosure() == fp.TestVariantClosure || servedFP.TestVariantClosure != fp.TestVariantClosure {
 		t.Fatal("served fingerprint did not carry the refreshed compartment pin")
 	}
 
@@ -114,10 +114,10 @@ func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
 		rewritten[c.Key] = string(c.Value)
 	}
 	refreshed, _, ok := fingerprintFromConfig(recs[0].Config)
-	if !ok || refreshed.TestVariantClosure != servedFP.TestVariantClosure || rewritten["pew-test-variant-ledger"] == encoded {
+	if !ok || refreshed.EffectiveTestVariantClosure() != servedFP.EffectiveTestVariantClosure() || refreshed.TestVariantClosure != fp.TestVariantClosure || rewritten["pew-test-variant-ledger"] == encoded {
 		t.Fatalf("run path did not rewrite the recording under the refreshed pin: %q", refreshed.TestVariantClosure)
 	}
-	v, reason, _, grown, err = checkOne(context.Background(), st, e, pkg, "", tmp, bench, "")
+	v, reason, _, grown, err = storedVerdict(context.Background(), st, e, pkg, "", tmp, bench, "")
 	if err != nil || v != verdictValid || grown != "" {
 		t.Fatalf("post-rewrite verdict = {%s %q grown=%q}, %v; want plainly valid", v, reason, grown, err)
 	}
@@ -129,7 +129,7 @@ func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
 		t.Fatal(err)
 	}
 	write("go0.0-never")
-	v, reason, _, grown, err = checkOne(context.Background(), st, e, pkg, "", tmp, bench, "")
+	v, reason, _, grown, err = storedVerdict(context.Background(), st, e, pkg, "", tmp, bench, "")
 	if err != nil || v != verdictStale || reason != "toolchain" || grown != "" {
 		t.Fatalf("masked-pin verdict = {%s %q grown=%q}, %v; want stale (toolchain) — the refreshed verdict's own attribution", v, reason, grown, err)
 	}
@@ -141,7 +141,7 @@ func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
 		[]byte("package grow\n\nfunc init() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	v, reason, refusedFP, grown, err := checkOne(context.Background(), st, e, pkg, "", tmp, bench, "")
+	v, reason, refusedFP, grown, err := storedVerdict(context.Background(), st, e, pkg, "", tmp, bench, "")
 	if err != nil || v != verdictStale || reason != "test variants" || grown != "" {
 		t.Fatalf("non-inert verdict = {%s %q grown=%q}, %v; want stale (test variants)", v, reason, grown, err)
 	}
@@ -149,7 +149,9 @@ func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
 	// stale "test variants" verdict shows its moved input, never an
 	// all-matching table that contradicts the verdict.
 	var explained bytes.Buffer
-	explainRecordAgainstCurrent(context.Background(), &explained, e, tmp, pkg, bench, refusedFP, os.Environ())
+	if err := explainRecordAgainstCurrent(context.Background(), &explained, e, tmp, pkg, bench, refusedFP, os.Environ()); err != nil {
+		t.Fatal(err)
+	}
 	variantRow := ""
 	for _, line := range strings.Split(explained.String(), "\n") {
 		if strings.Contains(line, "test-variants") {

@@ -230,7 +230,7 @@ func TestPinnedRunGuardsItsPin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, reason, _, _, err := checkOne(context.Background(), store.New(benchDir), e, "example.com/pinned/a", "a", dir, "BenchmarkA", "")
+	v, reason, _, _, err := storedVerdict(context.Background(), store.New(benchDir), e, "example.com/pinned/a", "a", dir, "BenchmarkA", "")
 	if err != nil {
 		t.Fatalf("checkOne: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestPinnedRunGuardsItsPin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v, reason, _, _, err = checkOne(context.Background(), store.New(benchDir), pinned, "example.com/pinned/a", "a", dir, "BenchmarkA", ""); err != nil || reason == "runtimeconfig" {
+	if v, reason, _, _, err = storedVerdict(context.Background(), store.New(benchDir), pinned, "example.com/pinned/a", "a", dir, "BenchmarkA", ""); err != nil || reason == "runtimeconfig" {
 		t.Fatalf("pinned verdict over the pinned recording = {%s %q}, %v; want the guard to hold", v, reason, err)
 	}
 }

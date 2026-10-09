@@ -263,7 +263,7 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 				t.Errorf("%s recorded governor %q, want observed %q", bench, got, wantGovernor)
 			}
 		}
-		v, reason, _, _, err := checkOne(context.Background(), st, e, "example.com/incompleterun/"+pkgRel, pkgRel, dir, bench, "")
+		v, reason, _, _, err := storedVerdict(context.Background(), st, e, "example.com/incompleterun/"+pkgRel, pkgRel, dir, bench, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -280,13 +280,16 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 		case "BenchmarkGetwd":
 			// Spawn and ingestion share one environment with PWD pinned to
 			// the package directory the go driver gives the binary. The
-			// verdict still refuses on the closure (pew selects no
-			// observability proof), but the truthful pinned PWD is
+			// explicit observed policy lifts the closure; truthful pinned PWD is
 			// admitted recordless — the manifest must never carry the
 			// process-local-divergence seal an ingest under pew's own
 			// environment would record.
-			if v != verdictUnverifiable || !strings.Contains(reason, "os.Getenv") {
-				t.Fatalf("%s recording = {%s %q}, want unverifiable on the closure reason", bench, v, reason)
+			if v != verdictValid || !fp.ObservationProof.Observable || fp.ObservationAssertion == "" {
+				t.Fatalf("%s recording = {%s %q}, want supported observed validity", bench, v, reason)
+			}
+			ordinary, err := e.Check(context.Background(), fp, gofresh.Subject{Package: "example.com/incompleterun/" + pkgRel, Symbol: bench}, dir)
+			if err != nil || ordinary.Status != gofresh.Unverifiable {
+				t.Fatalf("ordinary policy = %+v, %v; observed proof must be load-bearing", ordinary, err)
 			}
 			manifest, decErr := base64.RawURLEncoding.DecodeString(fp.RuntimeInputs)
 			if decErr != nil {

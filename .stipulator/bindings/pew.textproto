@@ -22,26 +22,6 @@ bindings {
 }
 
 bindings {
-  requirement_id: "REQ-pew-validity-verdict"
-  content_hash: "f302c682f64ceddd1e8f8a1249376564484eb71f3bdd90f32045740cf47f3dc9"
-  source_hash: "258c9cc648ab58300185f0311ee813c65b5f5559d7217153d269dc4e6b2f26b7"
-  backend: "go"
-  symbol: "github.com/greatliontech/pew/cmd/pew.TestNonValidUsesLabel"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "836b0b0236eed17ac11dd27a90f4dee1f6bef7f9ab85103eaeb2b3f8fa55f9d5"
-}
-
-bindings {
-  requirement_id: "REQ-pew-validity-verdict"
-  content_hash: "f302c682f64ceddd1e8f8a1249376564484eb71f3bdd90f32045740cf47f3dc9"
-  source_hash: "258c9cc648ab58300185f0311ee813c65b5f5559d7217153d269dc4e6b2f26b7"
-  backend: "go"
-  symbol: "github.com/greatliontech/pew/cmd/pew.TestStatWorkingTreeStalenessHonorsDirective"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "a88a6def9b12350495e38084be2a13cebebc8fe33ae0cebe477a9d368657374e"
-}
-
-bindings {
   requirement_id: "REQ-pew-artifact-format"
   content_hash: "e9ba4d8cda80df34934ae45b734ce415fd3946871b673fb15f2ad0b34b0c60e5"
   source_hash: "4e29f6ef7865cbfb5849f9912b0a22541d5fda13c186e128036fb365252e86a0"
@@ -1232,16 +1212,6 @@ bindings {
 }
 
 bindings {
-  requirement_id: "REQ-pew-provenance-completeness"
-  content_hash: "27a7ad69fd76d54e1629f9daa9f00e266f2ebb733cc24c7969d347891b7cbdbc"
-  source_hash: "d76493f08aced3b778b54a5ebb69dc255566befdf08c05677cca5768c65cceee"
-  backend: "go"
-  symbol: "github.com/greatliontech/pew/cmd/pew.refreshRecording"
-  role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "e2ceb4b9e33c6fb2936f9cce07e3c83d8f44085fbb5a76b88a00b9fed5e0a13f"
-}
-
-bindings {
   requirement_id: "REQ-pew-key-set"
   content_hash: "ee7860e3083d8c6be51cd69aa2334964d8033a40401af4d14c5099fa19c53a65"
   source_hash: "bff2fa69f04012df7eaf216c6a0f4ecc4d5bb54271ccc690d5e7f8a89ded1fbf"
@@ -1279,4 +1249,314 @@ bindings {
   symbol: "github.com/greatliontech/pew/internal/run.TestParseRejectsReservedFormatConfig"
   role: BINDING_ROLE_TESTS
   shape_hash: "fdf4a376a77aa066cdda9d26e1f1d4b63218b17bc7fc42844a1a2b5606532de4"
+}
+
+bindings {
+  requirement_id: "REQ-pew-validity-verdict"
+  content_hash: "43790486e4b9e8c96f9506428acc922f88363f2e36e4fe217da4e4b7c56e66a8"
+  source_hash: "5e6ab71a8d316453013d646f73ffea1e1af03bc3412ef5185dbc3e1e41068e9e"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestNonValidUsesLabel"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "836b0b0236eed17ac11dd27a90f4dee1f6bef7f9ab85103eaeb2b3f8fa55f9d5"
+}
+
+bindings {
+  requirement_id: "REQ-pew-validity-verdict"
+  content_hash: "43790486e4b9e8c96f9506428acc922f88363f2e36e4fe217da4e4b7c56e66a8"
+  source_hash: "5e6ab71a8d316453013d646f73ffea1e1af03bc3412ef5185dbc3e1e41068e9e"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestStatWorkingTreeStalenessHonorsDirective"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a88a6def9b12350495e38084be2a13cebebc8fe33ae0cebe477a9d368657374e"
+}
+
+bindings {
+  requirement_id: "REQ-pew-provenance-completeness"
+  content_hash: "27a7ad69fd76d54e1629f9daa9f00e266f2ebb733cc24c7969d347891b7cbdbc"
+  source_hash: "d76493f08aced3b778b54a5ebb69dc255566befdf08c05677cca5768c65cceee"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.publishRefresh"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "e7b15100209768468890064b69f40b587359863e2fd4f1df5117e16b395c907c"
+}
+
+bindings {
+  requirement_id: "REQ-pew-validity-verdict"
+  content_hash: "43790486e4b9e8c96f9506428acc922f88363f2e36e4fe217da4e4b7c56e66a8"
+  source_hash: "5e6ab71a8d316453013d646f73ffea1e1af03bc3412ef5185dbc3e1e41068e9e"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestObservedMeasurementRetainsProducingSupportAcrossGrowth"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fad11ffe5038901a26bc6a0924254553c803ee3f9035294880d2fe731c2efcd2"
+}
+
+bindings {
+  requirement_id: "REQ-pew-validity-verdict"
+  content_hash: "43790486e4b9e8c96f9506428acc922f88363f2e36e4fe217da4e4b7c56e66a8"
+  source_hash: "5e6ab71a8d316453013d646f73ffea1e1af03bc3412ef5185dbc3e1e41068e9e"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestArmObservationNeverBorrowsMissingPremises"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f63621132e2974273dc5e4604306749dd52de639fe27bf4565ac16f6ead5325e"
+}
+
+bindings {
+  requirement_id: "REQ-pew-validity-verdict"
+  content_hash: "43790486e4b9e8c96f9506428acc922f88363f2e36e4fe217da4e4b7c56e66a8"
+  source_hash: "5e6ab71a8d316453013d646f73ffea1e1af03bc3412ef5185dbc3e1e41068e9e"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestCheckOneServesInertTestSuiteGrowth"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c3a4f064fb47b85454bd71ebb1cdf78de4fb1407e07617df82801c6509afa592"
+}
+
+bindings {
+  requirement_id: "REQ-pew-closure-noncall"
+  content_hash: "02739da44b7b9a6810c110b029225559056b4f1e826bbb697353d3e918028d4b"
+  source_hash: "6004d9d78dcc74c3a0db8ccd7e2047b188f081418785ceb4043d35a63a7502aa"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestNoncallAndMutableLocalMovementStalesStoredMeasurement"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2cf81941039218d68ba977439dcb6f08db459e02e59577db80f7f2376342c187"
+}
+
+bindings {
+  requirement_id: "REQ-pew-mutable-local"
+  content_hash: "7f2ae82fb280d181a4206e9507a191805f9d60217973e908db2c28897be95c56"
+  source_hash: "69decc226633124a7c10660aec48f3547a51f0d0c463cdf2fc3dc8acaf3a732a"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestNoncallAndMutableLocalMovementStalesStoredMeasurement"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2cf81941039218d68ba977439dcb6f08db459e02e59577db80f7f2376342c187"
+}
+
+bindings {
+  requirement_id: "REQ-pew-closure-soundness"
+  content_hash: "6df308b31bed02dc43a87c6126ba77585a9574d1a967d019f9c3bbe91ac11438"
+  source_hash: "3677924f3981ae127b90e4238f796bfa9d519a4bd3e51f6abf349575d58b4168"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestNoncallAndMutableLocalMovementStalesStoredMeasurement"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2cf81941039218d68ba977439dcb6f08db459e02e59577db80f7f2376342c187"
+}
+
+bindings {
+  requirement_id: "REQ-pew-provenance-completeness"
+  content_hash: "27a7ad69fd76d54e1629f9daa9f00e266f2ebb733cc24c7969d347891b7cbdbc"
+  source_hash: "d76493f08aced3b778b54a5ebb69dc255566befdf08c05677cca5768c65cceee"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestObservedMeasurementRetainsProducingSupportAcrossGrowth"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fad11ffe5038901a26bc6a0924254553c803ee3f9035294880d2fe731c2efcd2"
+}
+
+bindings {
+  requirement_id: "REQ-pew-observation-premises"
+  content_hash: "334e060747e278201bce4ef375294571d182f291d0f5f627edd47ec215cf51e7"
+  source_hash: "4ba8f2048f54cb809cbf2463a3abee85c93729c9ccd789aef72882257128a0b9"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestObservedMeasurementRetainsProducingSupportAcrossGrowth"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fad11ffe5038901a26bc6a0924254553c803ee3f9035294880d2fe731c2efcd2"
+}
+
+bindings {
+  requirement_id: "REQ-pew-observation-premises"
+  content_hash: "334e060747e278201bce4ef375294571d182f291d0f5f627edd47ec215cf51e7"
+  source_hash: "4ba8f2048f54cb809cbf2463a3abee85c93729c9ccd789aef72882257128a0b9"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestArmObservationNeverBorrowsMissingPremises"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f63621132e2974273dc5e4604306749dd52de639fe27bf4565ac16f6ead5325e"
+}
+
+bindings {
+  requirement_id: "REQ-pew-serve-proven"
+  content_hash: "7aacef5ef1acb2c3163bb523b5d6ef49d06f0fb46469fdb9b85a103baca1aa40"
+  source_hash: "e24b87d0c18b1de61321e4d988227edc36b54e5031881de6f37dfcfaa3407fc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestObservedMeasurementRetainsProducingSupportAcrossGrowth"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fad11ffe5038901a26bc6a0924254553c803ee3f9035294880d2fe731c2efcd2"
+}
+
+bindings {
+  requirement_id: "REQ-pew-vouch-source"
+  content_hash: "f86d214bdc12f0885290d54e3459c908ed06984d650b1d71dab5a2c08d7f6524"
+  source_hash: "c4d37012a51165e56feb03a4605de121fdb809759e93617544f0b7bdf29e0e4a"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestResolveVouchesSeam"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e70c93f5cf5df52602d73f0bdeceb0c49cdce0540d1a981815396320a10a6427"
+}
+
+bindings {
+  requirement_id: "REQ-pew-vouch-source"
+  content_hash: "f86d214bdc12f0885290d54e3459c908ed06984d650b1d71dab5a2c08d7f6524"
+  source_hash: "c4d37012a51165e56feb03a4605de121fdb809759e93617544f0b7bdf29e0e4a"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestJudgedVerbsNameTheirStoreForTheVouchFile"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d283a5e7f0ca62dbdac12cd28f0340e469173fccbd39c7281a75d391f8bad72d"
+}
+
+bindings {
+  requirement_id: "REQ-pew-closure-soundness"
+  content_hash: "6df308b31bed02dc43a87c6126ba77585a9574d1a967d019f9c3bbe91ac11438"
+  source_hash: "3677924f3981ae127b90e4238f796bfa9d519a4bd3e51f6abf349575d58b4168"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestProvenanceReadsPreparationSnapshot"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "928cccffbcd338d5db55c4ad0a1b2472687db953b013226b8e71e1200aa6c520"
+}
+
+bindings {
+  requirement_id: "REQ-pew-progress"
+  content_hash: "85521a23d73aeac90a8167852c7398a9295ac5c2b64bc0f82d7b95709fac52c2"
+  source_hash: "ffbd1af0652bde02f803739b60424568c85e6d7ea5c562772f9d319fb62730e6"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestEngineDiagnosticsDeliverDetailEvents"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b04ddc66d35a9bfee8c489f81fb5fc826d5cb4efe941992ba900fef45bfa19b1"
+}
+
+bindings {
+  requirement_id: "REQ-pew-unit-persistence"
+  content_hash: "a9714f963cc4a235ac7ae42d3b56e6b496ba833267c7a533c6e83728f1d54e85"
+  source_hash: "6f465a966a3b345204a32d4997513b196773d937e410c12ec10b1d4e824d9821"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestArmWriteGateRequiresOutcomeValidation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "585a798f86cfa5f7ddf60578ed9ac9b53d858b28a87d0b5aee64f9d6dee0ac02"
+}
+
+bindings {
+  requirement_id: "REQ-pew-validity-verdict"
+  content_hash: "43790486e4b9e8c96f9506428acc922f88363f2e36e4fe217da4e4b7c56e66a8"
+  source_hash: "5e6ab71a8d316453013d646f73ffea1e1af03bc3412ef5185dbc3e1e41068e9e"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.judgeRecordings"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "889d6fddf9f1380eaa183848f89138dd1ba6bc1dbe5253cc830697e9f6b01ccc"
+}
+
+bindings {
+  requirement_id: "REQ-pew-validity-verdict"
+  content_hash: "43790486e4b9e8c96f9506428acc922f88363f2e36e4fe217da4e4b7c56e66a8"
+  source_hash: "5e6ab71a8d316453013d646f73ffea1e1af03bc3412ef5185dbc3e1e41068e9e"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.inertGrownRecheckOn"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "79a3bed80d8c4eee00eafc509355f69bb18b0e3b44556de50f0d40eb2fbcc6b7"
+}
+
+bindings {
+  requirement_id: "REQ-pew-closure-soundness"
+  content_hash: "6df308b31bed02dc43a87c6126ba77585a9574d1a967d019f9c3bbe91ac11438"
+  source_hash: "3677924f3981ae127b90e4238f796bfa9d519a4bd3e51f6abf349575d58b4168"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.judgeRecordings"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "889d6fddf9f1380eaa183848f89138dd1ba6bc1dbe5253cc830697e9f6b01ccc"
+}
+
+bindings {
+  requirement_id: "REQ-pew-vouch-source"
+  content_hash: "f86d214bdc12f0885290d54e3459c908ed06984d650b1d71dab5a2c08d7f6524"
+  source_hash: "c4d37012a51165e56feb03a4605de121fdb809759e93617544f0b7bdf29e0e4a"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.beginInvocation"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "8ade7448cb71dc1ed3ac32bfd728ffcf500cf29f80fa9b0bcd5cc64d7bd1326d"
+}
+
+bindings {
+  requirement_id: "REQ-pew-vouch-source"
+  content_hash: "f86d214bdc12f0885290d54e3459c908ed06984d650b1d71dab5a2c08d7f6524"
+  source_hash: "c4d37012a51165e56feb03a4605de121fdb809759e93617544f0b7bdf29e0e4a"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.invocationVouches"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "0a0df387edf422c09140e7436da56805d2b47c1f94ebe1f7d4b3979442d9827d"
+}
+
+bindings {
+  requirement_id: "REQ-pew-preparation"
+  content_hash: "fd391b4964e9ec1830eccfad12182830e08adcdf837687d1e798c45a8996c749"
+  source_hash: "f069225841c5bca68c1d47ec90a96d2c47abbef44e4113723a5cdac7669f6153"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.beginInvocation"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "8ade7448cb71dc1ed3ac32bfd728ffcf500cf29f80fa9b0bcd5cc64d7bd1326d"
+}
+
+bindings {
+  requirement_id: "REQ-pew-observation-premises"
+  content_hash: "334e060747e278201bce4ef375294571d182f291d0f5f627edd47ec215cf51e7"
+  source_hash: "4ba8f2048f54cb809cbf2463a3abee85c93729c9ccd789aef72882257128a0b9"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.persistArm"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "cd7bdafc68c6d3713bbf1ab3c5598e3a5f1837f04de41c7e98a9009582cfb407"
+}
+
+bindings {
+  requirement_id: "REQ-pew-unit-persistence"
+  content_hash: "a9714f963cc4a235ac7ae42d3b56e6b496ba833267c7a533c6e83728f1d54e85"
+  source_hash: "6f465a966a3b345204a32d4997513b196773d937e410c12ec10b1d4e824d9821"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.persistArm"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "cd7bdafc68c6d3713bbf1ab3c5598e3a5f1837f04de41c7e98a9009582cfb407"
+}
+
+bindings {
+  requirement_id: "REQ-pew-interruption"
+  content_hash: "002d168a0964061da8be4947c8423fa29473b942e652c16b3d50ae10586b26c3"
+  source_hash: "60dbac26f11a8f920204bd844d5e879aed7b4fbfa71114907f4c58025cd2782b"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.persistArm"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "cd7bdafc68c6d3713bbf1ab3c5598e3a5f1837f04de41c7e98a9009582cfb407"
+}
+
+bindings {
+  requirement_id: "REQ-pew-admission"
+  content_hash: "4f226c3d9d1a22c302954c8ff077f57dc6fe77d40088ea2db762e9741f497e78"
+  source_hash: "ec127c0c455039827dac8cb41b750b5ab7a11e6a84214a9143688e10a1ff7190"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.admitRecording"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "9c89013dcc7bb1bd9a50e10be8d5f89aa62266d91c665d6d19ae300baea90b73"
+}
+
+bindings {
+  requirement_id: "REQ-pew-serve-proven"
+  content_hash: "7aacef5ef1acb2c3163bb523b5d6ef49d06f0fb46469fdb9b85a103baca1aa40"
+  source_hash: "e24b87d0c18b1de61321e4d988227edc36b54e5031881de6f37dfcfaa3407fc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.judgeRecordings"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "889d6fddf9f1380eaa183848f89138dd1ba6bc1dbe5253cc830697e9f6b01ccc"
+}
+
+bindings {
+  requirement_id: "REQ-pew-serve-proven"
+  content_hash: "7aacef5ef1acb2c3163bb523b5d6ef49d06f0fb46469fdb9b85a103baca1aa40"
+  source_hash: "e24b87d0c18b1de61321e4d988227edc36b54e5031881de6f37dfcfaa3407fc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.publishRefresh"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "e7b15100209768468890064b69f40b587359863e2fd4f1df5117e16b395c907c"
+}
+
+bindings {
+  requirement_id: "REQ-pew-vouch-source"
+  content_hash: "f86d214bdc12f0885290d54e3459c908ed06984d650b1d71dab5a2c08d7f6524"
+  source_hash: "c4d37012a51165e56feb03a4605de121fdb809759e93617544f0b7bdf29e0e4a"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestConcurrentInvocationsKeepEvidenceIsolated"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1e828c957c6cc64725516ee107ec388309aa572b953f52ad244dbce2c39caccc"
 }

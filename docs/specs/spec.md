@@ -107,8 +107,11 @@ that payload. No parallel fingerprint config lines are persisted or admitted in
 format 4. Comparison and explanation values below are projections from the admitted
 native fingerprint, never additional stored evidence. Absence remains absence;
 neither decoding nor refresh supplies historical observation or strategy evidence.
-An inert-growth refresh changes only the native fingerprint's test-variant hash
-and the companion ledger after §7.9's recheck, preserving every other field.
+An inert-growth refresh changes only the native fingerprint's versioned
+applicability endpoint and the companion ledger after §7.9's recheck. Every
+producing constituent, including the original test-variant hash and outcome
+support, remains unchanged. Unknown applicability strategies remain structurally
+readable but confer no reuse.
 
 The following vocabulary describes **non-persisted projections**. Legacy config
 spellings are display identifiers only; references elsewhere to fingerprint lines
@@ -373,9 +376,18 @@ Toolchain samples are shared only within one judged invocation, while its
 toolchain-selection inputs remain fixed. A later invocation samples again even
 at the same directory and under the same environment.
 
+The invocation also owns its complete environment snapshot, recording-store
+selection, store-vouch readings, preparation readers, observation-root memo and
+diagnostic/progress sinks. Command-local flags extend only that invocation's
+standing vouch set. Current-tree surfaces share one admitted recording and one
+package-batch judgment; historical comparison performs structural admission but
+enters no current-tree freshness judgment. Provisional checks are consumed only
+after the checking view validates.
+
 - **valid** (reuse `R`) — all six guards below provably hold over a soundly over-approximated
   closure, and either neither the closure nor runtime-input manifest carries an unverifiable
-  disposition or an applicable purity assertion explicitly overrides those dispositions (§7.5).
+  disposition, the supported observation conjunction discharges the closure's admitted
+  effects (§7.8), or an applicable purity assertion explicitly overrides those dispositions (§7.5).
 - **stale** (re-run) — some guard demonstrably fails: closure, runtime input, toolchain, machine,
    build config, or runtime config changed.
 - **unverifiable** (re-run, reason recorded) — guards would pass, but `B`'s closure reaches an
@@ -513,7 +525,7 @@ not source at all, so no source widening can bound it:
 
 | construct | external state |
 |-----------|----------------|
-| file I/O on a non-embedded path (`os.Open`, `os.ReadFile`, …) | the run retains identity-only input guards (§7.8); file-operation outcomes remain unsupported, and the ordinary freshness policy leaves the closure `unverifiable` |
+| file I/O on a non-embedded path (`os.Open`, `os.ReadFile`, …) | the run retains identity-only input guards (§7.8); file-operation outcomes remain unsupported, so observation cannot discharge the closure's unverifiability |
 | network I/O | a remote that may change |
 | `plugin.Open` / `plugin.Lookup` | code loaded from an arbitrary `.so` at runtime |
 | cgo linked against an external library (`#cgo LDFLAGS: -l…`) | C outside the build (in-tree `.c`/`.h` *are* hashed → that is A′, not B) |
@@ -522,8 +534,8 @@ not source at all, so no source widening can bound it:
 Any non-file Class-B dependence reachable in `B`'s closure → `unverifiable`. File I/O reached by
 the closure also remains `unverifiable`: rescuing it needs the completed observation conjunction
 *and* an observability proof. Construction-time proofs establish outcome support
-only for the shared method's admitted operations; Pew still selects the ordinary
-freshness policy when reading recordings (§7.8). Testlog
+only for the shared method's admitted operations; Pew explicitly selects observed
+checking for current-tree reuse (§7.8). Testlog
 identities alone prove neither complete path coverage nor operation outcomes, so
 they cannot suppress the Class-B marker. (Ambient nondeterminism — `time.Now`, unseeded `rand` — is a
 benchmark-*quality* issue, out of scope per §3, not a Class-B trigger.)
@@ -703,12 +715,18 @@ the shared facade; its ordinary source and guard validation still applies, and
 its missing outcome support is reported. One arm's preparation or attachment cannot seal
 another arm's transaction.
 
-Recordings retain Gofresh's ordinary fingerprint policy: the construction-time
-proof supports the outcome premise but does not authorize an observation-based
-freshness lift on read. A file-reading benchmark remains `unverifiable` unless an
-explicit purity assertion applies with its separate full-trust semantics from
-§7.5. Unversioned recordings are rejected at the Pew format boundary before their
-runtime manifest or any other fingerprint field is interpreted.
+Current-tree verdicts explicitly select Gofresh's observed policy. A lift requires
+the recognized attributable assertion, compatible subject-bound proof, completed
+manifest with outcome support for the original producing identity, matching runtime
+digest and every ordinary guard. A transformed applicability endpoint additionally
+requires the current proof and supported outcome inventory. Missing or inconsistent
+historical evidence never acquires support from current analysis or decoding.
+Unsupported inventories retain identity-only guards and their selected validation
+obligations. The immutable-environment method supports no file outcomes: a
+file-reading benchmark remains `unverifiable` unless an explicit purity assertion
+applies with its separate full-trust semantics from §7.5. Purity changes no support
+class. Unversioned recordings are rejected at the Pew format boundary before any
+fingerprint field is interpreted.
 
 ### 7.9 Inert test-suite growth
 
@@ -726,18 +744,31 @@ before the environment tiers, so a moved guard or runtime input can hide behind 
 the recording's `pew-test-variant-ledger` must diff **inert** against the current view's
 ledger per Gofresh's classifier — the only movement is added declarations no unchanged
 declaration can observe (a plain function that is not `TestMain`, a const, or a type; anything
-changed, removed, or initialization-bearing refuses) — and the recorded fingerprint refreshed
-to the current compartment hash re-checks, its verdict replacing the ordinary one, so every
+changed, removed, or initialization-bearing refuses) — and the shared explicit
+applicability-extension check licenses the current endpoint without modifying the
+producing fingerprint. Its verdict replaces the original one, so every
 remaining pin is enforced exactly as an ordinary verdict. Any fault refuses and the ordinary stale verdict stands (the safe direction:
 a spurious re-run, never a spurious reuse).
 
 The rule is a validity judgment shared by every verdict surface (`status`, `stat`'s
 working-tree warning, `run`'s default filter). Only `pew run` writes: when its verdict rode the rule,
-it rewrites the recording in place under the refreshed compartment hash and the current
+it stores the exact checked native fingerprint and paired current
 ledger — the proven extension is recorded, so later verdicts read plainly valid instead of
 re-proving the same delta. Read-only surfaces never touch the store. The measurement rows
 are untouched by the rewrite: the rule extends the recording's validity evidence, never its
 measured values (REQ-pew-derived-state's spirit — recomputing derived evidence never changes a measurement).
+
+The paired ledger retains Gofresh's binding strategy, production-file binding
+evidence, and test-file bindings (package, referenced names and import bindings).
+Its base64url-wrapped JSON adds `bindingStrategy` and `baseFiles` beside
+`declarations` and `fileHeaders`; each file header may carry `bindings`, whose
+`Package`, `References` and `Imports` preserve the shared binding evidence.
+Import objects contain `Name` and `Path`. Absent binding fields remain absent;
+they are never reconstructed from a declaration hash.
+Missing historical binding evidence proves no inert extension. Repeated growth
+retains the original producing fields and support while advancing the effective
+endpoint. Publication validates the checking view before writing the checked pair;
+a deferred-close judgment is provisional until that validation succeeds.
 
 ## 8. Machine fingerprint
 
@@ -938,7 +969,8 @@ provenance is captured atomically with the run:
 - Records provenance (§5), computes the run-commit closure hash (§7), and records runtime-input
   evidence (`pew-runtime*`, §7.8) at run time: the completed observation conjunction, or the
   canonical incomplete disposition with its honest reason when the conjunction cannot complete.
-- Captures one ordinary measurement view and every benchmark fingerprint before execution. The
+- Captures one shared measurement view and an observed fingerprint in each arm's
+  independent sibling transaction before execution. The
   result-contributing process for each benchmark is the package test binary launched by that
   benchmark's own `go test` driver invocation (single-subject execution above). Pew finalizes exactly
   one observation per invocation — completed under the §7.8 conjunction (pre-spawn bracket, testlog
@@ -1252,7 +1284,7 @@ knob, and a derived-default knob.
 
 **REQ-pew-closure-soundness** (behavior): **Closure soundness (`valid` requires proof).** pew MUST report `valid` only when all six guards (§7) provably hold over a closure that is a *superset* of the source able to affect `B`'s performance. Every blind spot is **resolved** to a precise edge, **widened** to the maximal non-std closure, or **downgraded** to `unverifiable` — never silently dropped, never narrowing the covered set. An unresolved blind spot yields `unverifiable` unless an applicable explicit purity assertion accepts responsibility for that disposition; purity never waives the six guards. The six-guard predicate is itself computed only under a provenance-sound engine (§7's toolchain-provenance prerequisite): a verdict-computing invocation whose ambient toolchain skews from the binary's compiled-in frontend refuses outright rather than judging over misread sources. *Violation (strongest):* a reachable `const`/type/embed `B` depends on changes while `B`'s call graph is byte-identical, the closure hash is unchanged, and `B` is reported `valid` → silent regression behind a stale baseline (the core failure pew exists to prevent). *Kind:* entailed.
 
-**REQ-pew-validity-verdict** (behavior): **Validity verdict.** `B` MUST be `valid` for HEAD iff *all six* guards hold and either its closure reaches no unhashable external dependence (Class B, §7.3) and its runtime-input manifest has no unverifiable disposition, or an applicable purity assertion overrides those dispositions (§7.5). Any guard failing ⇒ `stale`; absent a purity assertion, guards holding but either unverifiability source present ⇒ `unverifiable`. *Violation:* e.g. toolchain changed but reported valid, a benchmark reading an external file reported valid after the file changed, or a no-I/O benchmark carrying explicit incomplete outcome evidence reported valid. *Kind:* clause-explicit (§7).
+**REQ-pew-validity-verdict** (behavior): **Validity verdict.** `B` MUST be `valid` for HEAD iff *all six* guards hold and its remaining unverifiability is discharged: neither closure nor runtime manifest carries an unverifiable disposition; or the supported observation conjunction (§7.8) discharges the closure's admitted effects while the manifest is complete and verifiable; or an applicable purity assertion overrides those dispositions (§7.5). Any guard failing ⇒ `stale`; guards holding with an undisclosed or undischarged dependence ⇒ `unverifiable`. Historical absence is never filled by checking or decoding. *Violation:* a changed toolchain reported valid, a file-reading benchmark granted outcome support from successful exit alone, or explicit incomplete evidence silently promoted. *Kind:* clause-explicit (§7).
 
 **REQ-pew-artifact-format** (behavior): **Artifact format compatibility.** Every stored `.txt` MUST be a well-formed Go benchmark-format file parseable by `benchfmt` and plain `benchstat`; a recording without the current format discriminator is `stale (format)` and regenerated, never interpreted as an earlier shape. *Violation:* a written file that `benchfmt` rejects → ecosystem lock-in, G5 broken. *Kind:* clause-explicit (§5, G5). *Anchor tests:* a runtime-input manifest and a ledger past `benchfmt`'s 64 KiB scanner bound written through the store ⇒ every stored line under the bound, a bare `benchfmt` reader parses the file, the store's reader returns the values whole; a torn chunk set ⇒ corrupt, never a shorter value; a format-2 recording ⇒ not a current recording; a non-chunked row reaching the bound ⇒ the write refuses naming the row, one byte under it writes and reads back; an earlier-format recording past the bound ⇒ refused on read naming the regenerating operation, a foreign file ⇒ the plain read error.
 

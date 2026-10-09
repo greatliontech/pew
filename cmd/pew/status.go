@@ -31,6 +31,7 @@ const (
 )
 
 func newStatusCmd() *cobra.Command {
+	var rawVouches []string
 	var benchDir string
 	var label string
 	var staleOnly bool
@@ -41,10 +42,6 @@ func newStatusCmd() *cobra.Command {
 		Short: guidanceShort("status"),
 		Long:  guidanceHelp("status"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			vouchStoreDir = benchDir
-			if err := resolveVouches(); err != nil {
-				return err
-			}
 			if explain && jsonOut {
 				return fmt.Errorf("status: --explain and -json are mutually exclusive (the explanation is a human view)")
 			}
@@ -57,6 +54,10 @@ func newStatusCmd() *cobra.Command {
 			}
 			ctx, stop := commandContext(cmd)
 			defer stop()
+			ctx, _, err := beginInvocation(ctx, benchDir, rawVouches, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
 			return runStatus(ctx, cmd.OutOrStdout(), benchDir, label, staleOnly, explain, jsonOut, patterns)
 		},
 	}
@@ -106,9 +107,6 @@ func newEngineAt(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, en
 }
 
 func newEngineAtProducer(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env gotool.Environment, producerEnv *gotool.Environment) (*gofresh.Engine, string, error) {
-	if err := resolveVouches(); err != nil {
-		return nil, "", err
-	}
 	reader, err := preparationReader(ctx, moduleDir, env)
 	if err != nil {
 		return nil, "", err
@@ -125,45 +123,6 @@ func newEngineAtProducer(ctx context.Context, moduleDir, pkgDir string, mainPkg 
 	return e, pgo, err
 }
 
-// rawVouches collects the --vouch flag values; resolveVouches parses
-// them once into dynamicStateVouches before the first engine builds.
-var rawVouches []string
-
-// dynamicStateVouches is the process-wide vouch set from the --vouch
-// flags, extending the store's reviewed standing set (vouchfile.go) for
-// every engine a command builds, so run, status, and stat verdicts
-// judge under the same acceptances.
-var dynamicStateVouches []string
-
-// resolveVouches parses the collected --vouch values; every command
-// path that builds engines calls it before the first build.
-func resolveVouches() error {
-	if len(rawVouches) == 0 {
-		dynamicStateVouches = nil
-		return nil
-	}
-	// The engine's own grammar and set rule (gofresh.ParseVouchEntries:
-	// IMPORT-PATH:VARIABLE, one Go identifier for the variable; a
-	// repeated flag is one acceptance; a malformed entry refuses the set).
-	identities, err := gofresh.ParseVouchEntries(rawVouches)
-	if err != nil {
-		return err
-	}
-	dynamicStateVouches = identities
-	return nil
-}
-
-// engineDiagnostics is the sink every engine a command builds writes
-// its payload-bearing diagnostics through — gofresh's own
-// (gofresh.DiagnosticsTo over the operator's log): one "gofresh: "
-// line per event, a multi-line detail folded onto it, the writes
-// serialized by the sink, so analysis goroutines never interleave on
-// the log. Command-wide configuration like the vouch set (a var, not a
-// threaded parameter). The var's read is unsynchronized on analysis
-// goroutines: tests swap it for a sink over their own buffer only
-// while no engine is live, and only engine-free tests do.
-var engineDiagnostics = gofresh.DiagnosticsTo(os.Stderr)
-
 // emitEngineDiagnostic hands a payload-bearing gofresh event
 // (per-subject analysis-unavailable provenance, the unlisted-toolchain
 // notice) to the diagnostics sink, and a keep-alive that opens a unit
@@ -176,13 +135,17 @@ var engineDiagnostics = gofresh.DiagnosticsTo(os.Stderr)
 // Without the payload consumer, an
 // unlisted release surfaces only as scattered stale/unverifiable
 // verdicts with nothing naming the walk needed.
-func emitEngineDiagnostic(p gofresh.Progress) {
+func emitEngineDiagnostic(ctx context.Context, p gofresh.Progress) {
 	if _, diagnostic := p.Diagnostic(); diagnostic {
-		engineDiagnostics(p)
+		if i, ok := ctx.Value(invocationKey{}).(*invocation); ok && i.diagnostics != nil {
+			i.diagnostics(p)
+		} else {
+			gofresh.DiagnosticsTo(os.Stderr)(p)
+		}
 		return
 	}
 	if p.IsUnit() {
-		reportPhase(strings.TrimSpace("analysis " + p.Phase + " " + p.Package))
+		reportPhase(ctx, strings.TrimSpace("analysis "+p.Phase+" "+p.Package))
 	}
 }
 
@@ -197,20 +160,21 @@ func buildEngine(ctx context.Context, moduleDir string, env gotool.Environment, 
 	if err != nil {
 		return nil, err
 	}
-	reportPhase("preparing analysis under " + checkedToolchain)
+	reportPhase(ctx, "preparing analysis under "+checkedToolchain)
 	// The reviewed vouch set has one home, the store's root
 	// (REQ-pew-vouch-source): the engine declines the module's own
 	// vouches file and judges under the store's set extended by this
 	// invocation's flags.
 	opts := []gofresh.Option{gofresh.WithDir(moduleDir), gofresh.WithEnv(env.Values()...), gofresh.WithSingleSubjectExecution(),
-		gofresh.WithProgress(emitEngineDiagnostic), gofresh.WithoutRepositoryVouches()}
+		gofresh.WithDeferredCheckClose(),
+		gofresh.WithProgress(func(p gofresh.Progress) { emitEngineDiagnostic(ctx, p) }), gofresh.WithoutRepositoryVouches()}
 	if pgo != "" {
 		opts = append(opts, gofresh.WithBuildInputs(pgo))
 	}
 	if producerEnv != nil {
 		opts = append(opts, gofresh.WithProducerEnv(producerEnv.Values()...))
 	}
-	vouches, err := engineVouches(moduleDir)
+	vouches, err := invocationVouches(ctx, moduleDir)
 	if err != nil {
 		return nil, err
 	}
@@ -221,12 +185,17 @@ func buildEngine(ctx context.Context, moduleDir string, env gotool.Environment, 
 }
 
 func runStatus(ctx context.Context, w io.Writer, benchDir, label string, staleOnly, explain, jsonOut bool, patterns []string) error {
-	ctx = withToolchainSampler(ctx)
-	env, err := gotool.NewEnvironment(nil)
-	if err != nil {
-		return err
+	inv, ok := ctx.Value(invocationKey{}).(*invocation)
+	if !ok {
+		var err error
+		ctx, inv, err = beginInvocation(ctx, benchDir, nil, os.Stderr)
+		if err != nil {
+			return err
+		}
 	}
-	reportPhase("listing")
+	env := inv.env
+	benchDir = inv.vouches.storeDir
+	reportPhase(ctx, "listing")
 	pkgs, err := resolvePackages(ctx, env, patterns)
 	if err != nil {
 		if cancelledBy(ctx, err) {
@@ -251,7 +220,7 @@ func runStatus(ctx context.Context, w io.Writer, benchDir, label string, staleOn
 		if prepared[i].err != nil || len(prepared[i].benches) == 0 {
 			continue
 		}
-		reportPhase(fmt.Sprintf("judging %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
+		reportPhase(ctx, fmt.Sprintf("judging %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
 		_, err := checkToolchainProvenance(ctx, p.Module.Dir, env)
 		if ctx.Err() != nil {
 			return interrupted("status: interrupted while judging %s (package %d/%d)", p.ImportPath, i+1, len(pkgs))
@@ -268,7 +237,7 @@ func runStatus(ctx context.Context, w io.Writer, benchDir, label string, staleOn
 		if err := ctx.Err(); err != nil {
 			return interrupted("status: interrupted before %s (package %d/%d)", p.ImportPath, i+1, len(pkgs))
 		}
-		reportPhase(fmt.Sprintf("judging %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
+		reportPhase(ctx, fmt.Sprintf("judging %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
 		// A per-package failure (an unreadable PGO profile, a sibling that
 		// does not compile) is reported as a row and does not abort status of
 		// the rest of the tree.
@@ -300,7 +269,7 @@ func runStatus(ctx context.Context, w io.Writer, benchDir, label string, staleOn
 			e, _, err := newEngineForPkg(ctx, p, env)
 			return e, err
 		})
-		if err := statusPackage(ctx, w, os.Stderr, getEngine, benchDir, label, staleOnly, explain, jsonOut, p, benches, env); err != nil {
+		if err := statusPackage(ctx, w, inv.errw, getEngine, benchDir, label, staleOnly, explain, jsonOut, p, benches, env); err != nil {
 			if cancelledBy(ctx, err) {
 				return judging()
 			}
@@ -413,7 +382,21 @@ func statusPackage(ctx context.Context, w, errw io.Writer, getEngine func() (*go
 				failures = append(failures, fmt.Errorf("%s.%s explanation: %w", p.ImportPath, b, err))
 				continue
 			}
-			if err := explainRecordAgainstCurrent(ctx, w, e, p.Module.Dir, p.ImportPath, b, fp, env.Values()); err != nil {
+			subject := gofresh.Subject{Package: p.ImportPath, Symbol: b}
+			current := bv.current
+			if current.MaximalClosure == "" {
+				view, err := e.NewViewFor(ctx, []gofresh.Subject{subject}, p.Module.Dir, gofresh.Measurement)
+				if err != nil {
+					failures = append(failures, err)
+					continue
+				}
+				current, err = view.Capture(ctx, subject)
+				if err != nil {
+					failures = append(failures, err)
+					continue
+				}
+			}
+			if err := explainCapturedRecord(ctx, w, p.Module.Dir, fp, current, env.Values()); err != nil {
 				failures = append(failures, fmt.Errorf("%s.%s explanation: %w", p.ImportPath, b, err))
 			}
 		}
@@ -424,34 +407,10 @@ func statusPackage(ctx context.Context, w, errw io.Writer, getEngine func() (*go
 	return nil
 }
 
-// checkOne is the per-benchmark validity verdict for status and run (its default filter)
-// (stat's working-tree staleness warning shares verdictForRecs below over its
-// already-loaded rows). The engine recomputes the current
-// closure and guards (the SSA load is the dominant cost; an unrecorded benchmark
-// needs no analysis, so the store is read first).
-// The fourth result is the encoded current compartment ledger, non-empty
-// exactly when the verdict was granted through the inert-growth rule
-// (spec §7.9): the returned fingerprint then carries the refreshed
-// compartment pin, and the run path rewrites the recording so later
-// verdicts read plainly valid.
-func checkOne(ctx context.Context, st *store.Store, e *gofresh.Engine, pkgPath, pkgRel, moduleDir, bench, label string) (verdict, string, gofresh.Fingerprint, string, error) {
-	recs, err := st.Read(pkgRel, bench, label)
-	switch {
-	case errors.Is(err, store.ErrNotRecorded):
-		return verdictUnrecorded, "", gofresh.Fingerprint{}, "", nil
-	case errors.Is(err, store.ErrInvalidRecording):
-		return verdictStale, "format", gofresh.Fingerprint{}, "", nil
-	case err != nil:
-		return "", "", gofresh.Fingerprint{}, "", err
-	}
-	return verdictForRecs(ctx, e, pkgPath, moduleDir, bench, recs)
-}
-
-// newViewFor builds a package's typed view; a variable so a test can
-// count the loads a verb pays (the run's one view serves both its
-// freshness judgment and its capture).
-var newViewFor = func(e *gofresh.Engine, ctx context.Context, subjects []gofresh.Subject, moduleDir string, kind gofresh.Kind) (*gofresh.View, error) {
-	return e.NewViewFor(ctx, subjects, moduleDir, kind)
+// newViewFor builds through this operation's analysis dependency. The run's
+// one view serves both freshness judgment and the siblings' captured facts.
+func newViewFor(e *gofresh.Engine, ctx context.Context, subjects []gofresh.Subject, moduleDir string, kind gofresh.Kind) (*gofresh.View, error) {
+	return dependencies(ctx).view(e, ctx, subjects, moduleDir, kind)
 }
 
 // benchVerdict is one recorded benchmark's package-batch verdict row:
@@ -466,10 +425,13 @@ type benchVerdict struct {
 	fp          gofresh.Fingerprint
 	grownLedger string
 	foreign     []string
+	admitted    admission
+	view        *gofresh.View
+	current     gofresh.Fingerprint
 }
 
-// checkPackage is the per-package batch form of checkOne: one analysis
-// view serves every recorded benchmark's verdict (CheckBatch) and every
+// checkPackage reads store recordings before constructing one analysis
+// view serving every admitted benchmark's observed verdict and every
 // inert-growth rider's ledger read, capture, and re-check. A package
 // with N recorded benchmarks previously paid one view per benchmark
 // plus one more per rider - cost, not soundness: every fingerprint
@@ -479,12 +441,6 @@ type benchVerdict struct {
 // is unchanged.
 func checkPackage(ctx context.Context, st *store.Store, buildView func([]gofresh.Subject) (*gofresh.View, error), pkgPath, pkgRel, moduleDir string, benches []string, label string, view *gofresh.View) (map[string]*benchVerdict, error) {
 	out := map[string]*benchVerdict{}
-	type pending struct {
-		bench  string
-		fp     gofresh.Fingerprint
-		ledger string
-	}
-	var checks []pending
 	for _, b := range benches {
 		recs, err := st.Read(pkgRel, b, label)
 		switch {
@@ -501,13 +457,31 @@ func checkPackage(ctx context.Context, st *store.Store, buildView func([]gofresh
 		bv := &benchVerdict{foreign: store.ForeignConfigKeys(recs)}
 		out[b] = bv
 		adm := admitRecording(recs, true)
+		bv.admitted = adm
 		if !adm.ok {
 			// A strategy-refused recording decoded: its fingerprint rides
 			// the row so --explain can lay it against the current tree.
 			bv.v, bv.reason, bv.fp = verdictStale, adm.class, adm.fp
 			continue
 		}
-		checks = append(checks, pending{b, adm.fp, adm.ledger})
+	}
+	return judgeRecordings(ctx, buildView, pkgPath, benches, out, view)
+}
+
+// judgeRecordings is the current-tree verdict path for store and ref-paired
+// callers alike. Admission and historical comparison never select this policy.
+func judgeRecordings(ctx context.Context, buildView func([]gofresh.Subject) (*gofresh.View, error), pkgPath string, benches []string, out map[string]*benchVerdict, view *gofresh.View) (map[string]*benchVerdict, error) {
+	type pending struct {
+		bench  string
+		fp     gofresh.Fingerprint
+		ledger string
+	}
+	var checks []pending
+	for _, b := range benches {
+		bv := out[b]
+		if bv.err == nil && bv.admitted.ok {
+			checks = append(checks, pending{b, bv.admitted.fp, bv.admitted.ledger})
+		}
 	}
 	if len(checks) == 0 {
 		return out, nil
@@ -540,14 +514,21 @@ func checkPackage(ctx context.Context, st *store.Store, buildView func([]gofresh
 			return unjudged(err)
 		}
 		view = built
+	} else {
+		var err error
+		view, err = view.Sibling(subjects)
+		if err != nil {
+			return unjudged(err)
+		}
 	}
-	verdicts, err := view.CheckBatch(ctx, recorded)
+	verdicts, err := view.CheckObservedBatch(ctx, recorded)
 	if err != nil {
 		return unjudged(err)
 	}
 	for _, c := range checks {
 		subject := gofresh.Subject{Package: pkgPath, Symbol: c.bench}
 		bv := out[c.bench]
+		bv.view = view
 		bv.fp = c.fp
 		v := verdicts[subject]
 		pendingLedger := ""
@@ -562,77 +543,19 @@ func checkPackage(ctx context.Context, st *store.Store, buildView func([]gofresh
 			bv.fp = refreshedFP
 		}
 		bv.v, bv.reason = verdict(v.Status), v.Reason
+		bv.current, err = view.Capture(ctx, subject)
+		if err != nil {
+			return unjudged(err)
+		}
+	}
+	if err := view.Validate(ctx); err != nil {
+		return unjudged(err)
 	}
 	return out, nil
 }
 
-// verdictForRecs is the verdict core over already-loaded recording rows:
-// every verdict surface — status and run (its default filter) through checkOne, stat's
-// working-tree staleness warning directly — shares it, the inert-growth
-// rule included (spec §7.9).
-func verdictForRecs(ctx context.Context, e *gofresh.Engine, pkgPath, moduleDir, bench string, recs []*benchfmt.Result) (verdict, string, gofresh.Fingerprint, string, error) {
-	adm := admitRecording(recs, true)
-	if !adm.ok {
-		return verdictStale, adm.class, adm.fp, "", nil
-	}
-	fp, recordedLedger := adm.fp, adm.ledger
-	v, err := e.Check(ctx, fp, gofresh.Subject{Package: pkgPath, Symbol: bench}, moduleDir)
-	if err != nil {
-		return "", "", gofresh.Fingerprint{}, "", err
-	}
-	pendingLedger := ""
-	var refreshedFP gofresh.Fingerprint
-	if v.Status == gofresh.Stale && v.Reason == gofresh.ReasonTestVariants {
-		if refreshed, encoded, rv, ok := inertGrownRecheck(ctx, e, moduleDir, pkgPath, bench, recordedLedger, fp); ok {
-			// The refreshed verdict takes the ordinary verdict's place: a
-			// record that would read
-			// valid but for the proven-inert compartment movement serves,
-			// while a pin that hid behind the compartment reason surfaces
-			// under its own attribution (spec §7.9).
-			v, refreshedFP, pendingLedger = rv, refreshed, encoded
-		}
-	}
-	grownLedger := ""
-	if v.Status == gofresh.Valid && pendingLedger != "" {
-		// The serve succeeded: the refreshed fingerprint is the one the
-		// verdict granted over, and the run path records it. A refused
-		// re-check keeps returning the recorded fingerprint, so an
-		// explanation lays the recording's own values against the current
-		// tree — the moved pin and the moved compartment both surface.
-		grownLedger = pendingLedger
-		fp = refreshedFP
-	}
-	// The fingerprint the verdict was decided over rides back so an
-	// explanation view describes the same recording — never a re-read that a
-	// concurrent run could have replaced.
-	return verdict(v.Status), v.Reason, fp, grownLedger, nil
-}
-
-// inertGrownRecheck applies the inert-growth verdict rule (spec §7.9) to a
-// recording refused as exactly stale test variants
-// (gofresh.ReasonTestVariants). That verdict
-// certifies the benchmark's own source closure unchanged and nothing more —
-// gofresh orders the compartment comparison after the core and before the
-// environment tiers, so a moved guard or runtime input can hide behind that
-// reason — so the rule completes the proof itself: the recorded compartment
-// ledger must diff inert against the current view's (the only movement is
-// added declarations no unchanged declaration can observe), and the
-// recorded fingerprint refreshed to the current compartment hash re-checks,
-// its verdict replacing the ordinary one — every remaining pin enforced
-// exactly as an ordinary verdict. Any
-// fault refuses and the original verdict stands.
-func inertGrownRecheck(ctx context.Context, e *gofresh.Engine, moduleDir, pkgPath, bench, recordedLedger string, fp gofresh.Fingerprint) (gofresh.Fingerprint, string, gofresh.Verdict, bool) {
-	subject := gofresh.Subject{Package: pkgPath, Symbol: bench}
-	view, err := e.NewViewFor(ctx, []gofresh.Subject{subject}, moduleDir, gofresh.Measurement)
-	if err != nil {
-		return fp, "", gofresh.Verdict{}, false
-	}
-	return inertGrownRecheckOn(ctx, view, subject, recordedLedger, fp)
-}
-
-// inertGrownRecheckOn is the rule against a caller-supplied view - the
-// package-batch path shares one view across every rider; the
-// single-benchmark path (stat's working-tree warning) wraps it above.
+// inertGrownRecheckOn asks the shared engine to license applicability from
+// the paired historical ledger. No producing field is rewritten by Pew.
 func inertGrownRecheckOn(ctx context.Context, view *gofresh.View, subject gofresh.Subject, recordedLedger string, fp gofresh.Fingerprint) (gofresh.Fingerprint, string, gofresh.Verdict, bool) {
 	if recordedLedger == "" {
 		return fp, "", gofresh.Verdict{}, false
@@ -641,22 +564,12 @@ func inertGrownRecheckOn(ctx context.Context, view *gofresh.View, subject gofres
 	if err != nil {
 		return fp, "", gofresh.Verdict{}, false
 	}
-	current, err := view.TestVariantLedger(subject)
+	refreshed, current, v, err := view.CheckObservedInertTestVariantExtension(ctx, fp, recorded.ToGofresh(), subject)
 	if err != nil {
 		return fp, "", gofresh.Verdict{}, false
 	}
-	if !gofresh.DiffTestVariantLedgers(recorded.ToGofresh(), current).Inert() {
-		return fp, "", gofresh.Verdict{}, false
-	}
-	captured, err := view.Capture(ctx, subject)
-	if err != nil || captured.TestVariantClosure == "" {
-		return fp, "", gofresh.Verdict{}, false
-	}
-	refreshed := fp
-	refreshed.TestVariantClosure = captured.TestVariantClosure
-	v, err := view.Check(ctx, refreshed, subject)
-	if err != nil {
-		return fp, "", gofresh.Verdict{}, false
+	if v.Status != gofresh.Valid {
+		return fp, "", v, true
 	}
 	encoded, err := runpkg.EncodeLedger(runpkg.LedgerFromGofresh(current))
 	if err != nil {

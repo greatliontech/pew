@@ -24,6 +24,7 @@ import (
 )
 
 type statConfig struct {
+	vouches          []string
 	benchDir         string
 	label            string
 	opts             compare.Options
@@ -56,10 +57,6 @@ func newStatCmd() *cobra.Command {
 			if err := store.ValidateLabel(sc.label); err != nil {
 				return err
 			}
-			vouchStoreDir = sc.benchDir
-			if err := resolveVouches(); err != nil {
-				return err
-			}
 			ctx, stop := commandContext(cmd)
 			defer stop()
 			return runStat(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), sc, args)
@@ -75,7 +72,7 @@ func newStatCmd() *cobra.Command {
 	f.BoolVar(&sc.explain, "explain", false, "")
 	f.BoolVar(&sc.jsonOut, "json", false, "")
 	f.StringVar(&gate, "gate", "sec/op", "")
-	f.StringArrayVar(&rawVouches, "vouch", nil, "")
+	f.StringArrayVar(&sc.vouches, "vouch", nil, "")
 	return cmd
 }
 
@@ -214,9 +211,10 @@ type statSideKey struct {
 }
 
 type statSide struct {
-	recs []*benchfmt.Result
-	ok   bool
-	err  error
+	recs     []*benchfmt.Result
+	ok       bool
+	err      error
+	admitted *admission
 }
 
 func baselineFor(refs []string) (baseline, error) {
@@ -241,12 +239,13 @@ func (b baseline) historicalRefs() []string {
 }
 
 func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []string) error {
-	ctx = withToolchainSampler(ctx)
-	env, err := gotool.NewEnvironment(nil)
+	ctx, invocation, err := beginInvocation(ctx, sc.benchDir, sc.vouches, errw)
 	if err != nil {
 		return err
 	}
-	reportPhase("listing")
+	env := invocation.env
+	sc.benchDir = invocation.vouches.storeDir
+	reportPhase(ctx, "listing")
 	bl, err := baselineFor(refs)
 	if err != nil {
 		return err
@@ -271,7 +270,7 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 	if err != nil {
 		return err
 	}
-	reportPhase("scanning history")
+	reportPhase(ctx, "scanning history")
 	modules, err = addHistoricalModules(ctx, modules, repo, bl.historicalRefs(), sc, scanRoots)
 	if err != nil {
 		return err
@@ -289,6 +288,8 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 	// effective profiles differ need different guard inputs.
 	type engineKey struct{ moduleDir, pgo string }
 	engines := map[engineKey]*gofresh.Engine{}
+	judgments := map[string]map[string]*benchVerdict{}
+	projections := map[*benchfmt.Result]gofresh.Fingerprint{}
 	goflagsByModule := map[string]string{}
 	var tally statTally
 
@@ -296,7 +297,7 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 		if err := ctx.Err(); err != nil {
 			return interrupted("stat: interrupted before module %s (%d/%d); nothing compared", m.modulePath, mi+1, len(modules))
 		}
-		reportPhase(fmt.Sprintf("reading recordings of %s (%d/%d)", m.modulePath, mi+1, len(modules)))
+		reportPhase(ctx, fmt.Sprintf("reading recordings of %s (%d/%d)", m.modulePath, mi+1, len(modules)))
 		if err := addStatInventory(m, bl, sc.label); err != nil {
 			return err
 		}
@@ -316,7 +317,10 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 			if ctx.Err() != nil {
 				return stoppedAt()
 			}
-			reportPhase(fmt.Sprintf("judging %s.%s (%d/%d in %s)", key.pkgRel, key.bench, ki+1, len(keys), m.modulePath))
+			reportPhase(ctx, fmt.Sprintf("judging %s.%s (%d/%d in %s)", key.pkgRel, key.bench, ki+1, len(keys), m.modulePath))
+			if ctx.Err() != nil {
+				return stoppedAt()
+			}
 			baseRecs, baseOK, err := m.readSide(bl.baseRef, key.pkgRel, key.bench, key.label)
 			if err != nil && !errors.Is(err, store.ErrInvalidRecording) {
 				return err
@@ -335,7 +339,14 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 			// One admissibility ladder for every surface (admitRecording):
 			// the format rung on both sides, the strategy rung on the
 			// working-tree side alone.
-			baseAdm, newAdm := admitRecording(baseRecs, false), admitRecording(newRecs, newSideIsWorkingTree)
+			baseAdm, newAdm := m.admission(bl.baseRef, key), m.admission(bl.newRef, key)
+			for _, adm := range []admission{baseAdm, newAdm} {
+				if adm.ok {
+					for _, row := range adm.rows {
+						projections[row] = adm.fp
+					}
+				}
+			}
 			baseStale := baseOK && !baseAdm.ok && baseAdm.class == "format"
 			newStale := newOK && !newAdm.ok && newAdm.class == "format"
 			if baseStale {
@@ -426,9 +437,6 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 					ek := engineKey{moduleDir: cur.moduleDir, pgo: pgo}
 					engine := engines[ek]
 					if engine == nil {
-						if err := resolveVouches(); err != nil {
-							return err
-						}
 						engine, err = buildEngine(ctx, cur.moduleDir, env, nil, pgo)
 						if cancelledBy(ctx, err) {
 							return stoppedAt()
@@ -443,7 +451,21 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 					// stays read-only, so the returned ledger is dropped and
 					// no recording is rewritten here.
 					warnForeignKeys(errw, cur.importPath, key.bench, store.ForeignConfigKeys(newRecs))
-					if v, reason, fp, _, e := verdictForRecs(ctx, engine, cur.importPath, cur.moduleDir, key.bench, newRecs); cancelledBy(ctx, e) {
+					batchKey := cur.moduleDir + "\x00" + cur.importPath + "\x00" + key.label
+					batch := judgments[batchKey]
+					if batch == nil {
+						batch, err = m.judgePackage(ctx, engine, cur, key.label)
+						if cancelledBy(ctx, err) {
+							return stoppedAt()
+						}
+						if err != nil {
+							return err
+						}
+						judgments[batchKey] = batch
+					}
+					judged := batch[key.bench]
+					v, reason, fp, e := judged.v, judged.reason, judged.fp, judged.err
+					if cancelledBy(ctx, e) {
 						return stoppedAt()
 					} else if e != nil {
 						fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, e)
@@ -454,7 +476,7 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 						}
 						fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is %s; comparison may not reflect HEAD — re-run `pew run`\n", cur.importPath, key.bench, msg)
 						if sc.explain {
-							if err := explainRecordAgainstCurrent(ctx, errw, engine, cur.moduleDir, cur.importPath, key.bench, fp, env.Values()); err != nil {
+							if err := explainCapturedRecord(ctx, errw, cur.moduleDir, fp, judged.current, env.Values()); err != nil {
 								if cancelledBy(ctx, err) {
 									return stoppedAt()
 								}
@@ -470,15 +492,14 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 				}
 			}
 			if sc.explain && baseOK && newOK {
-				a, aOK := recordedGuards(baseRecs)
-				b, bOK := recordedGuards(newRecs)
-				if aOK && bOK && a != b {
+				a, b := baseAdm.fp.Guards, newAdm.fp.Guards
+				if baseAdm.ok && newAdm.ok && a != b {
 					newLabel := bl.newRef
 					if newLabel == "" {
 						newLabel = "working-tree"
 					}
 					fmt.Fprintf(errw, "pew: explain: %s.%s guard mismatch between %s and %s:\n", key.pkgRel, key.bench, bl.baseRef, newLabel)
-					if err := explainSides(errw, "base", "new", baseRecs, newRecs); err != nil {
+					if err := writeExplainRows(errw, "base", "new", guardRows(a, b)); err != nil {
 						return err
 					}
 				}
@@ -488,7 +509,15 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 		}
 	}
 
-	res := compare.Compare(baseAll, newAll, sc.opts)
+	res := compare.CompareProjected(baseAll, newAll, sc.opts, func(row *benchfmt.Result) func(string) string {
+		fp := projections[row]
+		return func(key string) string {
+			if runpkg.IsFingerprintProjection(key) {
+				return runpkg.FingerprintValue(fp, key)
+			}
+			return row.GetConfig(key)
+		}
+	})
 	if sc.jsonOut {
 		if err := writeStatJSON(w, res, func() string { return tally.emptyReason(res, sc.opts.GateUnits) }); err != nil {
 			return err
@@ -622,7 +651,7 @@ func addHistoricalModules(ctx context.Context, mods []*statModule, repo *gitblob
 			if err := ctx.Err(); err != nil {
 				return nil, interrupted("stat: interrupted scanning %s at %s; nothing compared", root, ref)
 			}
-			reportPhase(fmt.Sprintf("scanning %s at %s", root, ref))
+			reportPhase(ctx, fmt.Sprintf("scanning %s at %s", root, ref))
 			paths, err := repo.ListAt(ref, root)
 			if err != nil {
 				return nil, err
@@ -834,9 +863,6 @@ func readSide(st *store.Store, repo *gitblob.Repo, ref, pkgRel, bench, label str
 }
 
 func (m *statModule) readSide(ref, pkgRel, bench, label string) ([]*benchfmt.Result, bool, error) {
-	if ref == "" {
-		return readSide(m.store, m.repo, ref, pkgRel, bench, label)
-	}
 	if m.sides == nil {
 		m.sides = make(map[statSideKey]statSide)
 	}
@@ -845,6 +871,7 @@ func (m *statModule) readSide(ref, pkgRel, bench, label string) ([]*benchfmt.Res
 		return side.recs, side.ok, side.err
 	}
 	recs, ok, err := readSide(m.store, m.repo, ref, pkgRel, bench, label)
-	m.sides[key] = statSide{recs: recs, ok: ok, err: err}
+	adm := admitRecording(recs, ref == "")
+	m.sides[key] = statSide{recs: recs, ok: ok, err: err, admitted: &adm}
 	return recs, ok, err
 }

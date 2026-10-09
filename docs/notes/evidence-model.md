@@ -69,9 +69,9 @@ so the existing coherence exclusion does not settle it.
 
 The scope of the finding matters:
 
-- Pew currently selects no observability proof for recording reuse. The proposed
-  automatic file-read lift would expose the gap; this finding does not demonstrate
-  a current false-valid in that conservative path.
+- Selecting an observability proof cannot itself authorize automatic file-read
+  reuse. File outcomes need independent support; conservative identity-only
+  capture does not establish a false-valid merely by retaining those identities.
 - Gomutant and stipulator already use observed proof and the same facade. Their
   health and test-verdict checks do not independently record operation outcomes.
   This establishes a missing premise under the stated contract, not proof that

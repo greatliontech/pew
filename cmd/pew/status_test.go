@@ -216,7 +216,9 @@ func TestStatusExplainNamesMovedInputs(t *testing.T) {
 	env := append(os.Environ(), "PEW_EXPLAIN_PROBE=probe-secret-value")
 
 	var out strings.Builder
-	explainRecordAgainstCurrent(context.Background(), &out, e, ".", pkg, bench, fp, env)
+	if err := explainRecordAgainstCurrent(context.Background(), &out, e, ".", pkg, bench, fp, env); err != nil {
+		t.Fatal(err)
+	}
 	got := out.String()
 	if !strings.Contains(got, "moved inputs:") ||
 		!strings.Contains(got, "env PEW_EXPLAIN_PROBE") || !strings.Contains(got, watched) {
@@ -448,7 +450,9 @@ func TestExplainNamesAClosureDerivationMove(t *testing.T) {
 	}
 	e, pkg, bench, fp := explainFixture(t)
 	var same strings.Builder
-	explainRecordAgainstCurrent(context.Background(), &same, e, ".", pkg, bench, fp, os.Environ())
+	if err := explainRecordAgainstCurrent(context.Background(), &same, e, ".", pkg, bench, fp, os.Environ()); err != nil {
+		t.Fatal(err)
+	}
 	if strings.Contains(same.String(), "closure derivations") {
 		t.Fatalf("a recording under the current derivation shows a strategy row:\n%s", same.String())
 	}
@@ -461,7 +465,9 @@ func TestExplainNamesAClosureDerivationMove(t *testing.T) {
 		t.Fatalf("fixture: the moved derivation must share the current one's prefix and differ later: %q vs %q", moved.ClosureStrategy, gofresh.ClosureStrategy)
 	}
 	var out strings.Builder
-	explainRecordAgainstCurrent(context.Background(), &out, e, ".", pkg, bench, moved, os.Environ())
+	if err := explainRecordAgainstCurrent(context.Background(), &out, e, ".", pkg, bench, moved, os.Environ()); err != nil {
+		t.Fatal(err)
+	}
 	got := out.String()
 	var row string
 	for _, line := range strings.Split(got, "\n") {

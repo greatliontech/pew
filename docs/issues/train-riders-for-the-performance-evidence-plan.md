@@ -1,6 +1,6 @@
 # Handoff: the train's pew riders for the performance-evidence plan
 
-Lands: performance-evidence plan chunk 8, with the later-chunk items
+Lands: performance-evidence plan chunk 9, with the later-chunk items
 named below landing at their stated chunks.
 
 The cross-tool train (gofresh docs/plans/cross-tool-train.md) held pew
@@ -9,26 +9,6 @@ place this plan's machine never reads. The fifth re-audit band (train
 chunk 319, 2026-10-06) dissolved the train's pew tail into this plan
 and moves every rider here. Each item is a derived fact, not a wish;
 its source tick is named so the derivation can be read.
-
-## At chunk 8 — recorded-observation freshness
-
-- One verdict path: `checkOne` is test-only; `checkPackage`,
-  `verdictForRecs` and `inertGrownRecheck` beside it; admission
-  decodes each row three times (admission.go, status.go) — one
-  shared admission/verdict path, pins moved never deleted, preserving
-  REQ-pew-admission's order and the strategy rung on working-tree
-  sides only (`verdict-path-consolidation`,
-  `strategy-stale-arms-flipped-valid-without-rerecord`: the explain
-  row per validity key rides along).
-- The vouch set as four process-wide globals (status.go,
-  vouchfile.go) whose correctness depends on call order (044f7d8
-  itself reordered stat's resolveVouches): one threaded value with
-  engine construction, preserving REQ-pew-vouch-source (file ∪
-  flags; flags never remove a vouch).
-- The two covered gaps with no scheduled work
-  (`.stipulator/gaps/pew-closure-noncall`, `pew-mutable-local`): the
-  spec's anchors (a const flip, a struct-field change, an embed edit;
-  a local-replace edit) land at 8.4's movement verification.
 
 ## At chunk 9 — comparison policies
 
@@ -64,8 +44,7 @@ pew 320 (the residual bump: the releases this plan does not take,
 300's lint pew half, a resident ceiling), 252r (seven containment
 spellings, two module resolvers, the vestige set — `ExecuteBinary`,
 `run.Execute`, `gitblob.State` — the stretch literals, the
-declared-benchmarks rule, stat's partial pkgMeta; audit 335 struck
-`recordingFromPath` and `equalExcept` (deleted) and `checkOne` → 8.3;
+declared-benchmarks rule, stat's partial pkgMeta;
 `isPewRecording` is live), 232r (`--explain`'s
 stream, REQ-pew-derived-state's payload list, the REQ home rule with
 its two new pairs), 276r (§9's

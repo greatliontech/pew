@@ -12,7 +12,6 @@ import (
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	runpkg "github.com/greatliontech/pew/internal/run"
-	"golang.org/x/perf/benchfmt"
 )
 
 // The explanation views (spec §12 --explain): a verdict or a skipped
@@ -86,30 +85,27 @@ func guardRows(a, b guard.Guards) []explainRow {
 	}
 }
 
-// explainRecordAgainstCurrent explains one recording against the current tree
-// and environment: every guard's recorded vs current value, the closure hash,
-// the runtime-input digest, and — because a digest mismatch alone names
-// nothing — the manifest's watched identities. Current values come from the
-// engine's own capture, so they are digested exactly as the recorded ones were
-// (the engine folds build inputs with its own framing; a parallel capture
-// would diverge under PGO).
-func explainRecordAgainstCurrent(ctx context.Context, w io.Writer, e *gofresh.Engine, moduleDir, importPath, bench string, fp gofresh.Fingerprint, env []string) error {
-	curFP, err := e.CaptureFor(ctx, gofresh.Subject{Package: importPath, Symbol: bench}, moduleDir, gofresh.Measurement)
-	if err != nil {
-		_, writeErr := fmt.Fprintf(w, "    cannot compute the current state: %v\n", err)
-		return errors.Join(err, explanationWriteError(writeErr))
-	}
+func explainCapturedRecord(ctx context.Context, w io.Writer, moduleDir string, fp, curFP gofresh.Fingerprint, env []string) error {
 	rows := guardRows(fp.Guards, curFP.Guards)
+	rows = append(rows, explainRow{name: "dynamic-state strategy", a: fp.DynamicStateStrategy, b: curFP.DynamicStateStrategy, verbatim: true})
 	rows = append(rows, explainRow{name: runpkg.KeyClosure.Display, a: fp.MaximalClosure, b: curFP.MaximalClosure})
 	if fp.ClosureStrategy != curFP.ClosureStrategy {
 		// A derivation move: the two closure hashes were folded by
 		// different strategies and say nothing about each other's source.
 		rows = append(rows, explainRow{name: runpkg.KeyClosureStrategy.Display, a: fp.ClosureStrategy, b: curFP.ClosureStrategy, verbatim: true})
 	}
-	rows = append(rows, explainRow{name: runpkg.KeyTestVariants.Display, a: fp.TestVariantClosure, b: curFP.TestVariantClosure})
+	rows = append(rows, explainRow{name: "producing test-variants", a: fp.TestVariantClosure, b: curFP.TestVariantClosure})
+	rows = append(rows, explainRow{name: runpkg.KeyTestVariants.Display, a: fp.EffectiveTestVariantClosure(), b: curFP.TestVariantClosure})
+	rows = append(rows, explainRow{name: "purity attribution", a: fp.PurityAssertion, b: curFP.PurityAssertion, verbatim: true})
+	if _, err := fmt.Fprintf(w, "    recorded observation: assertion=%q strategy=%q observable=%t reason=%q; proof and outcome support are checked independently of purity\n", fp.ObservationAssertion, fp.ObservationProof.Strategy, fp.ObservationProof.Observable, fp.ObservationProof.Reason); err != nil {
+		return explanationWriteError(err)
+	}
 	currentRuntime := ""
 	var analysisErr error
 	if fp.RuntimeInputs != "" {
+		if _, err := fmt.Fprintln(w, "    runtime inputs: diagnostic re-observation of the recorded identities (values are not disclosed)"); err != nil {
+			return explanationWriteError(err)
+		}
 		if st, err := runtimeinput.Current(ctx, fp.RuntimeInputs, moduleDir, env); err != nil {
 			analysisErr = err
 			rows = append(rows, explainRow{name: runpkg.KeyRuntime.Display, a: fp.RuntimeDigest, b: "(uncomputable: " + err.Error() + ")"})
@@ -166,24 +162,4 @@ func movedInputsLine(ctx context.Context, manifest, moduleDir string, env []stri
 		return ""
 	}
 	return strings.Join(moved, ", ")
-}
-
-// explainSides explains a skipped comparison between two recordings: the
-// recorded guard values side by side, so a guard-mismatch skip names the
-// moving guard instead of one word.
-func explainSides(w io.Writer, aLabel, bLabel string, base, new []*benchfmt.Result) error {
-	a, aOK := recordedGuards(base)
-	b, bOK := recordedGuards(new)
-	if !aOK || !bOK {
-		return nil
-	}
-	return writeExplainRows(w, aLabel, bLabel, guardRows(a, b))
-}
-
-func recordedGuards(recs []*benchfmt.Result) (guard.Guards, bool) {
-	if len(recs) == 0 {
-		return guard.Guards{}, false
-	}
-	fp, _, ok := fingerprintFromConfig(recs[0].Config)
-	return fp.Guards, ok
 }

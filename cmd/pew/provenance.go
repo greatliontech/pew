@@ -20,16 +20,6 @@ type toolchainProvenanceError struct{ err error }
 func (e *toolchainProvenanceError) Error() string { return e.err.Error() }
 func (e *toolchainProvenanceError) Unwrap() error { return e.err }
 
-// goVersionSampler reports the ambient toolchain's GOVERSION as the
-// target module resolves it — the engine's build-toolchain provenance
-// half. Swapped only by tests. The default samples the memoized
-// preparation reader: one snapshot per coordinate and normalized
-// environment for the invocation, a failed sample memoized like an
-// answered one, a cancelled sample never memoized) under pew's policy,
-// so provenance adds no second `go env` to build preparation and an alias
-// and its target are one key.
-var goVersionSampler = sampleGoVersion
-
 type preparationReaderKey struct{}
 
 // withToolchainSampler owns the preparation readers for one judged invocation.
@@ -40,18 +30,18 @@ func withToolchainSampler(ctx context.Context) context.Context {
 }
 
 func preparationReader(ctx context.Context, dir string, env gotool.Environment) (*gofreshtool.EnvReader, error) {
-	makeReader := func() *gofreshtool.EnvReader { return gotool.Reader(dir, env, observeSample) }
+	makeReader := func() *gofreshtool.EnvReader {
+		return gotool.Reader(dir, env, func(cmd *exec.Cmd) {
+			if hook := dependencies(ctx).prepare; hook != nil {
+				hook(cmd)
+			}
+		})
+	}
 	memo, _ := ctx.Value(preparationReaderKey{}).(*gofreshtool.RunMemo[*gofreshtool.EnvReader])
 	if memo == nil {
 		return makeReader(), nil
 	}
 	return memo.Get(gotool.CommandDir(dir), env.Values(), makeReader)
-}
-
-func observeSample(cmd *exec.Cmd) {
-	if sampleCommandObserver != nil {
-		sampleCommandObserver(cmd)
-	}
 }
 
 // sampleGoVersion reads the toolchain sample through pew's one go-command
@@ -65,10 +55,6 @@ func sampleGoVersion(ctx context.Context, dir string, env gotool.Environment) (s
 	}
 	return (gofreshtool.SnapshotSampler{Reader: reader}).Sample(ctx, gotool.CommandDir(dir), env.Values())
 }
-
-// sampleCommandObserver is the runner's boundary hook on the sample's
-// command; nil in production, a pin installs one to observe the spawn.
-var sampleCommandObserver func(*exec.Cmd)
 
 // checkToolchainProvenance refuses the judged-run states where this
 // binary's compiled-in analysis frontend cannot faithfully read what
@@ -86,6 +72,7 @@ func checkToolchainProvenance(ctx context.Context, dir string, env gotool.Enviro
 	// refusal contract); the invocation owns the sampler memo, so a
 	// composite per check does not repeat its toolchain query.
 	var sample gofresh.SampleFunc
+	goVersionSampler := dependencies(ctx).sample
 	if goVersionSampler != nil {
 		sample = func(ctx context.Context, dir string, _ []string) (string, error) {
 			return goVersionSampler(ctx, dir, env)

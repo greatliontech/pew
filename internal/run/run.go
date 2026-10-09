@@ -532,23 +532,30 @@ type LedgerDeclaration struct {
 
 // LedgerFileHeader is one compartment file's persisted header identity.
 type LedgerFileHeader struct {
-	File     string `json:"file"`
-	Hash     string `json:"hash"`
-	Embedded bool   `json:"embedded,omitempty"`
+	File     string                           `json:"file"`
+	Hash     string                           `json:"hash"`
+	Embedded bool                             `json:"embedded,omitempty"`
+	Bindings *gofresh.TestVariantFileBindings `json:"bindings,omitempty"`
 }
 
 // Ledger is the recorded package's test-variant declaration ledger — the
 // inert-growth rule's diff base (§7.9).
 type Ledger struct {
-	Declarations []LedgerDeclaration `json:"declarations,omitempty"`
-	FileHeaders  []LedgerFileHeader  `json:"fileHeaders,omitempty"`
+	BindingStrategy string              `json:"bindingStrategy,omitempty"`
+	BaseFiles       []LedgerFileHeader  `json:"baseFiles,omitempty"`
+	Declarations    []LedgerDeclaration `json:"declarations,omitempty"`
+	FileHeaders     []LedgerFileHeader  `json:"fileHeaders,omitempty"`
 }
 
 // LedgerFromGofresh converts gofresh's ledger to the recorded form.
 func LedgerFromGofresh(ledger gofresh.TestVariantLedger) Ledger {
 	out := Ledger{
-		Declarations: make([]LedgerDeclaration, 0, len(ledger.Declarations)),
-		FileHeaders:  make([]LedgerFileHeader, 0, len(ledger.FileHeaders)),
+		BindingStrategy: ledger.BindingStrategy,
+		Declarations:    make([]LedgerDeclaration, 0, len(ledger.Declarations)),
+		FileHeaders:     make([]LedgerFileHeader, 0, len(ledger.FileHeaders)),
+	}
+	for _, header := range ledger.BaseFiles {
+		out.BaseFiles = append(out.BaseFiles, LedgerFileHeader(header))
 	}
 	for _, declaration := range ledger.Declarations {
 		out.Declarations = append(out.Declarations, LedgerDeclaration{
@@ -566,8 +573,12 @@ func LedgerFromGofresh(ledger gofresh.TestVariantLedger) Ledger {
 // ToGofresh converts the recorded form back to gofresh's ledger type.
 func (l Ledger) ToGofresh() gofresh.TestVariantLedger {
 	out := gofresh.TestVariantLedger{
-		Declarations: make([]gofresh.TestVariantDeclaration, 0, len(l.Declarations)),
-		FileHeaders:  make([]gofresh.TestVariantFileHeader, 0, len(l.FileHeaders)),
+		BindingStrategy: l.BindingStrategy,
+		Declarations:    make([]gofresh.TestVariantDeclaration, 0, len(l.Declarations)),
+		FileHeaders:     make([]gofresh.TestVariantFileHeader, 0, len(l.FileHeaders)),
+	}
+	for _, header := range l.BaseFiles {
+		out.BaseFiles = append(out.BaseFiles, gofresh.TestVariantFileHeader(header))
 	}
 	for _, declaration := range l.Declarations {
 		out.Declarations = append(out.Declarations, gofresh.TestVariantDeclaration{

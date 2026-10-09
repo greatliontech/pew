@@ -9,8 +9,10 @@ import (
 
 func TestLedgerNativeCompanionRoundTrip(t *testing.T) {
 	want := gofresh.TestVariantLedger{
-		Declarations: []gofresh.TestVariantDeclaration{{File: "x_test.go", Kind: "method", Name: "Method", Receiver: "T", Hash: "hash", Package: "p", References: []string{"a", "b"}}},
-		FileHeaders:  []gofresh.TestVariantFileHeader{{File: "x_test.go", Hash: "header", Embedded: true}},
+		BindingStrategy: "bindingparse@2",
+		BaseFiles:       []gofresh.TestVariantFileHeader{{File: "x.go", Bindings: &gofresh.TestVariantFileBindings{Package: "p", References: []string{"a"}, Imports: []gofresh.TestVariantImport{{Name: "a", Path: "example.com/a"}}}}},
+		Declarations:    []gofresh.TestVariantDeclaration{{File: "x_test.go", Kind: "method", Name: "Method", Receiver: "T", Hash: "hash", Package: "p", References: []string{"a", "b"}}},
+		FileHeaders:     []gofresh.TestVariantFileHeader{{File: "x_test.go", Hash: "header", Embedded: true, Bindings: &gofresh.TestVariantFileBindings{Package: "p", References: []string{"b"}, Imports: []gofresh.TestVariantImport{{Name: "b", Path: "example.com/b"}}}}},
 	}
 	// A new shared ledger field must receive a nonzero anchor, so the companion
 	// adapter cannot silently drop new diff semantics.

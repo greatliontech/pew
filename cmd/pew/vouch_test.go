@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
@@ -24,15 +23,12 @@ import (
 // characters, or a non-identifier variable refuse the whole set loudly
 // (spec §12 --vouch).
 func TestResolveVouchesTakesTheEnginesSet(t *testing.T) {
-	prior := rawVouches
-	t.Cleanup(func() { rawVouches = prior; dynamicStateVouches = nil })
-	rawVouches = []string{"b.example/dep:Var", "a.example/dep:Var", "b.example/dep:Var"}
-	if err := resolveVouches(); err != nil || len(dynamicStateVouches) != 2 || dynamicStateVouches[0] != "a.example/dep.Var" || dynamicStateVouches[1] != "b.example/dep.Var" {
-		t.Fatalf("resolved = %v, %v", dynamicStateVouches, err)
+	s, err := newVouchSource("", []string{"b.example/dep:Var", "a.example/dep:Var", "b.example/dep:Var"})
+	if err != nil || len(s.flags) != 2 || s.flags[0] != "a.example/dep.Var" || s.flags[1] != "b.example/dep.Var" {
+		t.Fatalf("resolved = %v, %v", s, err)
 	}
 	for _, bad := range []string{"a.example/dep", "", ":Var", "a.example/dep:", "a.example/dep:not-ident", "a.example/dep:9x", "a.example/dep:V.S", "a.example/dep :Var", "a.example/dep\x01x:Var"} {
-		rawVouches = []string{"a.example/dep:Var", bad}
-		if err := resolveVouches(); err == nil {
+		if _, err := newVouchSource("", []string{"a.example/dep:Var", bad}); err == nil {
 			t.Fatalf("malformed vouch %q accepted", bad)
 		}
 	}
@@ -111,9 +107,8 @@ func BenchmarkCount(b *testing.B) {
 	subject := gofresh.Subject{Package: "example.com/vouchbench", Symbol: "BenchmarkCount"}
 	capture := func(vouches ...string) gofresh.Fingerprint {
 		t.Helper()
-		dynamicStateVouches = vouches
-		defer func() { dynamicStateVouches = nil }()
-		e, err := buildEngine(context.Background(), dir, testEnvironment(t, os.Environ()), nil, "")
+		owned := context.WithValue(ctx, invocationKey{}, &invocation{vouches: &vouchSource{flags: vouches}})
+		e, err := buildEngine(owned, dir, testEnvironment(t, os.Environ()), nil, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -163,9 +158,8 @@ func BenchmarkCount(b *testing.B) {
 
 	// The vouched VERDICT no longer names the culprit - the discharge is
 	// load-bearing, not merely recorded.
-	dynamicStateVouches = []string{culprit}
-	vouchedEngine, err := buildEngine(context.Background(), dir, testEnvironment(t, os.Environ()), nil, "")
-	dynamicStateVouches = nil
+	owned := context.WithValue(ctx, invocationKey{}, &invocation{vouches: &vouchSource{flags: []string{culprit}}})
+	vouchedEngine, err := buildEngine(owned, dir, testEnvironment(t, os.Environ()), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,8 +182,6 @@ func BenchmarkCount(b *testing.B) {
 	// The store's reviewed vouch file is the standing set every engine
 	// over the module judges under, with no flag given: the same
 	// discharge, from the file beside the recordings (REQ-pew-vouch-source).
-	storeVouchMemo = sync.Map{}
-	vouchStoreDir = ""
 	if err := os.MkdirAll(filepath.Join(dir, "benchmarks"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +192,6 @@ func BenchmarkCount(b *testing.B) {
 	if fileFP.DynamicStateVouches != culprit {
 		t.Fatalf("the store's vouch file did not discharge: %q, want %q", fileFP.DynamicStateVouches, culprit)
 	}
-	storeVouchMemo = sync.Map{}
 
 	// The reviewed set has one home, the store's root: a vouches file
 	// at the MODULE root — the engine's own repository file — is
@@ -216,31 +207,27 @@ func BenchmarkCount(b *testing.B) {
 	if moduleFileFP.DynamicStateVouches != "" {
 		t.Fatalf("the module root's vouches file discharged %q; pew's engines judge under the store's set alone", moduleFileFP.DynamicStateVouches)
 	}
-	storeVouchMemo = sync.Map{}
 }
 
-// The flag-to-engine seam: resolveVouches parses the collected flag
-// values into the process-wide set, refuses malformed entries, and
-// resets the set when the flags are absent.
+// Each invocation parses its own flag set and refuses malformed entries;
+// a later empty set neither inherits nor changes the earlier set.
 func TestResolveVouchesSeam(t *testing.T) {
-	t.Cleanup(func() { rawVouches, dynamicStateVouches = nil, nil })
-	rawVouches = []string{"a.example/dep:Var"}
-	if err := resolveVouches(); err != nil {
+	s, err := newVouchSource("", []string{"a.example/dep:Var"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(dynamicStateVouches) != 1 || dynamicStateVouches[0] != "a.example/dep.Var" {
-		t.Fatalf("resolved set = %v", dynamicStateVouches)
+	if len(s.flags) != 1 || s.flags[0] != "a.example/dep.Var" {
+		t.Fatalf("resolved set = %v", s.flags)
 	}
-	rawVouches = []string{"garbage"}
-	if err := resolveVouches(); err == nil {
+	if _, err := newVouchSource("", []string{"garbage"}); err == nil {
 		t.Fatal("malformed vouch resolved silently")
 	}
-	rawVouches = nil
-	if err := resolveVouches(); err != nil {
+	empty, err := newVouchSource("", nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if dynamicStateVouches != nil {
-		t.Fatalf("empty flags left a stale set: %v", dynamicStateVouches)
+	if len(empty.flags) != 0 || len(s.flags) != 1 {
+		t.Fatalf("invocations share flags: old=%v new=%v", s.flags, empty.flags)
 	}
 }
 
@@ -250,22 +237,23 @@ func TestResolveVouchesSeam(t *testing.T) {
 // file's set and never remove from it; the set is read from the store
 // --bench-dir names (REQ-pew-vouch-source).
 func TestVouchFileIsTheStandingSetTheFlagsExtend(t *testing.T) {
-	t.Cleanup(func() { storeVouchMemo = sync.Map{}; vouchStoreDir = ""; dynamicStateVouches = nil })
 	module := t.TempDir()
 	store := filepath.Join(module, "benchmarks")
 	if err := os.MkdirAll(store, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	storeVouchMemo, vouchStoreDir = sync.Map{}, ""
-	if got, err := engineVouches(module); err != nil || len(got) != 0 {
+	s, _ := newVouchSource("", nil)
+	if got, err := s.engineVouches(module); err != nil || len(got) != 0 {
 		t.Fatalf("absent file = %v, %v; want the empty set", got, err)
 	}
 	if err := os.WriteFile(filepath.Join(store, vouchFileName), []byte("# standing\n\nexample.com/dep:Var\n  example.com/other:Second  \n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	storeVouchMemo = sync.Map{}
-	dynamicStateVouches = []string{"example.com/flag.Extra", "example.com/dep.Var"}
-	got, err := engineVouches(module)
+	if got, err := s.engineVouches(module); err != nil || len(got) != 0 {
+		t.Fatalf("same invocation reread standing set: %v %v", got, err)
+	}
+	s, _ = newVouchSource("", []string{"example.com/flag:Extra", "example.com/dep:Var"})
+	got, err := s.engineVouches(module)
 	if err != nil || strings.Join(got, ",") != "example.com/dep.Var,example.com/flag.Extra,example.com/other.Second" {
 		t.Fatalf("file ∪ flags = %v, %v", got, err)
 	}
@@ -274,16 +262,16 @@ func TestVouchFileIsTheStandingSetTheFlagsExtend(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(elsewhere, vouchFileName), []byte("example.com/named:Store\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	storeVouchMemo, vouchStoreDir, dynamicStateVouches = sync.Map{}, elsewhere, nil
-	if got, err := engineVouches(module); err != nil || strings.Join(got, ",") != "example.com/named.Store" {
+	s, _ = newVouchSource(elsewhere, nil)
+	if got, err := s.engineVouches(module); err != nil || strings.Join(got, ",") != "example.com/named.Store" {
 		t.Fatalf("named store's file = %v, %v", got, err)
 	}
 	// A malformed line refuses, naming the file.
 	if err := os.WriteFile(filepath.Join(elsewhere, vouchFileName), []byte("garbage\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	storeVouchMemo = sync.Map{}
-	if _, err := engineVouches(module); err == nil || !strings.Contains(err.Error(), "vouch file") || !strings.Contains(err.Error(), "IMPORT-PATH:VARIABLE") {
+	s, _ = newVouchSource(elsewhere, nil)
+	if _, err := s.engineVouches(module); err == nil || !strings.Contains(err.Error(), "vouch file") || !strings.Contains(err.Error(), "IMPORT-PATH:VARIABLE") {
 		t.Fatalf("malformed vouch file = %v; want the refusal naming the file", err)
 	}
 }
@@ -292,24 +280,27 @@ func TestVouchFileIsTheStandingSetTheFlagsExtend(t *testing.T) {
 // first engine builds, so the store the flag names is the store whose
 // vouch file governs (REQ-pew-vouch-source).
 func TestJudgedVerbsNameTheirStoreForTheVouchFile(t *testing.T) {
-	t.Cleanup(func() { vouchStoreDir = ""; storeVouchMemo = sync.Map{} })
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/vouchcmd\n\ngo 1.26\n")
+	writeFile(t, filepath.Join(dir, "bench_test.go"), "package vouchcmd\nimport \"testing\"\nfunc BenchmarkX(b *testing.B) {}\n")
+	withWorkingDir(t, dir)
+	storeDir := t.TempDir()
+	writeFile(t, filepath.Join(storeDir, vouchFileName), "malformed\n")
 	for _, verb := range []struct {
 		name string
 		cmd  func() *cobra.Command
 		args []string
 	}{
-		{"run", newRunCmd, []string{"--bench-dir", "/nonexistent/store", "./definitely/not/a/package"}},
-		{"status", newStatusCmd, []string{"--bench-dir", "/nonexistent/store", "./definitely/not/a/package"}},
-		{"stat", newStatCmd, []string{"--bench-dir", "/nonexistent/store"}},
+		{"run", newRunCmd, []string{"--bench-dir", storeDir, "."}},
+		{"status", newStatusCmd, []string{"--bench-dir", storeDir, "."}},
+		{"stat", newStatCmd, []string{"--bench-dir", storeDir}},
 	} {
-		vouchStoreDir = ""
 		cmd := verb.cmd()
 		cmd.SetArgs(verb.args)
 		cmd.SetOut(&bytes.Buffer{})
 		cmd.SetErr(&bytes.Buffer{})
-		_ = cmd.Execute()
-		if vouchStoreDir != "/nonexistent/store" {
-			t.Fatalf("%s left the vouch store at %q, want its --bench-dir", verb.name, vouchStoreDir)
+		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), filepath.Join(storeDir, vouchFileName)) {
+			t.Fatalf("%s ignored named store: %v", verb.name, err)
 		}
 	}
 }

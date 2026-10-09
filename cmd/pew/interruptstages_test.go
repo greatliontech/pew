@@ -10,13 +10,17 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	gogit "github.com/go-git/go-git/v5"
 
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/compare"
+	"github.com/greatliontech/pew/internal/recordingtest"
 	"github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 )
@@ -31,10 +35,10 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	if testing.Short() {
 		t.Skip("lists fixture modules through the toolchain")
 	}
-	orig := goVersionSampler
-	t.Cleanup(func() { goVersionSampler = orig })
+	owned, deps := testDependencies(t)
+	orig := deps.sample
 	var cancel context.CancelFunc
-	goVersionSampler = func(ctx context.Context, _ string, _ testEnvironmentValue) (string, error) {
+	deps.sample = func(ctx context.Context, _ string, _ testEnvironmentValue) (string, error) {
 		cancel() // the operator interrupts while the sample runs
 		return "", ctx.Err()
 	}
@@ -56,10 +60,10 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "pkg", "pkg_test.go"), "package pkg\n\nimport \"testing\"\n\nfunc BenchmarkStage(b *testing.B) {}\n")
 	withWorkingDir(t, dir)
 	var ctx context.Context
-	ctx, cancel = context.WithCancel(context.Background())
+	ctx, cancel = context.WithCancel(owned)
 	defer cancel()
 	assertInterrupted("run", runRun(ctx, &w, &ew, runConfig{benchDir: filepath.Join(dir, "b"), opts: run.Options{Count: 1, Bench: "."}}, []string{"./..."}), "interrupted while preparing example.com/stage/pkg")
-	ctx, cancel = context.WithCancel(context.Background())
+	ctx, cancel = context.WithCancel(owned)
 	defer cancel()
 	assertInterrupted("status", runStatus(ctx, &w, filepath.Join(dir, "b"), "", false, false, false, []string{"./..."}), "status: interrupted while judging example.com/stage/pkg")
 	// A completed sample does not erase a cancellation observed while
@@ -68,29 +72,29 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 		cancel()
 		return runtime.Version(), nil
 	}
-	goVersionSampler = answering
-	ctx, cancel = context.WithCancel(context.Background())
+	deps.sample = answering
+	ctx, cancel = context.WithCancel(owned)
 	defer cancel()
 	assertInterrupted("status (completed prerequisite)", runStatus(ctx, &w, filepath.Join(dir, "b"), "", false, false, false, []string{"./..."}), "status: interrupted while judging example.com/stage/pkg")
-	goVersionSampler = func(context.Context, string, testEnvironmentValue) (string, error) { return runtime.Version(), nil }
-	ctx, cancel = context.WithCancel(context.Background())
+	deps.sample = func(context.Context, string, testEnvironmentValue) (string, error) { return runtime.Version(), nil }
+	ctx, cancel = context.WithCancel(owned)
 	defer cancel()
 	assertInterrupted("status (after the last unit)", runStatus(ctx, cancelOnWrite{&w, cancel}, filepath.Join(dir, "b"), "", false, false, false, []string{"./..."}), "status: interrupted after the last package")
 	// With a recording to judge, the judgment re-observes the tree under
 	// the ended context and reports the interruption itself.
 	writeStatRecording(t, store.New(filepath.Join(dir, "b")), "pkg", "BenchmarkStage", 100)
 	calls := 0
-	goVersionSampler = func(ctx context.Context, dir string, env testEnvironmentValue) (string, error) {
+	deps.sample = func(ctx context.Context, dir string, env testEnvironmentValue) (string, error) {
 		calls++
 		if calls == 2 {
 			return answering(ctx, dir, env)
 		}
 		return runtime.Version(), nil
 	}
-	ctx, cancel = context.WithCancel(context.Background())
+	ctx, cancel = context.WithCancel(owned)
 	defer cancel()
 	assertInterrupted("status (judgment)", runStatus(ctx, &w, filepath.Join(dir, "b"), "", false, false, false, []string{"./..."}), "status: interrupted while judging example.com/stage/pkg")
-	goVersionSampler = func(ctx context.Context, _ string, _ testEnvironmentValue) (string, error) {
+	deps.sample = func(ctx context.Context, _ string, _ testEnvironmentValue) (string, error) {
 		cancel()
 		return "", ctx.Err()
 	}
@@ -107,7 +111,7 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	writeStatRecording(t, st, "pkg", "BenchmarkStage", 100)
 	commitAll(t, repo, "base")
 	withWorkingDir(t, statDir)
-	ctx, cancel = context.WithCancel(context.Background())
+	ctx, cancel = context.WithCancel(owned)
 	defer cancel()
 	assertInterrupted("stat", runStat(ctx, &w, &ew, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, nil), "stat: interrupted at pkg.BenchmarkStage")
 
@@ -127,43 +131,98 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	writeStatRecording(t, two, "pkg", "BenchmarkB", 100)
 	commitAll(t, twoRepo, "base")
 	withWorkingDir(t, twoDir)
-	goVersionSampler = orig
-	stopReporter := startReporter(io.Discard, time.Hour)
+	deps.sample = orig
+	owned, stopReporter := startReporter(owned, io.Discard, time.Hour)
 	t.Cleanup(stopReporter)
 	for _, bench := range []string{"BenchmarkA", "BenchmarkB"} {
-		ctx, cancel = context.WithCancel(context.Background())
+		ctx, cancel = context.WithCancel(owned)
 		defer cancel()
-		setPhaseHook(func(phase string) {
+		setPhaseHook(ctx, func(phase string) {
 			if strings.HasPrefix(phase, "judging pkg."+bench+" ") {
 				cancel()
 			}
 		})
 		assertInterrupted("stat at "+bench, runStat(ctx, &w, &ew, statConfig{benchDir: two.Root, opts: compare.DefaultOptions()}, nil), "stat: interrupted at pkg."+bench)
 	}
-	setPhaseHook(nil)
+	setPhaseHook(owned, nil)
+
+	// Enter the batch itself, not merely the per-record progress boundary.
+	// Matching source/guard fingerprints keep runtime observation reachable.
+	env := testEnvironment(t, os.Environ())
+	engine, _, err := newEngineAt(owned, twoDir, filepath.Join(twoDir, "pkg"), false, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjects := []gofresh.Subject{{Package: "example.com/stattwo/pkg", Symbol: "BenchmarkA"}, {Package: "example.com/stattwo/pkg", Symbol: "BenchmarkB"}}
+	view, err := engine.NewViewFor(owned, subjects, twoDir, gofresh.Measurement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt, err := runtimeinput.Incomplete(twoDir, "fixture", "fixture has no producing observation", env.Values())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, subject := range subjects {
+		fp, err := view.Capture(owned, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ledger, err := view.TestVariantLedger(subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := run.EncodeLedger(run.LedgerFromGofresh(ledger))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := two.Write("pkg", subject.Symbol, "", recordingtest.Results(subject.Symbol, []float64{100}, recordingtest.Measured(fp, encoded, rt.Digest, rt.Manifest))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, phase := range []string{"analysis ", "analysis runtime"} {
+		ctx, cancel = context.WithCancel(owned)
+		var fired atomic.Bool
+		setPhaseHook(ctx, func(current string) {
+			if strings.HasPrefix(current, phase) {
+				fired.Store(true)
+				cancel()
+			}
+		})
+		w.Reset()
+		err := runStat(ctx, &w, &ew, statConfig{benchDir: two.Root, opts: compare.DefaultOptions()}, nil)
+		cancel()
+		if !fired.Load() {
+			t.Fatalf("batch phase %q was never reached", phase)
+		}
+		assertInterrupted("stat inside "+phase, err, "stat: interrupted at pkg.BenchmarkA")
+		if w.Len() != 0 {
+			t.Fatalf("cancelled batch published a comparison: %s", &w)
+		}
+	}
+	setPhaseHook(owned, nil)
 
 	// gc: the signal lands while the module is resolved for a module
 	// that lists no package at all.
 	gcDir := t.TempDir()
 	writeFile(t, filepath.Join(gcDir, "go.mod"), "module example.com/gcmod\n\ngo 1.24\n")
 	withWorkingDir(t, gcDir)
-	ctx, cancel = context.WithCancel(context.Background())
+	ctx, cancel = context.WithCancel(owned)
 	defer cancel()
-	setPhaseHook(func(phase string) {
+	setPhaseHook(ctx, func(phase string) {
 		if phase == "resolving the module" {
 			cancel()
 		}
 	})
 	assertInterrupted("gc", runGC(ctx, &w, filepath.Join(gcDir, "b")), "gc: interrupted while resolving the module")
-	setPhaseHook(nil)
-	goVersionSampler = func(ctx context.Context, _ string, _ testEnvironmentValue) (string, error) {
+	setPhaseHook(owned, nil)
+	deps.sample = func(ctx context.Context, _ string, _ testEnvironmentValue) (string, error) {
 		cancel()
 		return "", ctx.Err()
 	}
 
 	abDir := abFixtureRepo(t)
 	withWorkingDir(t, abDir)
-	ctx, cancel = context.WithCancel(context.Background())
+	ctx, cancel = context.WithCancel(owned)
 	defer cancel()
 	ac := abConfig{
 		bench: ".", count: 1, benchtime: "1x", ref: "HEAD",
@@ -230,10 +289,8 @@ func TestGoVersionSampleHonorsTheCallersContext(t *testing.T) {
 
 // setPhaseHook installs the active reporter's phase observer under its
 // lock — the field's guard is the reporter's mutex.
-func setPhaseHook(f func(string)) {
-	activeMu.Lock()
-	r := active
-	activeMu.Unlock()
+func setPhaseHook(ctx context.Context, f func(string)) {
+	r := ctx.Value(reporterKey{}).(*reporter)
 	r.mu.Lock()
 	r.onPhase = f
 	r.mu.Unlock()
@@ -435,16 +492,14 @@ func TestMeasurementStagesReportTheirCancellationAsInterruption(t *testing.T) {
 
 	// run: a measured arm whose write gate exceeded its bound is
 	// discarded by the gate, naming it — not by the verb's context.
-	bound := armWriteGateBound
-	armWriteGateBound = time.Nanosecond
-	defer func() { armWriteGateBound = bound }()
 	dir = twoArmFixture(t)
 	withWorkingDir(t, dir)
 	rc = runConfig{
-		benchDir: filepath.Join(dir, "benchmarks"),
-		opts:     run.Options{Count: 1, Benchtime: "1x", Bench: "."},
-		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
-		execute:  armStub(nil),
+		writeGateBound: time.Nanosecond,
+		benchDir:       filepath.Join(dir, "benchmarks"),
+		opts:           run.Options{Count: 1, Benchtime: "1x", Bench: "."},
+		throttle:       func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
+		execute:        armStub(nil),
 	}
 	w.Reset()
 	err := runRun(context.Background(), &w, &ew, rc, []string{"."})

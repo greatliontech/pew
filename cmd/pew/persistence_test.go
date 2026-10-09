@@ -214,18 +214,18 @@ func TestGCReportsEachRemovalAsItLands(t *testing.T) {
 // analysis stretch (REQ-pew-progress).
 func TestReporterNamesThePhaseOnTheCadence(t *testing.T) {
 	log := &lockedBuffer{}
-	stop := startReporter(log, 5*time.Millisecond)
-	reportPhase("measuring example.com/p arm 1/2")
+	ctx, stop := startReporter(t.Context(), log, 5*time.Millisecond)
+	reportPhase(ctx, "measuring example.com/p arm 1/2")
 	time.Sleep(40 * time.Millisecond)
-	emitEngineDiagnostic(gofresh.Progress{Phase: "load", Package: "example.com/p"})
+	emitEngineDiagnostic(ctx, gofresh.Progress{Phase: "load", Package: "example.com/p"})
 	time.Sleep(40 * time.Millisecond)
 	// A keep-alive that is a fact, not a unit of work — a served class
 	// with no package — names no stretch: the load stays in flight.
-	emitEngineDiagnostic(gofresh.Progress{Phase: "served"})
+	emitEngineDiagnostic(ctx, gofresh.Progress{Phase: "served"})
 	time.Sleep(40 * time.Millisecond)
 	// A unit event with no package — the observe pass — names its
 	// stretch without a doubled space.
-	emitEngineDiagnostic(gofresh.Progress{Phase: "observe"})
+	emitEngineDiagnostic(ctx, gofresh.Progress{Phase: "observe"})
 	time.Sleep(40 * time.Millisecond)
 	stop() // joins the cadence goroutine: no line lands after it
 	text := log.String()
@@ -245,7 +245,7 @@ func TestReporterNamesThePhaseOnTheCadence(t *testing.T) {
 	if log.String() != text {
 		t.Fatal("the cadence kept printing after stop")
 	}
-	reportPhase("after stop")
+	reportPhase(ctx, "after stop")
 	if log.String() != text {
 		t.Fatal("a phase set after stop printed")
 	}

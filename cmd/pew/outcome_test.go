@@ -41,8 +41,8 @@ func TestRunRecordsPerArmOutcomeSupport(t *testing.T) {
 		if !ok {
 			t.Fatal("record does not admit")
 		}
-		if fp.ObservationProof != (gofresh.ObservationProof{}) {
-			t.Fatal("construction proof enabled an unselected read policy")
+		if fp.ObservationProof.Subject.Symbol != name || !fp.ObservationProof.Observable || fp.ObservationAssertion == "" {
+			t.Fatal("record lost the arm's selected observation proof")
 		}
 		data, err := base64.RawURLEncoding.DecodeString(fp.RuntimeInputs)
 		if err != nil {
@@ -84,10 +84,6 @@ func TestArmWriteGateRequiresOutcomeValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fp, err := parent.Capture(context.Background(), subject)
-	if err != nil {
-		t.Fatal(err)
-	}
 	observed, err := parent.Sibling([]gofresh.Subject{subject})
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +92,7 @@ func TestArmWriteGateRequiresOutcomeValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	prep := &packagePreparation{pkg: p, st: store.New(filepath.Join(t.TempDir(), "benchmarks")), pgoInput: pgo}
-	err = persistArm(context.Background(), io.Discard, io.Discard, runConfig{}, newGitStateCache(nil), p, prep, parent, "", true, "", subject.Symbol, fp, armMeasurement{outcomeView: observed}, env)
+	err = persistArm(context.Background(), io.Discard, io.Discard, runConfig{}, newGitStateCache(nil), p, prep, parent, "", true, "", subject.Symbol, armMeasurement{outcomeView: observed}, env)
 	if err == nil || !strings.Contains(err.Error(), "no attached completed observation") {
 		t.Fatalf("write gate bypassed outcome validation: %v", err)
 	}

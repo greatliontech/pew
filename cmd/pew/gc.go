@@ -41,7 +41,7 @@ func runGC(ctx context.Context, w io.Writer, benchDir string) error {
 	if err != nil {
 		return err
 	}
-	reportPhase("listing")
+	reportPhase(ctx, "listing")
 	pkgs, err := resolvePackages(ctx, env, []string{"./..."})
 	if err != nil {
 		if cancelledBy(ctx, err) {
@@ -82,7 +82,7 @@ func runGC(ctx context.Context, w io.Writer, benchDir string) error {
 		}
 	}
 	if len(groups) == 0 {
-		reportPhase("resolving the module")
+		reportPhase(ctx, "resolving the module")
 		moduleDir, err := currentModuleDir(ctx, env)
 		if cancelledBy(ctx, err) {
 			return interrupted("gc: interrupted while resolving the module")
@@ -110,7 +110,7 @@ func runGC(ctx context.Context, w io.Writer, benchDir string) error {
 		if err := ctx.Err(); err != nil {
 			return interrupted("gc: interrupted before store %s (%d/%d; %d removed so far, each reported as it went)", dir, i+1, len(dirs), len(removed))
 		}
-		reportPhase(fmt.Sprintf("scanning store %s (%d/%d)", dir, i+1, len(dirs)))
+		reportPhase(ctx, fmt.Sprintf("scanning store %s (%d/%d)", dir, i+1, len(dirs)))
 		st := store.New(dir)
 		n, err := addStoreOnlySourceBenchmarks(w, st, g.moduleDir, g.live, g.protected)
 		if err != nil {

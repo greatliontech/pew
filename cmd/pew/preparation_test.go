@@ -375,13 +375,13 @@ func TestRunServesValidRecordingsByDefault(t *testing.T) {
 	// One typed view per package serves the freshness judgment and the
 	// capture: the second run loads exactly once.
 	loads := 0
-	prior := newViewFor
-	newViewFor = func(e *gofresh.Engine, ctx context.Context, subjects []gofresh.Subject, moduleDir string, kind gofresh.Kind) (*gofresh.View, error) {
+	ctx, deps := testDependencies(t)
+	prior := deps.view
+	deps.view = func(e *gofresh.Engine, ctx context.Context, subjects []gofresh.Subject, moduleDir string, kind gofresh.Kind) (*gofresh.View, error) {
 		loads++
 		return prior(e, ctx, subjects, moduleDir, kind)
 	}
-	defer func() { newViewFor = prior }()
-	if err := runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"."}); err != nil {
+	if err := runRun(ctx, &out, &bytes.Buffer{}, rc, []string{"."}); err != nil {
 		t.Fatalf("second run: %v\n%s", err, out.String())
 	}
 	if loads != 1 {

@@ -24,6 +24,8 @@ import (
 )
 
 type runConfig struct {
+	writeGateBound  time.Duration
+	vouches         []string
 	benchDir, label string
 	roots           *runtimeinput.Roots
 	// pin is the derived CPU set a pinned run measures on, unpinned when
@@ -77,10 +79,6 @@ func newRunCmd() *cobra.Command {
 			if err := validateBenchmarkPattern(rc.opts.Bench); err != nil {
 				return err
 			}
-			vouchStoreDir = rc.benchDir
-			if err := resolveVouches(); err != nil {
-				return err
-			}
 			if pin {
 				derived, err := derivePin(cmd.ErrOrStderr())
 				if err != nil {
@@ -106,18 +104,19 @@ func newRunCmd() *cobra.Command {
 	f.BoolVar(&rc.strict, "strict", false, "")
 	f.StringVar(&rc.label, "label", "", "")
 	f.BoolVar(&rc.all, "all", false, "")
-	f.StringArrayVar(&rawVouches, "vouch", nil, "")
+	f.StringArrayVar(&rc.vouches, "vouch", nil, "")
 	return cmd
 }
 
 func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []string) error {
-	ctx = withToolchainSampler(ctx)
-	env, err := gotool.NewEnvironment(nil)
+	ctx, invocation, err := beginInvocation(ctx, rc.benchDir, rc.vouches, errw)
 	if err != nil {
 		return err
 	}
-	rc.roots = &runtimeinput.Roots{}
-	reportPhase("listing")
+	env := invocation.env
+	rc.benchDir = invocation.vouches.storeDir
+	rc.roots = &invocation.roots
+	reportPhase(ctx, "listing")
 	pkgs, err := resolvePackages(ctx, env, patterns)
 	if err != nil {
 		if cancelledBy(ctx, err) {
@@ -175,7 +174,7 @@ func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []str
 		if ctx.Err() != nil {
 			return preparing()
 		}
-		reportPhase(fmt.Sprintf("preparing %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
+		reportPhase(ctx, fmt.Sprintf("preparing %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
 		prep, err := preparePackage(ctx, rc, p, envs)
 		if err != nil {
 			// The interruption outranks a provenance refusal raised in
@@ -457,7 +456,7 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 	// freshness judgment reads it and the capture reads it — a second
 	// load over the same subjects would only re-derive the first
 	// (REQ-pew-serve-proven).
-	reportPhase("loading " + p.ImportPath)
+	reportPhase(ctx, "loading "+p.ImportPath)
 	subjects := make([]gofresh.Subject, 0, len(runBenches))
 	for _, name := range runBenches {
 		subjects = append(subjects, gofresh.Subject{Package: p.ImportPath, Symbol: name})
@@ -518,14 +517,6 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 	if !baseline.Equal(startState) {
 		return fmt.Errorf("repository state moved before benchmark run")
 	}
-	fingerprints := make(map[string]gofresh.Fingerprint, len(subjects))
-	for _, subject := range subjects {
-		fp, err := view.Capture(ctx, subject)
-		if err != nil {
-			return err
-		}
-		fingerprints[subject.Symbol] = fp
-	}
 	// One compartment ledger covers the whole package: it derives from the
 	// same view snapshot every fingerprint's compartment hash pinned, and
 	// the inert-growth rule diffs it at verdict time (spec §7.9).
@@ -550,7 +541,7 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 	warmupPath := warmup.Name()
 	_ = warmup.Close()
 	defer os.Remove(warmupPath)
-	reportPhase("building " + p.ImportPath)
+	reportPhase(ctx, "building "+p.ImportPath)
 	if _, err := rc.executeGo(ctx, p.Module.Dir, "", env, run.BuildArgs(p.ImportPath, warmupPath)); err != nil {
 		return err
 	}
@@ -591,7 +582,7 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 			stoppedAt = i
 			break
 		}
-		reportPhase(fmt.Sprintf("measuring %s arm %d/%d", p.ImportPath, i+1, len(runBenches)))
+		reportPhase(ctx, fmt.Sprintf("measuring %s arm %d/%d", p.ImportPath, i+1, len(runBenches)))
 		m, refused, err := measureBench(ctx, errw, rc, gc, p, envs.measured(), opts, pkgRel, name, truth, scratch, conditions, view)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -611,14 +602,10 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 		// valid, the source inputs' dirtiness, the PGO input unchanged,
 		// HEAD unmoved — is re-derived for this arm's own span, so a
 		// later arm's failure or an interruption never costs it.
-		fp, ok := fingerprints[name]
-		if !ok {
-			return fmt.Errorf("benchmark %s was not captured in the producer view", name)
-		}
 		if rc.beforePersist != nil {
 			rc.beforePersist(name)
 		}
-		if err := persistArm(ctx, w, errw, rc, gc, p, prep, view, commit, initialDirty, encodedLedger, name, fp, m, env); err != nil {
+		if err := persistArm(ctx, w, errw, rc, gc, p, prep, view, commit, initialDirty, encodedLedger, name, m, env); err != nil {
 			return fmt.Errorf("%s: %w (%d recorded)", name, err, len(written))
 		}
 		written = append(written, name)
@@ -666,9 +653,8 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 // re-validation and the `go env` re-derivation it runs detached from
 // the verb's context, so an interruption cannot discard a measurement
 // that completed (REQ-pew-unit-persistence) and cannot hang on one
-// either. A variable only so a test can pin the expiry's attribution;
-// production never writes it.
-var armWriteGateBound = 2 * time.Minute
+// either. An explicitly configured bound belongs to the run configuration.
+const armWriteGateBound = 2 * time.Minute
 
 // persistArm installs one measured arm's recording behind the write
 // gate re-derived for this arm: the view still validates (the source
@@ -678,7 +664,7 @@ var armWriteGateBound = 2 * time.Minute
 // commit. Each recording describes exactly its own invocation: the run
 // conditions carry this arm's throttle-bracket delta and the runtime
 // evidence is this arm's own digest and manifest.
-func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, prep *packagePreparation, view *gofresh.View, commit string, initialDirty bool, encodedLedger, name string, fp gofresh.Fingerprint, m armMeasurement, env gotool.Environment) error {
+func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, prep *packagePreparation, view *gofresh.View, commit string, initialDirty bool, encodedLedger, name string, m armMeasurement, env gotool.Environment) error {
 	st, pkgRel, pgoInput := prep.st, prep.pkgRel, prep.pgoInput
 	// The gate runs detached from the verb's context under its own
 	// bound: the arm is measured, and a measured unit is kept (spec
@@ -686,23 +672,28 @@ func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitSta
 	// flight, never one whose measurement completed), so the gate's
 	// own evidence — the view still valid, the inputs' dirtiness, the
 	// PGO input, HEAD — decides the write, not a signal landing during it.
-	gate, cancel := context.WithTimeout(context.WithoutCancel(ctx), armWriteGateBound)
+	bound := rc.writeGateBound
+	if bound == 0 {
+		bound = armWriteGateBound
+	}
+	gate, cancel := context.WithTimeout(context.WithoutCancel(ctx), bound)
 	defer cancel()
 	// gated attributes the bound's expiry: a measured arm discarded by
 	// the gate's own deadline names the gate, never a bare deadline.
 	gated := func(err error) error {
 		if err != nil && gate.Err() != nil {
-			return fmt.Errorf("the arm's write gate exceeded %s: %w", armWriteGateBound, err)
+			return fmt.Errorf("the arm's write gate exceeded %s: %w", bound, err)
 		}
 		return err
 	}
 	if err := view.Validate(gate); err != nil {
 		return gated(err)
 	}
-	if m.outcomeView != nil {
-		if err := m.outcomeView.Validate(gate); err != nil {
-			return gated(err)
-		}
+	if m.outcomeView == nil {
+		return fmt.Errorf("missing arm producer transaction")
+	}
+	if err := m.outcomeView.Validate(gate); err != nil {
+		return gated(err)
 	}
 	dirty := initialDirty
 	if !dirty {
@@ -716,8 +707,7 @@ func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitSta
 	for _, cfg := range run.ProvenanceConfig(commit, dirty, m.conditions) {
 		recs = withConfig(recs, cfg)
 	}
-	fp.RuntimeDigest, fp.RuntimeInputs = m.digest, m.manifest
-	fingerprintConfigs, err := run.FingerprintConfigs(fp, encodedLedger)
+	fingerprintConfigs, err := run.FingerprintConfigs(m.fingerprint, encodedLedger)
 	if err != nil {
 		return err
 	}
@@ -775,10 +765,10 @@ func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitSta
 // result rows, its own runtime-input evidence (spec §7.8), and the shared
 // pre-run conditions carrying this arm's throttle-bracket delta.
 type armMeasurement struct {
-	recs             []*benchfmt.Result
-	digest, manifest string
-	conditions       run.Conditions
-	outcomeView      *gofresh.View
+	recs        []*benchfmt.Result
+	conditions  run.Conditions
+	outcomeView *gofresh.View
+	fingerprint gofresh.Fingerprint
 }
 
 // measureBench executes exactly one top-level benchmark in its own `go test`
@@ -844,17 +834,10 @@ func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStat
 	if err != nil {
 		return armMeasurement{}, nil, err
 	}
-	var outcomeFingerprint gofresh.Fingerprint
 	outcomeReason := frame.Outcome.Reason(binding)
-	if outcomeReason == "" {
-		outcomeFingerprint, err = outcomeView.CaptureObserved(ctx, subject)
-		if err != nil {
-			return armMeasurement{}, nil, err
-		}
-	} else {
-		// No outcome claim will be published, so the ordinary producer view
-		// remains the validation authority for this incomplete observation.
-		outcomeView = nil
+	outcomeFingerprint, err := outcomeView.CaptureObserved(ctx, subject)
+	if err != nil {
+		return armMeasurement{}, nil, err
 	}
 	testlog, err := os.CreateTemp("", "pew-testlog-*")
 	if err != nil {
@@ -906,10 +889,9 @@ func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStat
 	if err != nil {
 		return armMeasurement{}, nil, err
 	}
-	if outcomeView != nil {
-		if _, err := outcomeView.AttachObservation(subject, outcomeFingerprint, runtimeState); err != nil {
-			return armMeasurement{}, nil, err
-		}
+	attached, err := outcomeView.AttachObservation(subject, outcomeFingerprint, runtimeState)
+	if err != nil {
+		return armMeasurement{}, nil, err
 	}
 	if runtimeState.Unverifiable {
 		reason := runtimeState.Reason
@@ -979,7 +961,7 @@ func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStat
 		sort.Strings(foreign)
 		return armMeasurement{}, []string{fmt.Sprintf("stream carries result rows for %s, which this single-subject invocation did not run", strings.Join(foreign, ", "))}, nil
 	}
-	return armMeasurement{recs: recs, digest: runtimeState.Digest, manifest: runtimeState.Manifest, conditions: armConditions, outcomeView: outcomeView}, nil, nil
+	return armMeasurement{recs: recs, conditions: armConditions, outcomeView: outcomeView, fingerprint: attached}, nil, nil
 }
 
 func requireBenchmarkGroups(names []string, groups map[string][]*benchfmt.Result) error {
@@ -1157,7 +1139,7 @@ func nonValid(ctx context.Context, errw io.Writer, st *store.Store, e *gofresh.E
 			// under the recording store, which the repository-state
 			// bracket excludes wholesale — pew's outputs are never part of
 			// the measured subject (spec §5).
-			if err := refreshRecording(st, pkgRel, b, label, fp.TestVariantClosure, grownLedger); err != nil {
+			if err := publishRefresh(st, pkgRel, b, label, bv.admitted, fp, grownLedger); err != nil {
 				return nil, err
 			}
 		}
@@ -1168,34 +1150,29 @@ func nonValid(ctx context.Context, errw io.Writer, st *store.Store, e *gofresh.E
 	return need, nil
 }
 
-// refreshRecording rewrites a recording's compartment pin and ledger in
-// place, leaving every measured row and every other config line untouched.
-func refreshRecording(st *store.Store, pkgRel, bench, label, pin, ledger string) error {
-	recs, err := st.Read(pkgRel, bench, label)
-	if err != nil {
-		return err
-	}
-	admitted := admitRecording(recs, false)
+// publishRefresh stores exactly the admitted measurement and checked applicability
+// pair. It never reads a different recording after the extension was established.
+func publishRefresh(st *store.Store, pkgRel, bench, label string, admitted admission, fp gofresh.Fingerprint, ledger string) error {
 	if !admitted.ok {
 		return fmt.Errorf("refresh: recording is stale (%s)", admitted.class)
 	}
-	fp := admitted.fp
-	fp.TestVariantClosure = pin
 	encoded, err := run.EncodeFingerprint(fp)
 	if err != nil {
 		return err
 	}
-	for _, r := range recs {
-		for i := range r.Config {
-			switch r.Config[i].Key {
+	rows := make([]*benchfmt.Result, len(admitted.rows))
+	for i, row := range admitted.rows {
+		rows[i] = row.Clone()
+		for j := range rows[i].Config {
+			switch rows[i].Config[j].Key {
 			case run.KeyFingerprint.Name:
-				r.Config[i].Value = []byte(encoded)
+				rows[i].Config[j].Value = []byte(encoded)
 			case run.KeyTestVariantLedger.Name:
-				r.Config[i].Value = []byte(ledger)
+				rows[i].Config[j].Value = []byte(ledger)
 			}
 		}
 	}
-	return st.Write(pkgRel, bench, label, recs)
+	return st.Write(pkgRel, bench, label, rows)
 }
 
 // warnNewVariantLineage compares the GOMAXPROCS suffixes of the rows

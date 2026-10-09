@@ -35,7 +35,8 @@ func TestProvenanceReadsPreparationSnapshot(t *testing.T) {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/one-snapshot\n\ngo 1.26.4\n")
 	env := testEnvironment(t, nil)
-	ctx := withToolchainSampler(t.Context())
+	owned, deps := testDependencies(t)
+	ctx := withToolchainSampler(owned)
 	queryCount := func() int {
 		data, err := os.ReadFile(count)
 		if err != nil && !os.IsNotExist(err) {
@@ -43,10 +44,8 @@ func TestProvenanceReadsPreparationSnapshot(t *testing.T) {
 		}
 		return strings.Count(string(data), "query\n")
 	}
-	priorSampler := goVersionSampler
-	t.Cleanup(func() { goVersionSampler = priorSampler })
 	base, want := 0, 0
-	goVersionSampler = func(ctx context.Context, dir string, env testEnvironmentValue) (string, error) {
+	deps.sample = func(ctx context.Context, dir string, env testEnvironmentValue) (string, error) {
 		version, err := sampleGoVersion(ctx, dir, env)
 		// Observe before constructing the engine: its own validation may
 		// perform separate reads, outside the consumer's preparation pass.
@@ -57,7 +56,7 @@ func TestProvenanceReadsPreparationSnapshot(t *testing.T) {
 	}
 	for i := 1; i <= 3; i++ {
 		if i == 3 {
-			ctx = withToolchainSampler(t.Context())
+			ctx = withToolchainSampler(owned)
 		}
 		base, want = queryCount(), 1
 		if i == 2 {
@@ -90,14 +89,13 @@ func TestJudgedVerbsShareSamplesOnlyWithinInvocation(t *testing.T) {
 			}
 			commitFixture(t, dir)
 			withWorkingDir(t, dir)
-			priorSampler, priorObserver := goVersionSampler, sampleCommandObserver
-			t.Cleanup(func() { goVersionSampler, sampleCommandObserver = priorSampler, priorObserver })
+			ctx, deps := testDependencies(t)
 			checks, spawns := 0, 0
-			goVersionSampler = func(ctx context.Context, dir string, env testEnvironmentValue) (string, error) {
+			deps.sample = func(ctx context.Context, dir string, env testEnvironmentValue) (string, error) {
 				checks++
 				return sampleGoVersion(ctx, dir, env)
 			}
-			sampleCommandObserver = func(*exec.Cmd) { spawns++ }
+			deps.prepare = func(*exec.Cmd) { spawns++ }
 			for invocation := 1; invocation <= 2; invocation++ {
 				before := checks
 				var out, errout bytes.Buffer
@@ -105,7 +103,7 @@ func TestJudgedVerbsShareSamplesOnlyWithinInvocation(t *testing.T) {
 				case "run":
 					// Preparation constructs both engines before the deliberately
 					// refused build. No benchmark measurements are needed here.
-					err := runRun(context.Background(), &out, &errout, runConfig{all: true,
+					err := runRun(ctx, &out, &errout, runConfig{all: true,
 						opts: run.Options{Count: 1, Benchtime: "1x", Bench: "."},
 						execute: func(string, string, []string, []string) ([]byte, error) {
 							return nil, errors.New("fixture build refused")
@@ -114,11 +112,11 @@ func TestJudgedVerbsShareSamplesOnlyWithinInvocation(t *testing.T) {
 						t.Fatal("fixture build unexpectedly succeeded")
 					}
 				case "status":
-					if err := runStatus(context.Background(), &out, "", "", false, false, false, []string{"./..."}); err != nil {
+					if err := runStatus(ctx, &out, "", "", false, false, false, []string{"./..."}); err != nil {
 						t.Fatal(err)
 					}
 				case "stat":
-					if err := runStat(context.Background(), &out, &errout, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
+					if err := runStat(ctx, &out, &errout, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
 						t.Fatal(err)
 					}
 				}

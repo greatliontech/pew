@@ -103,16 +103,15 @@ func TestStatusProvenanceRefusalPrecedesEveryVerdict(t *testing.T) {
 	}
 	t.Setenv("GOWORK", filepath.Join(dir, "go.work"))
 	withWorkingDir(t, dir)
-	prior := goVersionSampler
-	t.Cleanup(func() { goVersionSampler = prior })
-	goVersionSampler = func(_ context.Context, moduleDir string, _ testEnvironmentValue) (string, error) {
+	ctx, deps := testDependencies(t)
+	deps.sample = func(_ context.Context, moduleDir string, _ testEnvironmentValue) (string, error) {
 		if filepath.Base(moduleDir) == "two" {
 			return "go99.1.0", nil
 		}
 		return runtime.Version(), nil
 	}
 	var out bytes.Buffer
-	err := runStatus(t.Context(), &out, "", "", false, false, true, []string{"./one/...", "./two/..."})
+	err := runStatus(ctx, &out, "", "", false, false, true, []string{"./one/...", "./two/..."})
 	var refused *toolchainProvenanceError
 	if !errors.As(err, &refused) || out.Len() != 0 {
 		t.Fatalf("provenance refusal followed verdicts: %v\n%s", err, &out)
@@ -125,6 +124,7 @@ func TestStatusReportsIndependentRowsAndFailsIncompleteReports(t *testing.T) {
 	}
 	for _, failure := range []string{"read", "analysis"} {
 		t.Run(failure, func(t *testing.T) {
+			ctx, deps := testDependencies(t)
 			dir := twoArmFixture(t)
 			withWorkingDir(t, dir)
 			unusableRecordings(t, dir)
@@ -139,9 +139,7 @@ func TestStatusReportsIndependentRowsAndFailsIncompleteReports(t *testing.T) {
 				}
 			} else {
 				writeStatRecording(t, st, "", "BenchmarkFirst", 100)
-				prior := newViewFor
-				t.Cleanup(func() { newViewFor = prior })
-				newViewFor = func(*gofresh.Engine, context.Context, []gofresh.Subject, string, gofresh.Kind) (*gofresh.View, error) {
+				deps.view = func(*gofresh.Engine, context.Context, []gofresh.Subject, string, gofresh.Kind) (*gofresh.View, error) {
 					return nil, errors.New("analysis unavailable")
 				}
 			}
@@ -152,7 +150,7 @@ func TestStatusReportsIndependentRowsAndFailsIncompleteReports(t *testing.T) {
 			}
 			for _, jsonOut := range []bool{false, true} {
 				var out bytes.Buffer
-				err := runStatus(t.Context(), &out, "", "variant", true, false, jsonOut, []string{"."})
+				err := runStatus(ctx, &out, "", "variant", true, false, jsonOut, []string{"."})
 				if err == nil || !strings.Contains(err.Error(), "incomplete report") {
 					t.Fatalf("incomplete status passed: %v\n%s", err, &out)
 				}
@@ -177,7 +175,7 @@ func TestStatusReportsIndependentRowsAndFailsIncompleteReports(t *testing.T) {
 				}
 			}
 			cause := errors.New("status output unavailable")
-			if err := runStatus(t.Context(), statusBrokenWriter{cause}, "", "variant", false, false, false, []string{"."}); !errors.Is(err, cause) {
+			if err := runStatus(ctx, statusBrokenWriter{cause}, "", "variant", false, false, false, []string{"."}); !errors.Is(err, cause) {
 				t.Fatalf("failed status output reported success: %v", err)
 			}
 		})

@@ -51,7 +51,7 @@ func (ac abConfig) sideGuards(ctx context.Context, moduleDir, pkgDir string, mai
 	}
 	// One pass, one reader: the effective GOFLAGS and the guards'
 	// capture read the same `go env -json` document.
-	reader := gotool.Reader(moduleDir, env, captureCommandObserver)
+	reader := gotool.Reader(moduleDir, env, dependencies(ctx).prepare)
 	goflags, err := run.EffectiveGoflags(ctx, reader)
 	if err != nil {
 		return guard.Guards{}, err
@@ -74,11 +74,6 @@ func (ac abConfig) sideGuards(ctx context.Context, moduleDir, pkgDir string, mai
 	// analysis environment, never nil).
 	return guard.Capture(ctx, reader, env.Values(), guard.Measurement, buildInputs...)
 }
-
-// captureCommandObserver is the reader's boundary hook on every child
-// the capture spawns — the go-env snapshot and the toolchain sample;
-// nil in production, a pin installs one to observe their directories.
-var captureCommandObserver func(*exec.Cmd)
 
 // abPackageName resolves a package directory's package name with the same
 // toolchain environment the builds use.
@@ -163,7 +158,7 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 	if ac.count < 1 {
 		return fmt.Errorf("ab: count must be at least 1")
 	}
-	reportPhase("listing")
+	reportPhase(ctx, "listing")
 	pkgs, err := resolvePackages(ctx, analysis, patterns)
 	if err != nil {
 		if cancelledBy(ctx, err) {
@@ -229,7 +224,7 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 		if ctx.Err() != nil {
 			return preparing()
 		}
-		reportPhase(fmt.Sprintf("preparing %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
+		reportPhase(ctx, fmt.Sprintf("preparing %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
 		prep, err := prepareABPackage(ctx, ac, p, repoRoot, worktree, placement, env)
 		if prep != nil && prep.tmp != "" {
 			defer os.RemoveAll(prep.tmp)
@@ -427,7 +422,7 @@ func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPrep
 		if ctx.Err() != nil {
 			return stopped()
 		}
-		reportPhase(fmt.Sprintf("comparing %s (%d/%d) iteration %d/%d", p.ImportPath, index, total, i+1, ac.count))
+		reportPhase(ctx, fmt.Sprintf("comparing %s (%d/%d) iteration %d/%d", p.ImportPath, index, total, i+1, ac.count))
 		// A cancellation landing inside a side's process is the
 		// interruption too: the process under measurement is killed and
 		// the pair in flight is lost, the artifact holding the rest.

@@ -24,6 +24,7 @@ type admission struct {
 	// whose fingerprint still decoded).
 	fp     gofresh.Fingerprint
 	ledger string
+	rows   []*benchfmt.Result
 }
 
 // admitRecording climbs the ladder over the WHOLE recording: every row
@@ -44,19 +45,27 @@ func admitRecording(recs []*benchfmt.Result, workingTree bool) admission {
 			return admission{class: "format"}
 		}
 	}
-	if !store.IsRecordingShape(recs) {
+	if len(recs) == 0 {
 		return admission{class: "format"}
 	}
 	var first admission
 	var firstKeys map[string]string
 	for i, r := range recs {
+		keys := closedSetValues(r.Config)
+		for _, key := range runpkg.MandatoryRecordingKeys {
+			if keys[key] == "" {
+				return admission{class: "format"}
+			}
+		}
+		if keys[runpkg.KeyDirty.Name] != "true" && keys[runpkg.KeyDirty.Name] != "false" {
+			return admission{class: "format"}
+		}
 		fp, ledger, ok := fingerprintFromConfig(r.Config)
 		if !ok {
 			return admission{class: "format"}
 		}
-		keys := closedSetValues(r.Config)
 		if i == 0 {
-			first, firstKeys = admission{fp: fp, ledger: ledger}, keys
+			first, firstKeys = admission{fp: fp, ledger: ledger, rows: recs}, keys
 			continue
 		}
 		if fp != first.fp || ledger != first.ledger || !equalStringMaps(keys, firstKeys) {

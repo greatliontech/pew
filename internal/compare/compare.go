@@ -228,6 +228,12 @@ func recordGuard(cur guardValue, v string) guardValue {
 
 // Compare runs the regression pipeline over two already-parsed result sets.
 func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
+	return CompareProjected(base, newer, opts, run.ComparisonValues)
+}
+
+// CompareProjected compares rows using the caller's admitted configuration
+// projections. The accessor belongs to this comparison and never mutates rows.
+func CompareProjected(base, newer []*benchfmt.Result, opts Options, values func(*benchfmt.Result) func(string) string) *Result {
 	th := &benchmath.Thresholds{CompareAlpha: opts.Alpha}
 	filter := mustFilter("*")
 	var parser benchproc.ProjectionParser
@@ -240,7 +246,7 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 
 	add := func(rs []*benchfmt.Result, isBase bool) {
 		for _, r := range rs {
-			value := run.ComparisonValues(r)
+			value := values(r)
 			gk := gkey{configBy.Project(r), rowBy.Project(r)}
 			g := groups[gk]
 			if g == nil {

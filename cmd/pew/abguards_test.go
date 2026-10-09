@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,10 +29,9 @@ func TestSideGuardsCaptureTheModulesIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	var seen []*exec.Cmd
-	prior := captureCommandObserver
-	captureCommandObserver = func(cmd *exec.Cmd) { seen = append(seen, cmd) }
-	t.Cleanup(func() { captureCommandObserver = prior })
-	g, err := abConfig{}.sideGuards(context.Background(), link, filepath.Join(link, "p"), false, testEnvironment(t, os.Environ()))
+	ctx, deps := testDependencies(t)
+	deps.prepare = func(cmd *exec.Cmd) { seen = append(seen, cmd) }
+	g, err := abConfig{}.sideGuards(ctx, link, filepath.Join(link, "p"), false, testEnvironment(t, os.Environ()))
 	if err != nil {
 		t.Fatal(err)
 	}

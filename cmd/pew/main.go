@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -14,8 +15,8 @@ func main() {
 	// Every verb reports the stretch in flight on the one cadence (spec
 	// REQ-pew-progress); the reporter stops before the error prints,
 	// on every path — cobra runs no post-run hook for a failing verb.
-	stop := startReporter(os.Stderr, progressCadence)
-	err := newRootCmd().Execute()
+	ctx, stop := startReporter(context.Background(), os.Stderr, progressCadence)
+	err := newRootCmd().ExecuteContext(ctx)
 	stop()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "pew:", err)

@@ -71,8 +71,8 @@ func interrupted(format string, args ...any) error {
 
 // reporter is the verb's progress line: the phase in flight, repeated
 // on the cadence to the operator's log with the elapsed time, so a long
-// stretch is never silent. One reporter serves a process — the verbs
-// are sequential — and the engine's keep-alives name the stretch too
+// stretch is never silent. One reporter belongs to the command context,
+// and the engine's keep-alives name the stretch too
 // (emitEngineDiagnostic).
 type reporter struct {
 	mu    sync.Mutex
@@ -89,32 +89,21 @@ type reporter struct {
 	cadence time.Duration
 }
 
-var (
-	activeMu sync.Mutex
-	active   *reporter
-)
+type reporterKey struct{}
 
-// startReporter installs the process's reporter writing to out on the
+// startReporter returns a context carrying its own reporter writing to out on the
 // cadence; the returned stop ends the cadence. Tests lower the cadence
 // through cadence; production passes progressCadence.
-func startReporter(out io.Writer, cadence time.Duration) (stop func()) {
+func startReporter(ctx context.Context, out io.Writer, cadence time.Duration) (context.Context, func()) {
 	r := &reporter{out: out, start: time.Now(), stop: make(chan struct{}), done: make(chan struct{}), cadence: cadence}
-	activeMu.Lock()
-	active = r
-	activeMu.Unlock()
 	if cadence > 0 {
 		go r.tick()
 	} else {
 		close(r.done)
 	}
-	return func() {
+	return context.WithValue(ctx, reporterKey{}, r), func() {
 		r.stopped.Do(func() { close(r.stop) })
 		<-r.done // no line after the stop
-		activeMu.Lock()
-		if active == r {
-			active = nil
-		}
-		activeMu.Unlock()
 	}
 }
 
@@ -140,12 +129,15 @@ func (r *reporter) tick() {
 // reportPhase names the stretch now in flight; the next cadence line
 // carries it. A verb without a reporter (a library call, a test) is
 // silent.
-func reportPhase(phase string) {
-	activeMu.Lock()
-	r := active
-	activeMu.Unlock()
+func reportPhase(ctx context.Context, phase string) {
+	r, _ := ctx.Value(reporterKey{}).(*reporter)
 	if r == nil {
 		return
+	}
+	select {
+	case <-r.stop:
+		return
+	default:
 	}
 	r.mu.Lock()
 	r.phase = phase

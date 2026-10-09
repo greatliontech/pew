@@ -20,18 +20,17 @@ import (
 
 func TestEnginePreparationReportsTheCheckedSample(t *testing.T) {
 	const sampled = "go1.26.4"
-	prior := goVersionSampler
-	t.Cleanup(func() { goVersionSampler = prior })
+	ctx, deps := testDependencies(t)
 	calls := 0
-	goVersionSampler = func(context.Context, string, testEnvironmentValue) (string, error) {
+	deps.sample = func(context.Context, string, testEnvironmentValue) (string, error) {
 		calls++
 		return sampled, nil
 	}
-	stop := startReporter(io.Discard, 0)
+	ctx, stop := startReporter(ctx, io.Discard, 0)
 	defer stop()
 	var phases []string
-	setPhaseHook(func(phase string) { phases = append(phases, phase) })
-	if _, err := buildEngine(t.Context(), t.TempDir(), testEnvironment(t, nil), nil, ""); err != nil {
+	setPhaseHook(ctx, func(phase string) { phases = append(phases, phase) })
+	if _, err := buildEngine(ctx, t.TempDir(), testEnvironment(t, nil), nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 1 || !strings.Contains(strings.Join(phases, "\n"), sampled) {
@@ -47,19 +46,18 @@ func TestEnginePreparationReportsTheCheckedSample(t *testing.T) {
 // dir under the effective env — the same resolution the engine's own
 // loads use.
 func TestBuildEngineRefusesToolchainSkew(t *testing.T) {
-	orig := goVersionSampler
-	t.Cleanup(func() { goVersionSampler = orig })
+	ctx, deps := testDependencies(t)
 
 	var sampledDir string
 	var sampledEnv []string
-	goVersionSampler = func(_ context.Context, dir string, env testEnvironmentValue) (string, error) {
+	deps.sample = func(_ context.Context, dir string, env testEnvironmentValue) (string, error) {
 		sampledDir = dir
 		sampledEnv = env.Values()
 		return "go99.1.0", nil
 	}
 	dir := t.TempDir()
 	env := append(os.Environ(), "PEW_PROVENANCE_PROBE=1")
-	if _, err := buildEngine(context.Background(), dir, testEnvironment(t, env), nil, ""); err == nil {
+	if _, err := buildEngine(ctx, dir, testEnvironment(t, env), nil, ""); err == nil {
 		t.Fatal("buildEngine accepted an ambient toolchain a whole major ahead of the binary")
 	} else if !strings.Contains(err.Error(), "cross-major") {
 		t.Fatalf("skew refusal = %v, want the cross-major class named", err)
@@ -80,10 +78,9 @@ func TestBuildEngineRefusesToolchainSkew(t *testing.T) {
 
 // Missing sampling behavior is construction failure, not toolchain skew.
 func TestToolchainProvenanceRequiresSampler(t *testing.T) {
-	orig := goVersionSampler
-	t.Cleanup(func() { goVersionSampler = orig })
-	goVersionSampler = nil
-	_, err := checkToolchainProvenance(context.Background(), t.TempDir(), testEnvironment(t, os.Environ()))
+	ctx, deps := testDependencies(t)
+	deps.sample = nil
+	_, err := checkToolchainProvenance(ctx, t.TempDir(), testEnvironment(t, os.Environ()))
 	if !errors.Is(err, gofresh.ErrNoSampler) {
 		t.Fatalf("missing sampler = %v, want construction refusal", err)
 	}
@@ -95,12 +92,11 @@ func TestToolchainProvenanceRequiresSampler(t *testing.T) {
 
 // An unidentifiable ambient toolchain refuses fail-closed.
 func TestBuildEngineRefusesUnidentifiableToolchain(t *testing.T) {
-	orig := goVersionSampler
-	t.Cleanup(func() { goVersionSampler = orig })
-	goVersionSampler = func(_ context.Context, dir string, env testEnvironmentValue) (string, error) {
+	ctx, deps := testDependencies(t)
+	deps.sample = func(_ context.Context, dir string, env testEnvironmentValue) (string, error) {
 		return "devel +abc123", nil
 	}
-	if _, err := buildEngine(context.Background(), t.TempDir(), testEnvironment(t, os.Environ()), nil, ""); err == nil {
+	if _, err := buildEngine(ctx, t.TempDir(), testEnvironment(t, os.Environ()), nil, ""); err == nil {
 		t.Fatal("buildEngine accepted an unidentifiable ambient toolchain")
 	} else if !strings.Contains(err.Error(), "unidentifiable") {
 		t.Fatalf("refusal = %v, want the unidentifiable class named", err)
@@ -137,10 +133,9 @@ func TestGoVersionSampleRunsUnderTheEnvironmentPolicy(t *testing.T) {
 	}
 	env = append(env, "PEW_SAMPLE_A=1", "PEW_SAMPLE_B=2", "PWD=/somewhere/else")
 	var seen *exec.Cmd
-	prior := sampleCommandObserver
-	sampleCommandObserver = func(cmd *exec.Cmd) { seen = cmd }
-	t.Cleanup(func() { sampleCommandObserver = prior })
-	version, err := sampleGoVersion(context.Background(), link, testEnvironment(t, env))
+	ctx, deps := testDependencies(t)
+	deps.prepare = func(cmd *exec.Cmd) { seen = cmd }
+	version, err := sampleGoVersion(ctx, link, testEnvironment(t, env))
 	if err != nil || !strings.HasPrefix(version, "go") {
 		t.Fatalf("sample = %q, %v", version, err)
 	}
@@ -165,7 +160,7 @@ func TestGoVersionSampleRunsUnderTheEnvironmentPolicy(t *testing.T) {
 	// spawn.
 	t.Setenv("PEW_SAMPLE_MARKER", "inherited")
 	seen = nil
-	if version, err := sampleGoVersion(context.Background(), link, testEnvironment(t, nil)); err != nil || !strings.HasPrefix(version, "go") || seen == nil || !slices.Contains(seen.Env, "PWD="+resolved) || !slices.Contains(seen.Env, "PEW_SAMPLE_MARKER=inherited") {
+	if version, err := sampleGoVersion(ctx, link, testEnvironment(t, nil)); err != nil || !strings.HasPrefix(version, "go") || seen == nil || !slices.Contains(seen.Env, "PWD="+resolved) || !slices.Contains(seen.Env, "PEW_SAMPLE_MARKER=inherited") {
 		t.Fatalf("a nil env did not inherit the process environment: %q, %v, %v", version, err, seen)
 	}
 	// An environment the go-command policy refuses is its own class
@@ -186,22 +181,21 @@ func TestGoVersionSampleRunsUnderTheEnvironmentPolicy(t *testing.T) {
 // failed sample classifies identically — unidentifiable is not
 // agreement.
 func TestToolchainProvenanceErrorClassifies(t *testing.T) {
-	orig := goVersionSampler
-	t.Cleanup(func() { goVersionSampler = orig })
+	ctx, deps := testDependencies(t)
 
-	goVersionSampler = func(_ context.Context, dir string, env testEnvironmentValue) (string, error) {
+	deps.sample = func(_ context.Context, dir string, env testEnvironmentValue) (string, error) {
 		return "go99.1.0", nil
 	}
 	var pe *toolchainProvenanceError
-	if _, err := checkToolchainProvenance(context.Background(), t.TempDir(), testEnvironment(t, os.Environ())); !errors.As(err, &pe) {
+	if _, err := checkToolchainProvenance(ctx, t.TempDir(), testEnvironment(t, os.Environ())); !errors.As(err, &pe) {
 		t.Fatalf("skew refusal %v is not a *toolchainProvenanceError", err)
 	}
 
-	goVersionSampler = func(_ context.Context, dir string, env testEnvironmentValue) (string, error) {
+	deps.sample = func(_ context.Context, dir string, env testEnvironmentValue) (string, error) {
 		return "", fmt.Errorf("boom")
 	}
 	pe = nil
-	if _, err := checkToolchainProvenance(context.Background(), t.TempDir(), testEnvironment(t, os.Environ())); !errors.As(err, &pe) {
+	if _, err := checkToolchainProvenance(ctx, t.TempDir(), testEnvironment(t, os.Environ())); !errors.As(err, &pe) {
 		t.Fatalf("sample-failure refusal %v is not a *toolchainProvenanceError", err)
 	}
 }
@@ -218,10 +212,9 @@ func TestToolchainSamplerSamplesOncePerKey(t *testing.T) {
 		t.Skip("spawns the toolchain")
 	}
 	prepared := map[string]int{}
-	ctx := withToolchainSampler(context.Background())
-	prior := sampleCommandObserver
-	sampleCommandObserver = func(cmd *exec.Cmd) { prepared[cmd.Dir]++ }
-	t.Cleanup(func() { sampleCommandObserver = prior })
+	ctx, deps := testDependencies(t)
+	ctx = withToolchainSampler(ctx)
+	deps.prepare = func(cmd *exec.Cmd) { prepared[cmd.Dir]++ }
 	// The hook sees the resolved directory; the expectations index the
 	// filesystem's own resolution of each fixture.
 	resolvedOf := func(dir string) string {
@@ -256,14 +249,14 @@ func TestToolchainSamplerSamplesOncePerKey(t *testing.T) {
 	cancelled, cancel := context.WithCancel(ctx)
 	freshDir := t.TempDir()
 	fresh := resolvedOf(freshDir)
-	sampleCommandObserver = func(cmd *exec.Cmd) { prepared[cmd.Dir]++; cancel() }
+	deps.prepare = func(cmd *exec.Cmd) { prepared[cmd.Dir]++; cancel() }
 	if _, err := sampleGoVersion(cancelled, freshDir, env("1")); err == nil {
 		t.Fatal("a sample cancelled in flight answered")
 	}
 	if prepared[fresh] != 1 {
 		t.Fatalf("the cancelled sample prepared %d commands, want the one it started", prepared[fresh])
 	}
-	sampleCommandObserver = func(cmd *exec.Cmd) { prepared[cmd.Dir]++ }
+	deps.prepare = func(cmd *exec.Cmd) { prepared[cmd.Dir]++ }
 	if v, err := sampleGoVersion(ctx, freshDir, env("1")); err != nil || !strings.HasPrefix(v, "go") {
 		t.Fatalf("a live call after a cancelled one = %q, %v; want the fresh sample (the cancellation poisoned the memo)", v, err)
 	}
@@ -295,9 +288,8 @@ func TestSampleGoVersionSmoke(t *testing.T) {
 // Skew aborts run and status at the invocation level: no per-package
 // error rows, the refusal is the command's error.
 func TestRunAndStatusFailFastOnToolchainSkew(t *testing.T) {
-	orig := goVersionSampler
-	t.Cleanup(func() { goVersionSampler = orig })
-	goVersionSampler = func(_ context.Context, dir string, env testEnvironmentValue) (string, error) {
+	ctx, deps := testDependencies(t)
+	deps.sample = func(_ context.Context, dir string, env testEnvironmentValue) (string, error) {
 		return "go99.1.0", nil
 	}
 	dir := t.TempDir()
@@ -306,7 +298,7 @@ func TestRunAndStatusFailFastOnToolchainSkew(t *testing.T) {
 	withWorkingDir(t, dir)
 
 	var out strings.Builder
-	err := runStatus(context.Background(), &out, "", "", false, false, false, []string{"."})
+	err := runStatus(ctx, &out, "", "", false, false, false, []string{"."})
 	if err == nil || !strings.Contains(err.Error(), "cross-major") {
 		t.Fatalf("runStatus under skew = %v\noutput:\n%s\nwant the invocation-level refusal", err, out.String())
 	}
@@ -315,7 +307,7 @@ func TestRunAndStatusFailFastOnToolchainSkew(t *testing.T) {
 	}
 
 	var runOut, runErrOut bytes.Buffer
-	err = runRun(context.Background(), &runOut, &runErrOut, runConfig{opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}, []string{"."})
+	err = runRun(ctx, &runOut, &runErrOut, runConfig{opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}, []string{"."})
 	if err == nil || !strings.Contains(err.Error(), "cross-major") {
 		t.Fatalf("runRun under skew = %v\noutput:\n%s\nwant the invocation-level refusal", err, runOut.String())
 	}

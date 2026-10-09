@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,9 +49,8 @@ func BenchmarkSecond(b *testing.B) { readRoot() }
 	wantEnvironment := ""
 	t.Setenv("PEW_ADMITTED_ENVIRONMENT", "")
 	samples := 0
-	priorObserver := sampleCommandObserver
-	sampleCommandObserver = func(*exec.Cmd) { samples++ }
-	t.Cleanup(func() { sampleCommandObserver = priorObserver })
+	ctx, deps := testDependencies(t)
+	deps.prepare = func(*exec.Cmd) { samples++ }
 	rc := runConfig{
 		all:  true,
 		opts: run.Options{Count: 1, Benchtime: "1x", Bench: "."},
@@ -102,7 +100,7 @@ func BenchmarkSecond(b *testing.B) { readRoot() }
 			t.Fatal(err)
 		}
 		var out, errout bytes.Buffer
-		if err := runRun(context.Background(), &out, &errout, rc, []string{"."}); err != nil {
+		if err := runRun(ctx, &out, &errout, rc, []string{"."}); err != nil {
 			t.Fatalf("run: %v\n%s\n%s", err, &out, &errout)
 		}
 		if strings.Count(errout.String(), `open "/" in `) != 2 || !strings.Contains(errout.String(), "external directory input: /") {

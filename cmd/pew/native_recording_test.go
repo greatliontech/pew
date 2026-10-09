@@ -35,6 +35,7 @@ func TestNativeFingerprintStoreRoundTrip(t *testing.T) {
 		fill(reflect.ValueOf(&fp.Guards).Elem())
 		fill(reflect.ValueOf(&fp.ObservationProof).Elem())
 		fill(reflect.ValueOf(&fp.ObservationProof.Subject).Elem())
+		fill(reflect.ValueOf(&fp.InertTestVariantApplicability).Elem())
 		fp.ObservationProof.Observable = n%2 == 0
 		if fp.ObservationProof.Observable {
 			fp.ObservationProof.Reason = ""
@@ -88,6 +89,7 @@ func FuzzNativeFingerprintEnvelope(f *testing.F) {
 		fp := recordingtest.Defaults().Fingerprint
 		fp.RuntimeInputs, fp.RuntimeDigest = value, value
 		fp.ObservationAssertion = value
+		fp.InertTestVariantApplicability = gofresh.InertTestVariantApplicability{Strategy: value, TestVariantClosure: value}
 		fp.ObservationProof = gofresh.ObservationProof{Strategy: value, Subject: gofresh.Subject{Package: value, Symbol: value}, Observable: observable, Evidence: value}
 		if !observable {
 			fp.ObservationProof.Reason = value
@@ -250,14 +252,16 @@ func TestRefreshPreservesNativeHistoricalEvidence(t *testing.T) {
 		if err := st.Write("", "BenchmarkX", "", rows); err != nil {
 			t.Fatal(err)
 		}
-		if err := refreshRecording(st, "", "BenchmarkX", "", "new-variant", "new-ledger"); err != nil {
+		refreshed := fp
+		refreshed.InertTestVariantApplicability = gofresh.InertTestVariantApplicability{Strategy: gofresh.InertTestVariantExtension, TestVariantClosure: "new-variant"}
+		if err := publishRefresh(st, "", "BenchmarkX", "", admitRecording(rows, false), refreshed, "new-ledger"); err != nil {
 			t.Fatal(err)
 		}
 		back, err := st.Read("", "BenchmarkX", "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		fp.TestVariantClosure = "new-variant"
+		fp = refreshed
 		adm := admitRecording(back, false)
 		if !adm.ok || adm.fp != fp || adm.ledger != "new-ledger" {
 			t.Fatalf("refresh changed historical evidence: %+v, want %+v", adm, fp)
@@ -285,7 +289,11 @@ func TestRefreshPreservesNativeHistoricalEvidence(t *testing.T) {
 			if err := os.WriteFile(path, legacy, 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if err := refreshRecording(st, "", "BenchmarkX", "", "upgrade", "upgrade"); err == nil {
+			legacyRows, err := st.Read("", "BenchmarkX", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := publishRefresh(st, "", "BenchmarkX", "", admitRecording(legacyRows, false), refreshed, "upgrade"); err == nil {
 				t.Fatal("legacy refresh accepted")
 			}
 			untouched, err := os.ReadFile(path)
