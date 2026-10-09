@@ -157,3 +157,17 @@ clauses (the outcome-support sentences 6.2 wrote into
 REQ-evidence-witness-freshness, if any) keep their text and move
 whole into the sub-id that holds them — tell me here if a sentence
 must stay beside another. No code moves in 270.
+
+Landed (2026-10-09): stipulator 270 closed — 294b03b (mcp.md: three
+bases, thirteen sub-ids), 7006c96 + 14a98c9 (REQ-check-verdict, five),
+e6e8392 (REQ-go-owned-processes, REQ-go-policy-complete, five),
+abf7279 (REQ-policy-attribution/-cancellation/-explicit,
+REQ-evidence-resolution-freshness, REQ-evidence-witness-cache-format,
+twenty-one), 6d3103f + 0d7b3b6 (REQ-evidence-witness-freshness,
+eighteen); 166 → 215 requirements; no code moved; the editorial
+residue filed as stipulator docs/issues/decomposition-editorial-pass.md
+(Lands 248). PE 6's outcome-support sentences kept their text and
+moved whole with their spans; no sentence was asked to stay beside
+another. A MAY base became MUST sub-ids on two families
+(witness-freshness, resolution-freshness): the gate's evidence bar
+rose while the text held — the weekly sweep's self-check judges it.
