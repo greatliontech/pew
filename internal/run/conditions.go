@@ -57,6 +57,20 @@ const conditionUnknown = "unknown"
 // structure, so a non-token governor read from sysfs is recorded as unknown.
 var governorTokenRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
+// KnownConditionValue reports whether a categorical value proves one observed
+// condition. Unknown or mixed governors cannot establish compatibility.
+func KnownConditionValue(key, value string) bool {
+	switch key {
+	case "governor":
+		return value != "unknown" && value != "mixed" && governorTokenRe.MatchString(value)
+	case "turbo":
+		return value == "on" || value == "off"
+	case "throttled", "battery":
+		return value == "true" || value == "false"
+	}
+	return false
+}
+
 // String renders the observation as the `pew-runconditions` value (spec §9):
 // fixed field order, every field present, unknowns explicit.
 func (c Conditions) String() string {

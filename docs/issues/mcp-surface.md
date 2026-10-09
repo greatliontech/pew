@@ -22,4 +22,7 @@ Invariants preserved either way: the CLI's verb-defaults table stays
 the CLI's contract; a second surface derives its own defaults and is
 never the CLI rendered through a wrapper.
 
-Lands: performance-evidence plan chunks 9 and 12 for JSON parity and progress; the MCP surface lands when a driving agent appears.
+Comparison text/JSON parity is complete in performance-evidence chunk 9.
+That does not settle a whole MCP surface or JSON output for new verbs.
+
+Lands: performance-evidence plan chunk 12 for remaining machine-readable/progress triage, including the `run`/`ab`/`gc` JSON scope question; the MCP surface lands when a driving agent appears.

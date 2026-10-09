@@ -501,8 +501,13 @@ func TestStatRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 	if !strings.Contains(errOut.String(), "working-tree recording .BenchmarkNop is stale (dynamic-state strategy); skipping") {
 		t.Fatalf("predating NEW side did not hit the strategy skip chain:\n%s", errOut.String())
 	}
-	if strings.Contains(out.String(), "BenchmarkNop") {
+	// A refused recording remains named by its audit and disposition; neither
+	// is numerical comparison evidence.
+	if strings.Contains(out.String(), "vs base") || !strings.Contains(out.String(), "not compared; requested=true eligible=false") {
 		t.Fatalf("predating recording still compared:\nstdout:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "dynamic-state strategies differ (base: "+gofresh.DynamicStateStrategy+"; new: (none))") {
+		t.Fatalf("strategy refusal erased its recording audit:\n%s", out.String())
 	}
 
 	// The base arm cuts the other way (spec §5's strategy row): commit
@@ -630,7 +635,7 @@ func TestStatABRejectsFormatValidNonPewOppositeSide(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
-	if strings.Contains(out.String(), "BenchmarkGhost") {
+	if strings.Contains(out.String(), "vs base") || !strings.Contains(out.String(), "not compared; requested=true eligible=false") || !strings.Contains(out.String(), "format (new): stale (format)") {
 		t.Fatalf("stat output compared non-pew recording:\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
 	}
 	if !strings.Contains(errOut.String(), "stale (format)") {

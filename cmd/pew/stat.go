@@ -16,6 +16,7 @@ import (
 	"github.com/greatliontech/pew/internal/compare"
 	"github.com/greatliontech/pew/internal/gitblob"
 	"github.com/greatliontech/pew/internal/gotool"
+	"github.com/greatliontech/pew/internal/metric"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 	"github.com/spf13/cobra"
@@ -51,6 +52,9 @@ func newStatCmd() *cobra.Command {
 			if err := validateOptions(sc.opts); err != nil {
 				return err
 			}
+			if err := sc.opts.Policies.Validate(); err != nil {
+				return err
+			}
 			if sc.explain && sc.jsonOut {
 				return fmt.Errorf("stat: --explain and -json are mutually exclusive (the explanation is a human view)")
 			}
@@ -71,7 +75,16 @@ func newStatCmd() *cobra.Command {
 	f.BoolVar(&sc.failOnRegression, "fail-on-regression", false, "")
 	f.BoolVar(&sc.explain, "explain", false, "")
 	f.BoolVar(&sc.jsonOut, "json", false, "")
-	f.StringVar(&gate, "gate", "sec/op", "")
+	var defaultGate []string
+	for _, d := range metric.Definitions() {
+		if d.DefaultGate {
+			defaultGate = append(defaultGate, d.Unit)
+		}
+	}
+	f.StringVar(&gate, "gate", strings.Join(defaultGate, ","), "")
+	f.StringVar(&sc.opts.Policies.Coverage, "coverage", "partial", "")
+	f.StringVar(&sc.opts.Policies.Freshness, "freshness", "report", "")
+	f.StringVar(&sc.opts.Policies.Conditions, "conditions", "report", "")
 	f.StringArrayVar(&sc.vouches, "vouch", nil, "")
 	return cmd
 }
@@ -94,13 +107,15 @@ func validateOptions(o compare.Options) error {
 	return nil
 }
 
-var knownUnits = map[string]bool{"sec/op": true, "B/op": true, "allocs/op": true}
-
 func parseGateUnits(s string) (map[string]bool, error) {
 	out := map[string]bool{}
 	for _, tok := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' }) {
-		if !knownUnits[tok] {
-			return nil, fmt.Errorf("stat: unknown --gate unit %q (want sec/op, B/op, or allocs/op)", tok)
+		if _, known := metric.Lookup(tok); !known {
+			var allowed []string
+			for _, d := range metric.Definitions() {
+				allowed = append(allowed, d.Unit)
+			}
+			return nil, fmt.Errorf("stat: unknown --gate unit %q (want %s)", tok, strings.Join(allowed, ", "))
 		}
 		out[tok] = true
 	}
@@ -115,66 +130,16 @@ func parseGateUnits(s string) (map[string]bool, error) {
 // exit would be vacuous — the gate would pass precisely when it measured
 // nothing. main maps it to a distinct exit status so CI can tell "compared and
 // clean" (0), "regression detected" (1), and "nothing compared" (2) apart.
-type nothingComparedError struct{ reason string }
+type nothingComparedError struct {
+	reason     string
+	incomplete bool
+}
 
 func (e *nothingComparedError) Error() string {
+	if e.incomplete {
+		return "fail-on-regression: incomplete required coverage — " + e.reason
+	}
 	return "fail-on-regression: nothing compared — " + e.reason
-}
-
-// statTally counts the disposition of every inventoried comparison candidate
-// that runStat skips before the compare pipeline, so an empty comparison can
-// name its cause (spec §10.1): the informational view prints it, and under
-// --fail-on-regression the failure carries it.
-type statTally struct {
-	inventoried   int // comparison keys with at least one readable side
-	staleFormat   int // skipped: recording files failing shape/format, per file
-	staleStrategy int // skipped: working-tree side recorded under another dynamic-state strategy (at most once per key)
-	dirty         int // skipped: dirty ref-resolved recording files, per file
-}
-
-// emptyReason names why a comparison produced no gated rows: nothing recorded,
-// every candidate skipped (with per-cause counts, spanning both runStat's own
-// skips and the compare pipeline's uncompared notes), or metrics compared but
-// none on a gated unit. The counts carry three denominations — the preamble
-// counts comparison keys, stale format / dirty count recording files (both
-// sides of a key can fail), and the compare-pipeline causes count benchmarks
-// (one file's sub-benchmarks fan out to several) — so the wording names each
-// and never implies the counts sum to one total.
-func (t statTally) emptyReason(res *compare.Result, gateUnits map[string]bool) string {
-	if n := res.ComparedRows(); n > 0 {
-		return fmt.Sprintf("%d metric(s) compared, none on a gated unit (%s)", n, gateUnitList(gateUnits))
-	}
-	if t.inventoried == 0 {
-		return "no recordings on either side (run `pew run` first)"
-	}
-	var parts []string
-	add := func(n int, cause string) {
-		if n > 0 {
-			parts = append(parts, fmt.Sprintf("%s: %d", cause, n))
-		}
-	}
-	add(t.staleFormat, "stale format")
-	add(t.staleStrategy, "stale dynamic-state strategy")
-	add(t.dirty, "dirty recording")
-	add(res.OneSided, "one-sided benchmarks")
-	add(res.GuardMismatch, "guard-mismatched benchmarks")
-	add(res.NoCommonUnit, "benchmarks with no shared metric unit")
-	if len(parts) == 0 {
-		return fmt.Sprintf("%d comparison key(s) yielded no comparison", t.inventoried)
-	}
-	return fmt.Sprintf("%d comparison key(s) found, none compared (%s)", t.inventoried, strings.Join(parts, "; "))
-}
-
-func gateUnitList(units map[string]bool) string {
-	if len(units) == 0 {
-		return "none configured"
-	}
-	out := make([]string, 0, len(units))
-	for u := range units {
-		out = append(out, u)
-	}
-	sort.Strings(out)
-	return strings.Join(out, ", ")
 }
 
 // baseline names the two sides of a comparison. newRef == "" means the new side
@@ -196,14 +161,16 @@ type currentBench struct {
 }
 
 type statModule struct {
-	modulePath string
-	moduleDir  string
-	benchDir   string
-	store      *store.Store
-	repo       *gitblob.Repo
-	keys       map[statKey]bool
-	current    map[statKey]currentBench
-	sides      map[statSideKey]statSide
+	refModules        map[string]string
+	inventoryFailures []compare.Disposition
+	modulePath        string
+	moduleDir         string
+	benchDir          string
+	store             *store.Store
+	repo              *gitblob.Repo
+	keys              map[statKey]bool
+	current           map[statKey]currentBench
+	sides             map[statSideKey]statSide
 }
 
 type statSideKey struct {
@@ -239,6 +206,16 @@ func (b baseline) historicalRefs() []string {
 }
 
 func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []string) error {
+	if err := sc.opts.Policies.Validate(); err != nil {
+		return err
+	}
+	var withheld []compare.Disposition
+	var withheldNotes []string
+	withhold := func(r *compare.Result) {
+		withheld = append(withheld, r.Dispositions...)
+		withheldNotes = append(withheldNotes, r.Notes...)
+	}
+	var reportErrors []error
 	ctx, invocation, err := beginInvocation(ctx, sc.benchDir, sc.vouches, errw)
 	if err != nil {
 		return err
@@ -250,7 +227,7 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 	if err != nil {
 		return err
 	}
-	pkgs, err := statPackages(ctx, env, bl, errw)
+	pkgs, err := statPackages(ctx, env, bl, errw, &withheld)
 	if err != nil {
 		if cancelledBy(ctx, err) {
 			return interrupted("stat: interrupted while listing packages")
@@ -290,8 +267,10 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 	engines := map[engineKey]*gofresh.Engine{}
 	judgments := map[string]map[string]*benchVerdict{}
 	projections := map[*benchfmt.Result]gofresh.Fingerprint{}
+	subjects := map[*benchfmt.Result]compare.Subject{}
 	goflagsByModule := map[string]string{}
-	var tally statTally
+	freshness := map[*benchfmt.Result]string{}
+	freshnessReason := map[*benchfmt.Result]string{}
 
 	for mi, m := range modules {
 		if err := ctx.Err(); err != nil {
@@ -299,7 +278,19 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 		}
 		reportPhase(ctx, fmt.Sprintf("reading recordings of %s (%d/%d)", m.modulePath, mi+1, len(modules)))
 		if err := addStatInventory(m, bl, sc.label); err != nil {
-			return err
+			if cancelledBy(ctx, err) {
+				return interrupted("stat: interrupted while inventorying recordings")
+			}
+			reportErrors = append(reportErrors, err)
+			withheld = append(withheld, compare.Disposition{Package: m.modulePath, Requested: true, Causes: []compare.Cause{{Code: "inventory", Message: "recording inventory unavailable"}}})
+		}
+		if bl.newRef == "" {
+			withheld = append(withheld, m.inventoryFailures...)
+		}
+		if bl.newRef == "" {
+			for key := range m.current {
+				m.keys[key] = true
+			}
 		}
 		// newSideIsWorkingTree is the per-side property both consumers
 		// derive from: the new side is the working tree exactly when no
@@ -322,17 +313,20 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 				return stoppedAt()
 			}
 			baseRecs, baseOK, err := m.readSide(bl.baseRef, key.pkgRel, key.bench, key.label)
-			if err != nil && !errors.Is(err, store.ErrInvalidRecording) {
-				return err
-			}
+			baseReadErr := err
 			newRecs, newOK, err := m.readSide(bl.newRef, key.pkgRel, key.bench, key.label)
-			if err != nil && !errors.Is(err, store.ErrInvalidRecording) {
+			newReadErr := err
+			if cancelledBy(ctx, baseReadErr) || cancelledBy(ctx, newReadErr) {
+				return stoppedAt()
+			}
+			resolved, err := m.resolveSubjects(key, bl)
+			if err != nil {
 				return err
 			}
-			if !baseOK && !newOK {
-				continue // never recorded on either side — nothing to say
+			if !baseOK && !newOK && baseReadErr == nil && newReadErr == nil {
+				withhold(blockedStatUnits(m, key, bl, resolved, sc.opts, []compare.Cause{{Code: "missing-side", Side: "both", Message: "unrecorded on both sides"}}))
+				continue
 			}
-			tally.inventoried++
 			// Each side's stale-format state warns and tallies independently
 			// (spec §10.1 per-side; the tally counts recording files), so with
 			// both sides stale neither file goes unmentioned.
@@ -340,6 +334,62 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 			// the format rung on both sides, the strategy rung on the
 			// working-tree side alone.
 			baseAdm, newAdm := m.admission(bl.baseRef, key), m.admission(bl.newRef, key)
+			var causes []compare.Cause
+			for _, side := range []struct {
+				name       string
+				present    bool
+				adm        admission
+				historical bool
+				rows       []*benchfmt.Result
+				err        error
+			}{
+				{"base", baseOK, baseAdm, true, baseRecs, baseReadErr}, {"new", newOK, newAdm, bl.newRef != "", newRecs, newReadErr},
+			} {
+				if side.err != nil && !errors.Is(side.err, store.ErrInvalidRecording) {
+					reportErrors = append(reportErrors, side.err)
+					causes = append(causes, compare.Cause{Code: "inventory", Side: side.name, Message: "recording could not be read"})
+					continue
+				}
+				if !side.present {
+					causes = append(causes, compare.Cause{Code: "missing-side", Side: side.name, Message: "recording absent"})
+					continue
+				}
+				if !side.adm.ok {
+					code := "format"
+					if side.adm.class == "dynamic-state strategy" {
+						code = "strategy"
+					}
+					causes = append(causes, compare.Cause{Code: code, Side: side.name, Message: "stale (" + side.adm.class + ")"})
+				}
+				if side.adm.class != "format" && side.historical && isDirty(side.rows) {
+					causes = append(causes, compare.Cause{Code: "dirty-ref", Side: side.name, Message: "dirty historical recording"})
+				}
+			}
+			blocked := false
+			for _, c := range causes {
+				if c.Code != "missing-side" {
+					blocked = true
+				}
+			}
+			if blocked {
+				withhold(blockedStatUnits(m, key, bl, resolved, sc.opts, causes))
+			}
+			readFailed := false
+			for _, c := range causes {
+				if c.Code == "inventory" {
+					readFailed = true
+				}
+			}
+			if readFailed {
+				continue
+			}
+			for _, r := range newRecs {
+				if newSideIsWorkingTree {
+					freshness[r] = "unavailable"
+				} else {
+					freshness[r] = "not-applicable"
+				}
+			}
 			for _, adm := range []admission{baseAdm, newAdm} {
 				if adm.ok {
 					for _, row := range adm.rows {
@@ -347,11 +397,11 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 					}
 				}
 			}
+			resolved.bind(subjects, baseRecs, newRecs)
 			baseStale := baseOK && !baseAdm.ok && baseAdm.class == "format"
 			newStale := newOK && !newAdm.ok && newAdm.class == "format"
 			if baseStale {
 				fmt.Fprintf(errw, "pew: warning: baseline %s:%s is stale (format); skipping — re-run `pew run`\n", bl.baseRef, key.bench)
-				tally.staleFormat++
 			}
 			if newStale {
 				side := bl.newRef
@@ -359,7 +409,6 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 					side = "working-tree"
 				}
 				fmt.Fprintf(errw, "pew: warning: %s recording %s.%s is stale (format); skipping — re-run `pew run`\n", side, key.pkgRel, key.bench)
-				tally.staleFormat++
 			}
 			if baseStale || newStale {
 				continue
@@ -378,7 +427,6 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 			// no laundering channel to guard there.
 			if newOK && !newAdm.ok && newAdm.class == "dynamic-state strategy" {
 				fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is stale (dynamic-state strategy); skipping — re-run `pew run`\n", key.pkgRel, key.bench)
-				tally.staleStrategy++
 				continue
 			}
 			// A dirty recording's commit does not faithfully describe its source
@@ -392,11 +440,9 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 			newDirty := newOK && bl.newRef != "" && isDirty(newRecs)
 			if baseDirty {
 				fmt.Fprintf(errw, "pew: warning: baseline %s:%s is a dirty recording; skipping (spec §10)\n", bl.baseRef, key.bench)
-				tally.dirty++
 			}
 			if newDirty {
 				fmt.Fprintf(errw, "pew: warning: new side %s:%s is a dirty recording; skipping (spec §10)\n", bl.newRef, key.bench)
-				tally.dirty++
 			}
 			if baseDirty || newDirty {
 				continue
@@ -405,6 +451,9 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 				cur, ok := m.current[key]
 				if !ok {
 					fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s has no current benchmark declaration; comparison may not reflect HEAD — re-run `pew run`\n", key.pkgRel, key.bench)
+					for _, r := range newRecs {
+						freshnessReason[r] = "no current benchmark declaration"
+					}
 				} else {
 					// Best-effort: a check failure warns but never blocks the
 					// comparison. The per-side stale-format gate above already
@@ -421,6 +470,9 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 						}
 						if err != nil {
 							fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, err)
+							for _, r := range newRecs {
+								freshnessReason[r] = "effective build flags unavailable"
+							}
 							baseAll = append(baseAll, baseRecs...)
 							newAll = append(newAll, newRecs...)
 							continue
@@ -430,6 +482,9 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 					pgo, pgoErr := runpkg.PGOInput(cur.moduleDir, cur.pkgDir, cur.mainPkg, goflags)
 					if pgoErr != nil {
 						fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, pgoErr)
+						for _, r := range newRecs {
+							freshnessReason[r] = "PGO input unavailable"
+						}
 						baseAll = append(baseAll, baseRecs...)
 						newAll = append(newAll, newRecs...)
 						continue
@@ -465,10 +520,19 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 					}
 					judged := batch[key.bench]
 					v, reason, fp, e := judged.v, judged.reason, judged.fp, judged.err
+					if e == nil {
+						for _, r := range newRecs {
+							freshness[r] = string(v)
+							freshnessReason[r] = reason
+						}
+					}
 					if cancelledBy(ctx, e) {
 						return stoppedAt()
 					} else if e != nil {
 						fmt.Fprintf(errw, "pew: warning: %s.%s: cannot check working-tree staleness: %v\n", cur.importPath, key.bench, e)
+						for _, r := range newRecs {
+							freshnessReason[r] = "freshness check failed"
+						}
 					} else if v != verdictValid {
 						msg := string(v)
 						if reason != "" {
@@ -509,6 +573,9 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 		}
 	}
 
+	sc.opts.FreshnessOf = func(r *benchfmt.Result) string { return freshness[r] }
+	sc.opts.SubjectOf = func(r *benchfmt.Result) compare.Subject { return subjects[r] }
+	sc.opts.FreshnessReasonOf = func(r *benchfmt.Result) string { return freshnessReason[r] }
 	res := compare.CompareProjected(baseAll, newAll, sc.opts, func(row *benchfmt.Result) func(string) string {
 		fp := projections[row]
 		return func(key string) string {
@@ -518,17 +585,24 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 			return row.GetConfig(key)
 		}
 	})
+	res.Dispositions = append(res.Dispositions, withheld...)
+	res.Notes = append(res.Notes, withheldNotes...)
+	for i := range res.Dispositions {
+		res.Dispositions[i].Label = sc.label
+	}
+	coverage := res.Coverage(sc.opts.Policies)
 	if sc.jsonOut {
-		if err := writeStatJSON(w, res, func() string { return tally.emptyReason(res, sc.opts.GateUnits) }); err != nil {
+		if err := writeStatReportJSON(w, res, coverage); err != nil {
 			return err
 		}
-	} else if len(res.Tables) == 0 && len(res.Notes) == 0 {
-		fmt.Fprintln(w, "no recorded benchmarks to compare:", tally.emptyReason(res, sc.opts.GateUnits))
-	} else if err := res.WriteText(w); err != nil {
+	} else if err := writeStatReportText(w, res, coverage); err != nil {
 		return err
 	}
 	if err := interruptedAfterLastUnit(ctx, "stat: interrupted after the last comparison; the comparison shown is complete"); err != nil {
 		return err
+	}
+	if len(reportErrors) > 0 {
+		return errors.Join(reportErrors...)
 	}
 	if !sc.failOnRegression {
 		return nil
@@ -539,16 +613,20 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 	// The gate never passes vacuously (spec §10.1): with zero gated-unit
 	// comparisons there is nothing for Regressed() to judge, so a clean exit
 	// would report "no regression" over a set that was never measured. Compared
-	// rows govern a partial comparison; only a fully empty gated set fails.
-	if res.GatedComparisons() == 0 {
-		return &nothingComparedError{reason: tally.emptyReason(res, sc.opts.GateUnits)}
+	// rows govern a partial comparison; complete additionally requires every
+	// requested obligation to be eligible and compared.
+	if !coverage.Satisfied {
+		return &nothingComparedError{reason: res.EmptyReason(sc.opts.Policies), incomplete: coverage.Eligible > 0}
 	}
 	return nil
 }
 
-func statPackages(ctx context.Context, env gotool.Environment, bl baseline, errw io.Writer) ([]pkgMeta, error) {
+func statPackages(ctx context.Context, env gotool.Environment, bl baseline, errw io.Writer, failures *[]compare.Disposition) ([]pkgMeta, error) {
 	pkgs, err := resolvePackages(ctx, env, []string{"./..."})
 	if err != nil {
+		if bl.newRef == "" {
+			*failures = append(*failures, compare.Disposition{Requested: true, Causes: []compare.Cause{{Code: "inventory", Side: "new", Message: "current package inventory unavailable"}}})
+		}
 		fallback, fallbackErr := fallbackStatPackages(ctx, env)
 		if fallbackErr != nil {
 			if bl.newRef != "" {
@@ -605,6 +683,7 @@ func statModules(pkgs []pkgMeta, sc statConfig, errw io.Writer) ([]*statModule, 
 			// Consistent with status/run: a package whose benchmark declarations cannot
 			// be read is reported and skipped, not fatal to the whole comparison.
 			fmt.Fprintf(errw, "pew: warning: %s: %v\n", p.ImportPath, err)
+			m.inventoryFailures = append(m.inventoryFailures, compare.Disposition{Package: p.ImportPath, Requested: true, Causes: []compare.Cause{{Code: "inventory", Side: "new", Message: "benchmark declarations unavailable"}}})
 			continue
 		}
 		pkgRel := packageRel(p)
@@ -705,6 +784,7 @@ func dedupeStatModules(mods []*statModule) []*statModule {
 	for _, m := range mods {
 		key := filepath.Clean(m.benchDir)
 		if existing := byStore[key]; existing != nil {
+			existing.inventoryFailures = append(existing.inventoryFailures, m.inventoryFailures...)
 			for k, v := range m.current {
 				existing.current[k] = v
 			}

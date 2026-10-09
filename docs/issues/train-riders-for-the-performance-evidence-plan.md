@@ -1,6 +1,6 @@
 # Handoff: the train's pew riders for the performance-evidence plan
 
-Lands: performance-evidence plan chunk 9, with the later-chunk items
+Lands: performance-evidence plan chunk 10, with the later-chunk items
 named below landing at their stated chunks.
 
 The cross-tool train (gofresh docs/plans/cross-tool-train.md) held pew
@@ -9,17 +9,6 @@ place this plan's machine never reads. The fifth re-audit band (train
 chunk 319, 2026-10-06) dissolved the train's pew tail into this plan
 and moves every rider here. Each item is a derived fact, not a wish;
 its source tick is named so the derivation can be read.
-
-## At chunk 9 — comparison policies
-
-- §10.1's unqualified "its magnitude clears a threshold" beside the
-  three REQs 044f7d8 added, and the null-delta rule stated three
-  times (REQ-pew-zero-baseline, REQ-pew-delta-representation, §12):
-  one statement at 9.1.
-- The metric set spelled four times (stat.go `knownUnits`, compare.go
-  `higherIsWorse` and `unitOrder`, a test's hand list): one registry
-  on 251's pattern at 9.2, preserving §10.1's sec/op gate default;
-  `audit-note-renderers-one-grammar` lands here.
 
 ## At chunk 10 — profile companions
 
@@ -35,8 +24,9 @@ its source tick is named so the derivation can be read.
 ## At chunk 12
 
 - Per-arm noise floors over same-closure recordings are sound on the
-  package closure today (gofresh 102 only refines them); the `--json`
-  parity (the train's 177) at 12.1/9.2.
+  package closure today (gofresh 102 only refines them).
+- Remaining machine-readable/progress triage (the train's 177) at
+  12.1; `mcp-surface` retains the new-verb JSON and MCP scope questions.
 
 ## What the train keeps (after this plan closes)
 

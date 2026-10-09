@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/pew/internal/metric"
 	"github.com/greatliontech/pew/internal/recordingtest"
 	"golang.org/x/perf/benchfmt"
 )
@@ -41,10 +42,15 @@ func benchResults(name string, cfg map[string]string, units map[string][]float64
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	var unitNames []string
+	for unit := range units {
+		unitNames = append(unitNames, unit)
+	}
+	sort.Strings(unitNames)
 	var rs []*benchfmt.Result
 	for i := range n {
 		var vals []benchfmt.Value
-		for _, u := range []string{"sec/op", "B/op", "allocs/op"} {
+		for _, u := range unitNames {
 			if vs, ok := units[u]; ok {
 				vals = append(vals, benchfmt.Value{Value: vs[i], Unit: u})
 			}
@@ -670,7 +676,8 @@ func FuzzZeroBaselineRegression(f *testing.F) {
 		if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) || floor < 0 || math.IsNaN(floor) || math.IsInf(floor, 0) {
 			return
 		}
-		for _, unit := range []string{"sec/op", "B/op", "allocs/op"} {
+		for _, definition := range metric.Definitions() {
+			unit := definition.Unit
 			opts := DefaultOptions()
 			opts.ThresholdPct = floor
 			opts.GateUnits = map[string]bool{unit: true}

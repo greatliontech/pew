@@ -277,9 +277,9 @@ closure and runtime-input evidence prove reuse validity:
 | runtimeconfig |          ✓             |             ✓             |
 
 Run conditions (`pew-runconditions`, §9) appear in **neither** key: they neither name a recording
-point nor gate reuse. They are audit provenance only — recorded so "under what machine conditions
-was this number taken" is answerable from the recording alone — and surface solely as a
-comparison note (§10.1). Putting them in identity or validity would recreate the §8 spurious-stale
+point nor gate reuse. They are audit provenance — recorded so "under what machine conditions
+was this number taken" is answerable from the recording alone — and surface as a
+comparison note, with optional regression-gate eligibility (§10.1). Putting them in identity or validity would recreate the §8 spurious-stale
 trap (the governor at *check* time mismatching the governor at *run* time).
 
 Identity **pins** code by commit; validity **tests** code by closure plus runtime-input evidence. The
@@ -1027,17 +1027,17 @@ staleness warnings, but they are not the authority for which historical recordin
 
 A **regression** on a metric requires all three: (1) it moved the **worse** direction (higher
 sec/op, B/op, or allocs/op); (2) the change is **statistically significant** — Mann–Whitney U via
-benchmath, default α = 0.05, *not* CI-overlap; and (3) its magnitude clears a **threshold** (default
-3%, just above good-hygiene noise). All three are needed: significance without a magnitude floor
+benchmath, default α = 0.05, *not* CI-overlap; and (3) its magnitude satisfies the
+percentage-floor rule below, including its zero-baseline case (default 3%, just
+above good-hygiene noise). All three are needed: significance without a magnitude floor
 flags real-but-trivial changes; a floor without significance flags noise.
 
 #### Numeric edge cases
 
 **REQ-pew-zero-baseline** (behavior): For a judged nonnegative metric, a
 statistically significant increase from a zero baseline center to a positive
-center MUST count as a regression for every finite percentage floor, retaining
-an undefined percentage delta (`null` in JSON) rather than using that display
-value as the direction or magnitude decision; zero to zero is unchanged and
+center MUST count as a regression for every finite percentage floor, independently
+of the percentage representation; zero to zero is unchanged and
 positive to zero is an improvement.
 
 **REQ-pew-statistical-options** (behavior): Comparison option admission MUST
@@ -1045,20 +1045,31 @@ reject non-finite alpha, confidence and threshold values before comparison work,
 requiring finite alpha/confidence in (0,1) and a finite nonnegative percentage
 floor, with zero floor retaining its any-significant-worsening meaning.
 
-**REQ-pew-delta-representation** (behavior): A comparison whose finite sample
-centers produce an unrepresentable floating-point percentage MUST retain its
-comparison and regression decision and emit `deltaPct: null` in JSON, just as
-for a zero baseline, rather than fail serialization or silently omit its row.
+**REQ-pew-delta-representation** (behavior): A comparison whose baseline center is
+zero or whose finite centers produce an unrepresentable percentage MUST retain
+its comparison and regression decision and emit `deltaPct: null` in JSON rather
+than fail serialization or silently omit its row. Percentage display is never
+the authority for direction or zero-baseline magnitude.
+
+**REQ-pew-finite-samples** (behavior): Every sample entering comparison MUST be
+finite; sec/op, B/op and allocs/op additionally have a nonnegative domain. An invalid
+sample refuses the whole affected comparison cell, never just the sample.
+Non-finite computed centers or significance probabilities, and probabilities
+outside [0,1], likewise refuse the cell. Unbounded confidence intervals remain
+legitimate, represented with null bounds and statistical warnings. A producer
+refuses an affected benchmark before replacing its recording, preserving
+its previous recording and independent completed siblings. Unknown units remain
+informational with no inferred worsening direction or gate eligibility.
 
 #### Comparison modes and reporting
 
 - **`pew stat` (default)** reports the benchstat-style table and marks `⚠ regression` on any metric
   meeting the three conditions. **`--fail-on-regression`** drives a non-zero exit on the same
-  criterion for CI. `sec/op` gates by default; `allocs/op` and `B/op` are flagged but failing on
+  criterion for eligible requested metrics in CI. `sec/op` gates by default; `allocs/op` and `B/op` are flagged but failing on
   them is opt-in.
 - **The gate never passes vacuously.** `--fail-on-regression` asserts "compared and clean", not
-  merely "no regression seen": exit status `0` requires at least one gated-unit comparison to have
-  actually been performed with no gated regression. When zero benchmarks are statistically compared
+  merely "no regression seen": exit status `0` requires at least one eligible gated-unit comparison to have
+  actually been performed with no eligible gated regression. When zero benchmarks are statistically compared
   on any gated unit — nothing recorded on either side, every candidate skipped (stale format, stale
   dynamic-state strategy, dirty baseline, one-sided, provenance guard mismatch, no shared metric
   unit), or metrics compared but
@@ -1066,7 +1077,7 @@ for a zero baseline, rather than fail serialization or silently omit its row.
   detected regression exits `1`, an empty gated comparison exits `2`, each with a diagnostic on
   stderr naming its cause; an interruption outranks the gate — a verb ended by a signal exits `130`
   whatever the comparison found, the comparison it completed standing on stdout. In a partial
-  comparison the compared subset alone governs the exit; skipped benchmarks surface as
+  comparison the eligible compared subset alone governs the default exit; skipped benchmarks surface as
   warnings/notes, never silently. Without `--fail-on-regression` an empty comparison stays
   informational (exit `0`), and the "no recorded benchmarks to compare" line names why when the
   cause is determinable from the inventoried recordings. A recording that fails the format shape
@@ -1082,20 +1093,87 @@ for a zero baseline, rather than fail serialization or silently omit its row.
   values solely from each admitted native payload. It separately requires non-empty equal
   `machine`, `toolchain`, `buildconfig`, and `runtimeconfig` — never comparing across machine
   fingerprints, toolchains, build variants, or runtime-configuration variants silently (§6, §8).
-- **Run conditions are surfaced, not gated.** When the two compared sides' recorded
+- **Run conditions are surfaced, not required by default.** When the two compared sides' recorded
   `pew-runconditions` (§9) differ in a categorical field — `governor`, `turbo`, `throttled`,
   `battery`, with a missing, malformed, or repeated field read as `unknown` — `pew stat` emits a
   note naming both sides' recorded conditions; when one side lacks the line, or a side mixes
   distinct values, the note names the affected side. In every case the comparison **still
-  proceeds**. Unlike the guard mismatches above, differing run conditions never block: the numbers
-  may still be wanted, the note keeps the mixing visible. Two sides that both lack the line are
-  silent — there is nothing recorded to disagree about. `load1` is continuous measurement context:
+  proceeds**. Unlike the guard mismatches above, differing run conditions never block numerical comparison: the numbers
+  may still be wanted, the note keeps the mixing visible. Two sides that both lack the line have
+  no differing-conditions note; their absence still cannot prove compatibility. `load1` is continuous measurement context:
   recorded and shown in the differing-conditions note, never itself a trigger.
 
 Every tunable across pew — α, threshold, `--count`, `--benchtime`, pinning, strictness, gating
 metrics — is **configurable with the stated values as defaults**; the correctness guards (§7) are
 *not* knobs. Deliberately un-optimized (no per-metric thresholds, adaptive noise floors, persistent
 caches) until real use asks for it.
+
+#### Coverage and eligibility policies
+
+**REQ-pew-comparison-coverage** (behavior): Comparison MUST inventory its requested
+universe before filtering. A working-tree comparison includes current benchmark
+declarations in the selected module/store/label scope and recordings on either
+side; a two-ref comparison uses only the union of historical recordings, never
+claims coverage of unrecorded historical declarations. Within readable recordings,
+the union of full benchmark names (sub-benchmarks and CPU suffix included) and
+retained configurations defines result identities. Every requested `--gate` unit
+is an obligation for every result identity, even when absent on both sides.
+Unrecorded declarations and unreadable recordings retain recording-level obligations;
+their unknown child identities are not fabricated. Dynamic children never observed
+on either side are outside the enumerated universe. Inventory failures leave an
+explicit unresolved obligation, never an assertion of complete coverage.
+Recording paths define the pairing across refs; a package label is resolved in
+each side's own module/store context, never borrowed from today's module name.
+Side package names that differ are reported separately, including when recorded
+`pkg` is absent. Retained configurations still partition result identities: a
+changed recorded `pkg` is not silently projected away or guessed to be a rename.
+
+**REQ-pew-comparison-dispositions** (behavior): Every obligation MUST have a typed
+terminal disposition, distinguishing compared,
+missing base/new/both, missing units, invalid samples/statistics, format, strategy,
+dirty historical recording, provenance incompatibility and inventory failure.
+All applicable causes are retained, with deterministic precedence: inventory,
+format, strategy, dirty, missing side, provenance, missing unit, invalid numeric
+evidence, freshness, conditions. Recording-side causes retain their side identity.
+Counts and gate decisions are derived from this same report, not independent tallies.
+
+**REQ-pew-comparison-policies** (behavior): `--coverage=partial` MUST preserve the
+nonempty clean eligible-subset default; `complete` additionally requires every
+requested obligation eligible and compared. `--freshness=report` preserves ordinary
+working-tree stale/unverifiable/check-unavailable warnings; `require` admits only
+the shared judgment's valid working-tree side to the gate. Historical sides are
+not applicable to current-tree freshness. Format, strategy, dirty-ref and provenance
+guard refusals remain mandatory in every policy. `--conditions=report` preserves
+informational conditions; `compatible` requires known, consistent, equal governor,
+turbo, throttled and battery fields on both sides for gate eligibility. Missing,
+malformed, repeated and unknown fields cannot prove compatibility; load1 is context
+only. These policies never hide otherwise admitted numerical comparisons, change
+fingerprints or grouping, or manufacture freshness evidence.
+
+Without `--fail-on-regression`, policies report satisfaction but do not drive exit.
+With it, an eligible gated regression exits 1 even with incomplete coverage;
+otherwise an empty eligible set or unsatisfied complete coverage exits 2; otherwise
+exit 0. Interruption exits 130 ahead of all gate outcomes. Operational errors retain
+their ordinary failure behavior. Every incomplete cause remains visible regardless
+of exit precedence. Requiring complete coverage does not implicitly require freshness
+or compatible conditions; these are independent assurances.
+
+**REQ-pew-comparison-report** (behavior): Text and JSON MUST render the same semantic
+report: identities, side dispositions, audit differences, freshness, eligibility,
+coverage and selected policies, including admission failures before statistics.
+Audit notes use one absent/mixed/different grammar with a categorical comparator
+for conditions and equality for other audit fields. Guard digests and closure hashes
+remain excluded from ordinary output; `--explain` alone discloses them.
+Numerical refusal does not erase audit differences between structurally readable
+sides, including dirty historical and strategy-refused working-tree recordings.
+Such audit notes add no comparison obligations. Format-invalid payloads are never
+decoded for audit reporting; an unavailable side is not represented as an empty
+audit value belonging to an admitted recording.
+Stored-recording audits belong to the readable recording pair at its canonical
+path, independently of whether child names or retained configurations match.
+Each recording-level audit difference is reported once, not once per matched
+child. This does not pair numerical results across differing child identities or
+configurations. Transient A/B streams retain their result-group audit reporting.
 
 ## 11. Architecture & dependencies
 
@@ -1195,13 +1273,39 @@ any selected result could not be judged or reported; ordinary stale, unrecorded 
 results do not make the report incomplete. An interruption retains its exit `130` precedence.
 `stat` emits comparison rows as
 `{"kind":"row", config, unit, benchmark, base:{center,lo,hi,confidence}, new:{…}, p, deltaPct,
-regression, gated, warnings}` (`deltaPct` is `null` when the baseline center is zero or the percentage is unrepresentable; a side's
+regression, gated, warnings}` (`deltaPct` follows REQ-pew-delta-representation; a side's
 `lo`/`hi` are `null` when its confidence interval is non-finite — the sample-count cause rides
 `warnings`; `config`/`warnings` omitted when empty), each not-compared note as
 `{"kind":"note", text}`, and an empty comparison as one `{"kind":"empty", reason}` object
 carrying the same cause the text view names — the §10.1 exit-status contract is unchanged either way. Internal values (guard digests,
 closure hashes) are deliberately excluded: they belong to `--explain`'s human view, and the two
 flags are mutually exclusive. The text renderer remains the default.
+
+Rows may additionally carry `package`, `recording` and `label` to identify their
+inventoried recording independently of stream configuration. Notes may additionally
+carry `code` and `details`: disposition details identify
+package, label, recording, full benchmark, configuration and unit where known,
+requested/compared/eligible status, regression and ordered side-attributed causes
+(`code`, `side`, `message`). Coverage summaries use note code `coverage`, with
+requested, compared, eligible, missing and regressed obligation counts, inventory
+completeness, policy satisfaction and effective policies. An entirely empty universe
+retains the single empty object, with additive coverage details. Row `gated` retains
+its requested-unit meaning, independently of eligibility. New fields are additive;
+existing row/note/empty fields retain their meanings.
+Rows and disposition details additionally carry `basePackage` and `newPackage`
+when known, resolved from the corresponding side's module context. `package` is
+the common package label, or the sole available side label; it is omitted when
+the two known side labels differ. Recorded package metadata remains in `config`.
+
+Disposition note code is `disposition`. Cause codes are `inventory`, `format`,
+`strategy`, `dirty-ref`, `missing-side`, `guard`, `missing-unit`, `invalid-sample`,
+`invalid-statistic`, `freshness`, and `conditions`; side is `base`, `new`, `both`,
+or omitted for scope-wide failures. Freshness is `valid`, `stale`, `unverifiable`,
+`unavailable`, or `not-applicable` where evaluated; conditions compatibility is
+`compatible` or `incompatible`. Informational causes remain visible even when the
+selected policy does not exclude them. `satisfied` in coverage details judges
+coverage eligibility, not the absence of regressions; `regressed` separately
+counts eligible requested regressions. Counts name obligations, not recording files.
 
 (`pew list` dropped — `status` is the inventory-plus-verdict view.) Every flag value is a **default,
 configurable** (§10.1); the correctness guards (§7) are not flags.
@@ -1220,7 +1324,7 @@ shape of the one text line that carries a count.
 |------|------------------------------|----------|-------------------|
 | `run` | serve what is proven, measure the rest, every package prepared first; one `recorded` line per measured benchmark, one `served` line per package that served anything, counting the valid recordings not re-measured (`served <pkg>: N valid, measuring M` / `N valid, nothing to run`; the row label is padded to the `recorded` column), refusals and errors as lines, progress on stderr on the cadence; judged under the store's reviewed vouch file | `--count=10` `--benchtime=1s` `--bench=.` | `--all` (a fresh baseline after a change nothing guards), `--pin` (cut scheduler variance), `--strict` (a CI gate on hygiene), `--label` (a variant lineage), `--vouch` (a one-off acceptance extending the store's reviewed vouch file), `--bench-dir` (a store outside the module) |
 | `status` | every selected benchmark's verdict with its reason — the inventory shows coverage, not only work | — | `--stale` (the actionable set, scriptable), `--explain` (why a verdict is non-valid), `--json` (machine rows), `--label`, `--vouch`, `--bench-dir` |
-| `stat` | compare recorded results, the baseline mode by argument count; the text table | `--alpha=0.05` `--confidence=0.95` `--threshold=3` `--gate=sec/op` | `--fail-on-regression` (a CI exit), `--json` (machine comparison rows and notes), `--explain` (the values behind a skip), `--label`, `--vouch`, `--bench-dir` |
+| `stat` | compare recorded results, the baseline mode by argument count; the text table | `--alpha=0.05` `--confidence=0.95` `--threshold=3` `--gate=sec/op` `--coverage=partial` `--freshness=report` `--conditions=report` | `--fail-on-regression` (a CI exit), `--json` (machine comparison rows and notes), `--explain` (the values behind a skip), `--label`, `--vouch`, `--bench-dir` |
 | `ab` | interleaved A/B of the working tree against a ref, nothing stored; the per-benchmark delta table | `--count=6` `--ref=HEAD` `--bench=.` | `--benchtime` (a budget other than go's default), `--out` (both raw streams for offline analysis), `--pin` (cut scheduler variance on both sides), `--strict` (refuse a noisy machine), `--worktree-dir` (a same-filesystem placement where the repository's parent is unwritable or on another device) |
 | `gc` | remove the recordings of benchmarks gone from the source, each removal reported as it happens | — | `--bench-dir` |
 | `guidance` | the decision map | — | a verb argument (that verb's full section) |
@@ -1298,9 +1402,9 @@ knob, and a derived-default knob.
 
 **REQ-pew-mutable-local** (behavior): **Mutable-local deps are hashed by content.** Any reachable dependency whose resolved source is *not* under `GOMODCACHE` (local `replace => ./path`, `go.work use`, `vendor/`) MUST be hashed by its source content, never pinned by `(module, version)` (§7.7). *Violation:* `B` reaches a locally-replaced dep; the dep's reachable source changes; `go.mod`/`go.sum` untouched; version-pinning → hash unchanged → `B` reported `valid` while its dependency moved → false-`valid`. *Kind:* entailed. *Anchor test:* edit a locally-replaced dep's reachable code without touching `go.mod` ⇒ `B` reports stale.
 
-**REQ-pew-runconditions-provenance** (behavior): **Run conditions are provenance-only.** The `pew-runconditions` line (§9) MUST never enter the machine fingerprint (§8), any validity guard (§7), or the comparison grouping / required-equal guard set (§10.1). *Violation:* the `performance` governor is set for a recording run; at check time the box idles in `powersave`; a conditions-bearing fingerprint or guard marks every recording stale → spurious re-run of a still-valid result — G2 defeated by the exact transient-mismatch trap §8 excludes by construction. *Kind:* entailed (from §8's exclusion and the §5.1 identity/validity keys). *Anchor tests:* two recordings differing only in `pew-runconditions` ⇒ both valid; ⇒ compared (with a note), never fragmented or blocked.
+**REQ-pew-runconditions-provenance** (behavior): **Run conditions are provenance, not freshness guards.** The `pew-runconditions` line (§9) MUST never enter the machine fingerprint (§8), any validity guard (§7), comparison grouping, or the mandatory comparison-guard set (§10.1). Optional condition compatibility affects regression-gate eligibility alone; numerical comparison still proceeds. *Violation:* the `performance` governor is set for a recording run; at check time the box idles in `powersave`; a conditions-bearing fingerprint or validity guard marks every recording stale → spurious re-run of a still-valid result. *Kind:* entailed (from §8's exclusion and the §5.1 identity/validity keys). *Anchor tests:* two recordings differing only in conditions ⇒ both valid and numerically compared with a note; default eligibility retained, opt-in compatible eligibility refused.
 
-**REQ-pew-regression-gate** (behavior): **The regression gate is never vacuously green.** Under `--fail-on-regression`, exit status `0` MUST require at least one gated-unit comparison to have been performed and found clean (§10.1); an empty gated comparison set exits non-zero with a status distinct from the regression exit and a cause-naming diagnostic. *Violation:* a repo with no recordings yet (or every recording skipped) wires `pew stat --fail-on-regression` as a CI gate; the gate exits `0` — passing precisely when it measured nothing — and a regression lands behind a green check: the silent-staleness failure (§1) reproduced at the gate itself. *Kind:* clause-explicit (§10.1). *Anchor tests:* empty store under the flag ⇒ exit `2` with diagnostic; all candidates skipped ⇒ exit `2` with per-cause tally; partial skip with a clean compared subset ⇒ exit `0`.
+**REQ-pew-regression-gate** (behavior): **The regression gate is never vacuously green.** Under `--fail-on-regression`, exit status `0` MUST require at least one eligible gated-unit comparison to have been performed and no eligible gated regression (§10.1), plus satisfaction of the selected coverage policy. An empty eligible set or unsatisfied complete coverage exits 2 with a cause-naming diagnostic, unless an eligible regression takes precedence with exit 1; interruption takes precedence with exit 130. *Violation:* every candidate is skipped but CI reports clean despite measuring nothing. *Kind:* clause-explicit (§10.1). *Anchor tests:* empty/all-skipped ⇒ exit 2; partial skip with a clean compared subset ⇒ default exit 0, complete exit 2; regression plus incomplete ⇒ exit 1.
 
 **REQ-pew-sample-completeness** (behavior): **Recording sample completeness.** A recording produced by `pew run` MUST carry exactly the demanded `--count` samples for every result row; a benchmark whose stream output shows corruption evidence (unparseable lines naming it, orphaned measurement fields, sample-count deviation) is refused rather than recorded (§9 sample floor); corruption or repository-state motion in one benchmark's arm never discards another benchmark's completed measurements — single-subject execution (§9) makes every stream and state judgment arm-local, so neither output corruption nor non-source residue refuses a whole package; only source-input or HEAD drift (the premise every fingerprint shares) aborts a package write — and no corrupt line's content is ever recorded, as measurement data or as salvage artifact. *Violation:* a dependency's logger splices one line into one result row and either (a) the whole package's completed run — ~30 minutes of untouched benchmarks — is discarded, or (b) the affected benchmark records silently with fewer samples than demanded, and `pew stat` later compares a degenerate sample set as statistics-grade while every guard holds. *Kind:* entailed (§9 statistics-grade defaults + §5 provenance honesty). *Anchor tests:* a stream captured from a real consensus-node-logging run ⇒ the affected benchmark refused with the spliced line reported verbatim, the clean benchmark recorded with its full sample set; an orphaned-fields line with no attributable benchmark ⇒ the producing arm's own benchmark refused, its sibling recorded.
 

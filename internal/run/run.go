@@ -21,6 +21,7 @@ import (
 	gofreshtool "github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/pew/internal/gotool"
+	"github.com/greatliontech/pew/internal/metric"
 	"golang.org/x/perf/benchfmt"
 )
 
@@ -339,6 +340,14 @@ func AuditStream(results []*benchfmt.Result, corrupt []CorruptLine, count int, s
 	var order []string
 	for _, r := range results {
 		name := string(r.Name)
+		bench := BenchName(name)
+		if sel[bench] {
+			for _, v := range r.Values {
+				if !metric.ValidSample(v.Unit, v.Value) {
+					audit.Refused[bench] = append(audit.Refused[bench], fmt.Sprintf("result row %s has invalid %s sample", name, v.Unit))
+				}
+			}
+		}
 		if rows[name] == 0 {
 			order = append(order, name)
 		}

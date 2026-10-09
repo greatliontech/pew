@@ -59,17 +59,22 @@ func summaryJSON(s benchmath.Summary) statJSONSummary {
 // emit as {"kind":"note","text":...} and an empty comparison as
 // {"kind":"empty","reason":...}.
 type statJSONRow struct {
-	Kind       string          `json:"kind"`
-	Config     string          `json:"config,omitempty"`
-	Unit       string          `json:"unit"`
-	Benchmark  string          `json:"benchmark"`
-	Base       statJSONSummary `json:"base"`
-	New        statJSONSummary `json:"new"`
-	P          float64         `json:"p"`
-	DeltaPct   *float64        `json:"deltaPct"` // null when the baseline center is 0
-	Regression bool            `json:"regression"`
-	Gated      bool            `json:"gated"`
-	Warnings   []string        `json:"warnings,omitempty"`
+	BasePackage string          `json:"basePackage,omitempty"`
+	NewPackage  string          `json:"newPackage,omitempty"`
+	Package     string          `json:"package,omitempty"`
+	Recording   string          `json:"recording,omitempty"`
+	Label       string          `json:"label,omitempty"`
+	Kind        string          `json:"kind"`
+	Config      string          `json:"config,omitempty"`
+	Unit        string          `json:"unit"`
+	Benchmark   string          `json:"benchmark"`
+	Base        statJSONSummary `json:"base"`
+	New         statJSONSummary `json:"new"`
+	P           float64         `json:"p"`
+	DeltaPct    *float64        `json:"deltaPct"` // null when the baseline center is 0
+	Regression  bool            `json:"regression"`
+	Gated       bool            `json:"gated"`
+	Warnings    []string        `json:"warnings,omitempty"`
 }
 
 type statJSONNote struct {
@@ -92,6 +97,8 @@ func writeStatJSON(w io.Writer, res *compare.Result, emptyReason func() string) 
 	for _, table := range res.Tables {
 		for _, row := range table.Rows {
 			out := statJSONRow{
+				BasePackage: row.BasePackage, NewPackage: row.NewPackage,
+				Package: row.Package, Recording: row.Recording, Label: row.Label,
 				Kind:       "row",
 				Config:     table.Config,
 				Unit:       table.Unit,

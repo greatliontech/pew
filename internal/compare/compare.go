@@ -32,6 +32,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/greatliontech/pew/internal/metric"
 	"github.com/greatliontech/pew/internal/run"
 	"golang.org/x/perf/benchfmt"
 	"golang.org/x/perf/benchmath"
@@ -65,6 +66,16 @@ var compareGuards = func() []string {
 // Options configure the regression criterion (spec §10.1). Every field is a
 // configurable default; the criterion itself is not a knob.
 type Options struct {
+	Policies  Policies
+	SubjectOf func(*benchfmt.Result) Subject
+	// Freshness is valid, stale, unverifiable, unavailable, or not-applicable.
+	// It comes from the caller's shared working-tree judgment, never from samples.
+	Freshness string
+	// FreshnessOf supplies a per-recording verdict when comparing a corpus.
+	FreshnessOf       func(*benchfmt.Result) string
+	FreshnessReasonOf func(*benchfmt.Result) string
+	// Blockers retain recording-level refusals while enumerating known children.
+	Blockers     []Cause
 	Alpha        float64         // significance level for Mann–Whitney U (default 0.05)
 	ThresholdPct float64         // regression magnitude floor, in percent (default 3.0)
 	Confidence   float64         // confidence level for summary intervals (default 0.95)
@@ -73,11 +84,17 @@ type Options struct {
 
 // DefaultOptions returns the spec's stated defaults (§9/§10.1).
 func DefaultOptions() Options {
+	gate := map[string]bool{}
+	for _, d := range metric.Definitions() {
+		if d.DefaultGate {
+			gate[d.Unit] = true
+		}
+	}
 	return Options{
 		Alpha:        0.05,
 		ThresholdPct: 3.0,
 		Confidence:   0.95,
-		GateUnits:    map[string]bool{"sec/op": true},
+		GateUnits:    gate,
 	}
 }
 
@@ -86,8 +103,9 @@ func DefaultOptions() Options {
 // provenance, variant-guard mismatch, or no metric unit present on both sides).
 // The notes exist so that an un-comparable benchmark is never silently dropped.
 type Result struct {
-	Tables []*Table
-	Notes  []string
+	Dispositions []Disposition
+	Tables       []*Table
+	Notes        []string
 	// OneSided, GuardMismatch, and NoCommonUnit count the benchmarks surfaced
 	// as notes instead of compared: present on one side only, blocked by a
 	// missing/mixed/differing provenance guard, or two-sided with no metric
@@ -114,15 +132,7 @@ func (r *Result) ComparedRows() int {
 // which must never read as a clean pass (spec §10.1) even though Regressed()
 // is vacuously false.
 func (r *Result) GatedComparisons() int {
-	n := 0
-	for _, t := range r.Tables {
-		for _, row := range t.Rows {
-			if row.Gated {
-				n++
-			}
-		}
-	}
-	return n
+	return r.Coverage(Policies{}).Eligible
 }
 
 // Table holds the per-benchmark comparison rows for one file configuration and
@@ -135,18 +145,19 @@ type Table struct {
 
 // Row is one benchmark's comparison for one unit.
 type Row struct {
-	Name     string
-	Base     benchmath.Summary // median + CI of the baseline samples
-	New      benchmath.Summary // median + CI of the new samples
-	Cmp      benchmath.Comparison
-	DeltaPct float64 // (new/base − 1)·100; NaN if the baseline center is 0
+	BasePackage, NewPackage   string
+	Package, Recording, Label string
+	Name                      string
+	Base                      benchmath.Summary // median + CI of the baseline samples
+	New                       benchmath.Summary // median + CI of the new samples
+	Cmp                       benchmath.Comparison
+	DeltaPct                  float64 // (new/base − 1)·100; NaN if the baseline center is 0
 	// Regression is true iff the change is in the worse direction (higher
 	// sec/op, B/op, allocs/op), statistically significant (p < α), and clears the
 	// magnitude threshold — all three (spec §10.1).
 	Regression bool
-	// Gated is true iff this unit is in Options.GateUnits, i.e. a regression here
-	// should drive a non-zero exit under --fail-on-regression (spec §10.1: sec/op
-	// gates by default; B/op and allocs/op are flagged but opt-in to fail).
+	// Gated names a requested metric. Eligibility in Dispositions additionally
+	// decides whether its regression drives --fail-on-regression.
 	Gated bool
 	// Warnings carries benchmath's notes (e.g. too few samples for a finite CI),
 	// surfaced rather than swallowed.
@@ -156,22 +167,8 @@ type Row struct {
 // Regressed reports whether any gated metric regressed — the condition that
 // --fail-on-regression turns into a non-zero exit (spec §10.1).
 func (r *Result) Regressed() bool {
-	for _, t := range r.Tables {
-		for _, row := range t.Rows {
-			if row.Regression && row.Gated {
-				return true
-			}
-		}
-	}
-	return false
+	return r.Coverage(Policies{}).Regressed > 0
 }
-
-// higherIsWorse is the set of units for which a larger value is a regression
-// (spec §10.1: higher sec/op, B/op, allocs/op are worse). The direction is only
-// defined for these; for any other unit (e.g. throughput "B/s", where higher is
-// *better*) pew makes no regression judgement — the delta is shown but never
-// flagged, the sound choice when the spec does not define the direction.
-var higherIsWorse = map[string]bool{"sec/op": true, "B/op": true, "allocs/op": true}
 
 type cell struct{ base, newer []float64 }
 
@@ -180,11 +177,16 @@ type cell struct{ base, newer []float64 }
 // at the benchmark level (not per unit) so a mismatch or one-sided benchmark
 // yields a single note, not one per metric.
 type group struct {
-	name            string
-	config          string
-	hasBase, hasNew bool
-	baseGuards      map[string]guardValue
-	newGuards       map[string]guardValue
+	// recordingAudit is shared by all children/configurations of an admitted
+	// stored recording. Nil identifies a transient result-group audit.
+	recordingAudit                                                   *group
+	basePackage, newPackage                                          string
+	packageName, recording, variantLabel, freshness, freshnessReason string
+	name                                                             string
+	config                                                           string
+	hasBase, hasNew                                                  bool
+	baseGuards                                                       map[string]guardValue
+	newGuards                                                        map[string]guardValue
 	// baseConds/newConds track the recorded `pew-runconditions` provenance per
 	// side. Unlike the guards it never blocks a comparison (spec §10.1, REQ-pew-runconditions-provenance):
 	// a difference is surfaced as a note and the comparison proceeds.
@@ -241,16 +243,29 @@ func CompareProjected(base, newer []*benchfmt.Result, opts Options, values func(
 	rowBy := mustParse(&parser, ".fullname", filter)
 	mustParse(&parser, pewIgnore, filter) // excluded from .config grouping
 
-	type gkey struct{ cfg, name benchproc.Key }
+	type gkey struct {
+		cfg, name benchproc.Key
+		subject   Subject
+	}
 	groups := map[gkey]*group{}
+	recordingAudits := map[string]*group{}
 
 	add := func(rs []*benchfmt.Result, isBase bool) {
 		for _, r := range rs {
 			value := values(r)
-			gk := gkey{configBy.Project(r), rowBy.Project(r)}
+			gk := gkey{cfg: configBy.Project(r), name: rowBy.Project(r)}
+			var subject Subject
+			if opts.SubjectOf != nil {
+				subject = opts.SubjectOf(r)
+				gk.subject = subject
+				if subject.Location != "" {
+					gk.subject.Package = ""
+				}
+			}
 			g := groups[gk]
 			if g == nil {
 				g = &group{
+					packageName: r.GetConfig("pkg"), recording: run.BenchName(string(r.Name)),
 					name:       string(r.Name),
 					config:     gk.cfg.String(),
 					baseGuards: map[string]guardValue{},
@@ -258,33 +273,49 @@ func CompareProjected(base, newer []*benchfmt.Result, opts Options, values func(
 					cells:      map[string]*cell{},
 				}
 				groups[gk] = g
+				if opts.SubjectOf != nil {
+					g.packageName, g.recording, g.variantLabel = subject.Package, subject.Recording, subject.Label
+				}
 			}
 			guards := g.newGuards
 			if isBase {
 				g.hasBase = true
+				g.basePackage = subject.Package
 				guards = g.baseGuards
 			} else {
 				g.hasNew = true
+				g.newPackage = subject.Package
+				if opts.FreshnessOf != nil {
+					g.freshness = opts.FreshnessOf(r)
+				}
+				if opts.FreshnessReasonOf != nil {
+					g.freshnessReason = opts.FreshnessReasonOf(r)
+				}
+			}
+			if opts.SubjectOf != nil {
+				g.packageName = commonPackage(g.basePackage, g.newPackage)
+			}
+			if subject.Location != "" {
+				audit := recordingAudits[subject.Location]
+				if audit == nil {
+					audit = &group{name: subject.Recording, recording: subject.Recording, variantLabel: subject.Label}
+					recordingAudits[subject.Location] = audit
+				}
+				if isBase {
+					audit.hasBase = true
+					audit.basePackage = subject.Package
+				} else {
+					audit.hasNew = true
+					audit.newPackage = subject.Package
+				}
+				audit.packageName = commonPackage(audit.basePackage, audit.newPackage)
+				audit.recordAudit(r, value, isBase)
+				g.recordingAudit = audit
+			} else {
+				g.recordAudit(r, value, isBase)
 			}
 			for _, key := range compareGuards {
 				guards[key] = recordGuard(guards[key], value(key))
-			}
-			if isBase {
-				g.baseConds = recordGuard(g.baseConds, r.GetConfig(run.KeyRunConditions.Name))
-				if g.baseAudit == nil {
-					g.baseAudit = map[string]guardValue{}
-				}
-				for _, k := range auditNoteKeys {
-					g.baseAudit[k.Name] = recordGuard(g.baseAudit[k.Name], value(k.Name))
-				}
-			} else {
-				g.newConds = recordGuard(g.newConds, r.GetConfig(run.KeyRunConditions.Name))
-				if g.newAudit == nil {
-					g.newAudit = map[string]guardValue{}
-				}
-				for _, k := range auditNoteKeys {
-					g.newAudit[k.Name] = recordGuard(g.newAudit[k.Name], value(k.Name))
-				}
 			}
 			for _, v := range r.Values {
 				c := g.cells[v.Unit]
@@ -310,6 +341,15 @@ func CompareProjected(base, newer []*benchfmt.Result, opts Options, values func(
 		gs = append(gs, g)
 	}
 	sort.Slice(gs, func(i, j int) bool {
+		if gs[i].packageName != gs[j].packageName {
+			return gs[i].packageName < gs[j].packageName
+		}
+		if gs[i].recording != gs[j].recording {
+			return gs[i].recording < gs[j].recording
+		}
+		if gs[i].variantLabel != gs[j].variantLabel {
+			return gs[i].variantLabel < gs[j].variantLabel
+		}
 		if gs[i].config != gs[j].config {
 			return gs[i].config < gs[j].config
 		}
@@ -320,6 +360,13 @@ func CompareProjected(base, newer []*benchfmt.Result, opts Options, values func(
 	type tkey struct{ config, unit string }
 	tables := map[tkey]*Table{}
 	for _, g := range gs {
+		units := append([]string{}, g.units...)
+		for unit, requested := range opts.GateUnits {
+			if requested && g.cells[unit] == nil {
+				units = append(units, unit)
+			}
+		}
+		blockers := append([]Cause{}, opts.Blockers...)
 		// One-sided: cannot compare. Surface so the omission is never silent.
 		if !g.hasBase || !g.hasNew {
 			side := "base"
@@ -327,27 +374,105 @@ func CompareProjected(base, newer []*benchfmt.Result, opts Options, values func(
 				side = "new"
 			}
 			res.Notes = append(res.Notes, fmt.Sprintf("%s: only present in %s; not compared", g.label(), side))
-			res.OneSided++
-			continue
-		}
-		if note, ok := g.guardNote(); ok {
-			res.Notes = append(res.Notes, note)
-			res.GuardMismatch++
-			continue
-		}
-		condNote, hasCondNote := g.conditionsNote()
-		rows := 0
-		for _, unit := range sortUnits(g.units) {
-			c := g.cells[unit]
-			if len(c.base) == 0 || len(c.newer) == 0 {
-				continue // metric present on only one side
+			missing := "new"
+			if !g.hasBase {
+				missing = "base"
 			}
-			rows++
+			blockers = append(blockers, Cause{"missing-side", missing, "only present in " + side + "; not compared"})
+		}
+		if note, ok := g.guardNote(); ok && g.hasBase && g.hasNew {
+			res.Notes = append(res.Notes, note)
+			blockers = append(blockers, g.guardCauses()...)
+		}
+		audit := g
+		if g.recordingAudit != nil {
+			audit = g.recordingAudit
+		}
+		condNote, hasCondNote := audit.conditionsNote()
+		conditionCauses := audit.conditionCauses()
+		compatible := len(conditionCauses) == 0
+		rows := 0
+		for _, unit := range sortUnits(units) {
+			c := g.cells[unit]
+			if c == nil {
+				c = &cell{}
+			}
+			_, known := metric.Lookup(unit)
+			d := Disposition{Benchmark: g.name, Config: g.config, Unit: unit, Requested: opts.GateUnits[unit] && known, Freshness: opts.Freshness, Conditions: "incompatible", Causes: append([]Cause{}, blockers...)}
+			d.Package, d.Recording = g.packageName, g.recording
+			d.BasePackage, d.NewPackage = g.basePackage, g.newPackage
+			d.Label = g.variantLabel
+			if g.freshness != "" {
+				d.Freshness = g.freshness
+			}
+			if d.Freshness == "" {
+				d.Freshness = "not-applicable"
+			}
+			if compatible {
+				d.Conditions = "compatible"
+			}
+			if len(c.base) == 0 {
+				d.Causes = append(d.Causes, Cause{"missing-unit", "base", "no samples for requested/observed unit"})
+			}
+			if len(c.newer) == 0 {
+				d.Causes = append(d.Causes, Cause{"missing-unit", "new", "no samples for requested/observed unit"})
+			}
+			for _, side := range []struct {
+				name   string
+				values []float64
+			}{{"base", c.base}, {"new", c.newer}} {
+				for _, v := range side.values {
+					if !metric.ValidSample(unit, v) {
+						d.Causes = append(d.Causes, Cause{"invalid-sample", side.name, "non-finite sample or negative known cost"})
+						break
+					}
+				}
+			}
+			finish := func() {
+				p := opts.Policies.Effective()
+				eligible := true
+				if d.Freshness != "valid" && d.Freshness != "not-applicable" {
+					message := d.Freshness
+					if g.freshnessReason != "" {
+						message += " (" + g.freshnessReason + ")"
+					}
+					d.Causes = append(d.Causes, Cause{"freshness", "new", message + "; comparison may not reflect HEAD"})
+					if p.Freshness == "require" {
+						eligible = false
+					}
+				}
+				if !compatible && p.Conditions == "compatible" {
+					eligible = false
+				}
+				d.Causes = append(d.Causes, conditionCauses...)
+				d.Eligible = d.Compared && eligible
+				d.OrderCauses()
+				res.Dispositions = append(res.Dispositions, d)
+				for _, cause := range d.Causes {
+					if cause.Code == "invalid-sample" || cause.Code == "invalid-statistic" {
+						res.Notes = append(res.Notes, fmt.Sprintf("%s %s: %s (%s side); not compared", g.label(), unit, cause.Message, cause.Side))
+					}
+				}
+			}
+			if len(c.base) == 0 || len(c.newer) == 0 {
+				finish()
+				continue
+			}
+			if len(d.Causes) > 0 {
+				finish()
+				continue
+			}
 			bs := benchmath.NewSample(c.base, th)
 			ns := benchmath.NewSample(c.newer, th)
 			bsum := benchmath.AssumeNothing.Summary(bs, opts.Confidence)
 			nsum := benchmath.AssumeNothing.Summary(ns, opts.Confidence)
 			cmp := benchmath.AssumeNothing.Compare(bs, ns)
+			if !validStatistics(bsum.Center, nsum.Center, cmp.P) {
+				d.Causes = append(d.Causes, Cause{"invalid-statistic", "both", "non-finite center or invalid significance probability"})
+				finish()
+				continue
+			}
+			rows++
 
 			delta := math.NaN()
 			if bsum.Center != 0 {
@@ -359,9 +484,12 @@ func CompareProjected(base, newer []*benchfmt.Result, opts Options, values func(
 			// at zero, but a positive cost where there was none clears every
 			// finite relative floor; presentation keeps that delta undefined.
 			significant := cmp.P < opts.Alpha
-			worse := higherIsWorse[unit] && nsum.Center > bsum.Center
+			definition, _ := metric.Lookup(unit)
+			worse := definition.HigherIsWorse && nsum.Center > bsum.Center
 			magnitude := (bsum.Center == 0 && nsum.Center > 0) || math.Abs(delta) >= opts.ThresholdPct
 			regression := significant && worse && magnitude
+			d.Compared, d.Regression = true, regression
+			finish()
 
 			tk := tkey{g.config, unit}
 			t := tables[tk]
@@ -370,13 +498,15 @@ func CompareProjected(base, newer []*benchfmt.Result, opts Options, values func(
 				tables[tk] = t
 			}
 			t.Rows = append(t.Rows, Row{
+				BasePackage: d.BasePackage, NewPackage: d.NewPackage,
+				Package: d.Package, Recording: d.Recording, Label: d.Label,
 				Name:       g.name,
 				Base:       bsum,
 				New:        nsum,
 				Cmp:        cmp,
 				DeltaPct:   delta,
 				Regression: regression,
-				Gated:      opts.GateUnits[unit],
+				Gated:      d.Requested,
 				Warnings:   collectWarnings(bsum.Warnings, nsum.Warnings, cmp.Warnings),
 			})
 		}
@@ -390,18 +520,40 @@ func CompareProjected(base, newer []*benchfmt.Result, opts Options, values func(
 		// exception — it reports internally inconsistent provenance, an
 		// integrity signal that stands regardless of whether anything
 		// compared.
-		if rows == 0 {
+		common := false
+		for _, c := range g.cells {
+			if len(c.base) > 0 && len(c.newer) > 0 {
+				common = true
+			}
+		}
+		if rows == 0 && !common && len(blockers) == 0 {
 			res.Notes = append(res.Notes, fmt.Sprintf("%s: no metric unit present on both sides; not compared", g.label()))
-			res.NoCommonUnit++
-			if hasCondNote && (g.baseConds.mixed || g.newConds.mixed) {
+			if g.recordingAudit == nil && hasCondNote && (g.baseConds.mixed || g.newConds.mixed) {
 				res.Notes = append(res.Notes, condNote)
 			}
-		} else if hasCondNote {
+		} else if g.recordingAudit == nil && (rows > 0 || (len(blockers) > 0 && g.hasBase && g.hasNew)) && hasCondNote {
 			res.Notes = append(res.Notes, condNote)
 		}
-		res.Notes = append(res.Notes, g.auditNotes()...)
+		if g.recordingAudit == nil && g.hasBase && g.hasNew {
+			res.Notes = append(res.Notes, g.auditNotes()...)
+		}
+	}
+	var locations []string
+	for location := range recordingAudits {
+		locations = append(locations, location)
+	}
+	sort.Strings(locations)
+	for _, location := range locations {
+		audit := recordingAudits[location]
+		if audit.hasBase && audit.hasNew {
+			if note, ok := audit.conditionsNote(); ok {
+				res.Notes = append(res.Notes, note)
+			}
+			res.Notes = append(res.Notes, audit.auditNotes()...)
+		}
 	}
 
+	res.deriveLegacyCounts()
 	res.Tables = make([]*Table, 0, len(tables))
 	for _, t := range tables {
 		res.Tables = append(res.Tables, t)
@@ -422,24 +574,22 @@ func CompareProjected(base, newer []*benchfmt.Result, opts Options, values func(
 // label names a benchmark in a note, qualifying it with its config when present
 // so cross-config notes are unambiguous.
 func (g *group) label() string {
-	if g.config == "" {
-		return g.name
+	name := g.name
+	if pkg := packageLabel(g.packageName, g.basePackage, g.newPackage); pkg != "" {
+		name = pkg + "." + name
 	}
-	return g.name + " [" + g.config + "]"
+	if g.variantLabel != "" {
+		name += " label=" + g.variantLabel
+	}
+	if g.config == "" {
+		return name
+	}
+	return name + " [" + g.config + "]"
 }
 
 func (g *group) guardNote() (string, bool) {
-	for _, key := range compareGuards {
-		base, newer := g.baseGuards[key], g.newGuards[key]
-		if base.mixed || newer.mixed {
-			return fmt.Sprintf("%s: mixed %s values within a side; not compared", g.label(), key), true
-		}
-		if base.missing || newer.missing || !base.seen || !newer.seen {
-			return fmt.Sprintf("%s: missing %s provenance; not compared", g.label(), key), true
-		}
-		if base.value != newer.value {
-			return fmt.Sprintf("%s: %s mismatch (base=%s new=%s); not compared", g.label(), key, base.value, newer.value), true
-		}
+	if causes := g.guardCauses(); len(causes) > 0 {
+		return fmt.Sprintf("%s: %s; not compared", g.label(), causes[0].Message), true
 	}
 	return "", false
 }
@@ -451,28 +601,7 @@ func (g *group) guardNote() (string, bool) {
 // a guard (REQ-pew-runconditions-provenance). Both sides lacking the line entirely is silent: there is
 // nothing recorded to disagree about.
 func (g *group) conditionsNote() (string, bool) {
-	base, newer := g.baseConds, g.newConds
-	if base.mixed || newer.mixed {
-		side := "base"
-		if !base.mixed {
-			side = "new"
-		}
-		return fmt.Sprintf("%s: mixed %s within the %s side", g.label(), run.KeyRunConditions.Display, side), true
-	}
-	baseHas := base.seen && !base.missing
-	newHas := newer.seen && !newer.missing
-	switch {
-	case !baseHas && !newHas:
-		return "", false
-	case !baseHas:
-		return fmt.Sprintf("%s: %s unrecorded on base side (new: %s)", g.label(), run.KeyRunConditions.Display, newer.value), true
-	case !newHas:
-		return fmt.Sprintf("%s: %s unrecorded on new side (base: %s)", g.label(), run.KeyRunConditions.Display, base.value), true
-	}
-	if conditionsDiffer(base.value, newer.value) {
-		return fmt.Sprintf("%s: %s differ (base: %s; new: %s)", g.label(), run.KeyRunConditions.Display, base.value, newer.value), true
-	}
-	return "", false
+	return auditNote(g.label(), run.KeyRunConditions.Display, g.baseConds, g.newConds, conditionsDiffer)
 }
 
 // conditionCategoricalFields are the recorded run-condition fields whose
@@ -511,33 +640,112 @@ var auditNoteKeys = func() []run.RecordingKey {
 func (g *group) auditNotes() []string {
 	var notes []string
 	for _, k := range auditNoteKeys {
-		base, newer := g.baseAudit[k.Name], g.newAudit[k.Name]
-		name := k.Display
-		baseMixed := base.mixed || (base.seen && base.missing && base.value != "")
-		newMixed := newer.mixed || (newer.seen && newer.missing && newer.value != "")
-		if baseMixed || newMixed {
-			switch {
-			case baseMixed && newMixed:
-				notes = append(notes, fmt.Sprintf("%s: mixed %s within both sides", g.label(), name))
-			case baseMixed:
-				notes = append(notes, fmt.Sprintf("%s: mixed %s within the base side", g.label(), name))
-			default:
-				notes = append(notes, fmt.Sprintf("%s: mixed %s within the new side", g.label(), name))
-			}
-			continue
-		}
-		baseValue, newValue := base.value, newer.value
-		if !base.seen || baseValue == "" {
-			baseValue = "(none)"
-		}
-		if !newer.seen || newValue == "" {
-			newValue = "(none)"
-		}
-		if baseValue != newValue {
-			notes = append(notes, fmt.Sprintf("%s: %s differ (base: %s; new: %s)", g.label(), name, baseValue, newValue))
+		if note, ok := auditNote(g.label(), k.Display, g.baseAudit[k.Name], g.newAudit[k.Name], func(a, b string) bool { return a != b }); ok {
+			notes = append(notes, note)
 		}
 	}
 	return notes
+}
+
+// recordAudit folds the same evidence for either a stored recording or a
+// transient result group. It has no numerical matching or obligation semantics.
+func (g *group) recordAudit(r *benchfmt.Result, value func(string) string, isBase bool) {
+	conditions, audits := &g.newConds, &g.newAudit
+	if isBase {
+		conditions, audits = &g.baseConds, &g.baseAudit
+	}
+	*conditions = recordGuard(*conditions, r.GetConfig(run.KeyRunConditions.Name))
+	if *audits == nil {
+		*audits = map[string]guardValue{}
+	}
+	for _, key := range auditNoteKeys {
+		(*audits)[key.Name] = recordGuard((*audits)[key.Name], value(key.Name))
+	}
+}
+
+func auditNote(label, name string, base, newer guardValue, differ func(string, string) bool) (string, bool) {
+	bm, nm := base.mixed || (base.seen && base.missing), newer.mixed || (newer.seen && newer.missing)
+	if bm || nm {
+		side := "both sides"
+		if !nm {
+			side = "the base side"
+		}
+		if !bm {
+			side = "the new side"
+		}
+		return fmt.Sprintf("%s: mixed %s within %s", label, name, side), true
+	}
+	b, n := base.seen && !base.missing, newer.seen && !newer.missing
+	if !b && !n {
+		return "", false
+	}
+	if !b {
+		return fmt.Sprintf("%s: %s differ (base: (none); new: %s); %s unrecorded on base side", label, name, newer.value, name), true
+	}
+	if !n {
+		return fmt.Sprintf("%s: %s differ (base: %s; new: (none)); %s unrecorded on new side", label, name, base.value, name), true
+	}
+	if differ(base.value, newer.value) {
+		return fmt.Sprintf("%s: %s differ (base: %s; new: %s)", label, name, base.value, newer.value), true
+	}
+	return "", false
+}
+
+func (g *group) conditionCauses() []Cause {
+	b, n := g.baseConds, g.newConds
+	var causes []Cause
+	for _, side := range []struct {
+		name  string
+		value guardValue
+	}{{"base", b}, {"new", n}} {
+		v := side.value
+		if v.mixed || (v.seen && v.missing) {
+			causes = append(causes, Cause{"conditions", side.name, "mixed run conditions"})
+			continue
+		}
+		if !v.seen || v.missing {
+			causes = append(causes, Cause{"conditions", side.name, "run conditions unrecorded"})
+			continue
+		}
+		fields := conditionCategorical(v.value)
+		for _, f := range conditionCategoricalFields {
+			if !run.KnownConditionValue(f, fields[f]) {
+				causes = append(causes, Cause{"conditions", side.name, f + " is unknown, malformed, or mixed"})
+			}
+		}
+	}
+	bv, nv := conditionCategorical(b.value), conditionCategorical(n.value)
+	for _, f := range conditionCategoricalFields {
+		if b.seen && n.seen && !b.mixed && !n.mixed && !b.missing && !n.missing && run.KnownConditionValue(f, bv[f]) && run.KnownConditionValue(f, nv[f]) && bv[f] != nv[f] {
+			causes = append(causes, Cause{"conditions", "both", fmt.Sprintf("%s differs (base: %s; new: %s)", f, bv[f], nv[f])})
+		}
+	}
+	return causes
+}
+
+func (g *group) guardCauses() []Cause {
+	var causes []Cause
+	for _, key := range compareGuards {
+		b, n := g.baseGuards[key], g.newGuards[key]
+		sides := []struct {
+			name string
+			v    guardValue
+		}{{"base", b}, {"new", n}}
+		for _, s := range sides {
+			if s.v.mixed {
+				causes = append(causes, Cause{"guard", s.name, "mixed " + key + " provenance"})
+			}
+		}
+		for _, s := range sides {
+			if s.v.missing || !s.v.seen {
+				causes = append(causes, Cause{"guard", s.name, "missing " + key + " provenance"})
+			}
+		}
+		if b.seen && n.seen && !b.mixed && !n.mixed && !b.missing && !n.missing && b.value != n.value {
+			causes = append(causes, Cause{"guard", "both", key + " mismatch"})
+		}
+	}
+	return causes
 }
 
 // conditionsDiffer compares two recorded `pew-runconditions` values on their
@@ -577,21 +785,22 @@ func conditionCategorical(value string) map[string]string {
 			continue
 		}
 		seen[key] = true
-		out[key] = v
+		if run.KnownConditionValue(key, v) || (key == "governor" && v == "mixed") {
+			out[key] = v
+		}
 	}
 	return out
 }
 
-// unitOrder is the preferred display order; unknown units follow alphabetically.
-var unitOrder = []string{"sec/op", "B/op", "allocs/op"}
-
+// unitRank uses the metric registry's display order; unknown units follow it.
 func unitRank(u string) int {
-	for i, known := range unitOrder {
-		if u == known {
-			return i
-		}
-	}
-	return len(unitOrder)
+	return metric.Rank(u)
+}
+
+// validStatistics admits the arithmetic results separately from their finite
+// input samples. Neither a library overflow nor a NaN probability is evidence.
+func validStatistics(base, newer, p float64) bool {
+	return metric.Finite(base) && metric.Finite(newer) && metric.Finite(p) && p >= 0 && p <= 1
 }
 
 func sortUnits(units []string) []string {
@@ -673,10 +882,20 @@ func (r *Result) WriteText(w io.Writer) error {
 			base := benchunit.Scale(row.Base.Center, cls) + " ± " + row.Base.PctRangeString()
 			newv := benchunit.Scale(row.New.Center, cls) + " ± " + row.New.PctRangeString()
 			delta := row.Cmp.FormatDelta(row.Base.Center, row.New.Center) + " (" + row.Cmp.String() + ")"
+			if !metric.Finite(row.DeltaPct) {
+				delta = "undefined (" + row.Cmp.String() + ")"
+			}
 			if row.Regression {
 				delta += "  ⚠ regression"
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", row.Name, base, newv, delta)
+			name := row.Name
+			if pkg := packageLabel(row.Package, row.BasePackage, row.NewPackage); pkg != "" {
+				name = pkg + "." + name
+			}
+			if row.Label != "" {
+				name += " label=" + row.Label
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", name, base, newv, delta)
 		}
 		if err := tw.Flush(); err != nil {
 			return err

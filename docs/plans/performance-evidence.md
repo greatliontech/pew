@@ -36,14 +36,14 @@
   - [x] 7.1 Triage encoding ownership and derive the benchmark-format envelope around gofresh's native fingerprint record, keeping pew-owned facts separate and settling the clean format cutover before writing it.
   - [x] 7.2 Replace parallel fingerprint encoding with one admitted payload and derived display/comparison projections; preserve source/guard/purity/observation evidence, closed keys, chunk bounds and regeneration-only handling.
   - [x] 7.3 Verify exact round trips, malformed and inconsistent evidence refusal, oversized metadata and interrupted replacement; complete gates, mutations and review, retire the encoding issue, commit and push.
-- [ ] 8. Complete invocation-owned evidence and observed freshness in pew.
+- [x] 8. Complete invocation-owned evidence and observed freshness in pew.
   - [x] 8.1 Triage verdict/vouch duplication, strategy-report evidence and the outstanding movement witnesses against the shared completion and encoding contracts.
   - [x] 8.2 Bind environment, store/vouches and preparation resources to one invocation; share immutable analysis facts while giving every arm its own capture, attachment, validation and publication transaction.
   - [x] 8.3 Unify recording admission and verdict derivation; select observed capture/checking only with supported completion premises, retain unsupported observation evidence as incomplete/unverifiable while deriving final verdicts under ordinary guards and explicit purity, and preserve inert test growth's justified applicability transformation.
-  - [ ] 8.4 Verify source/runtime-input movement, proof rejection, old-record non-upgrade, sibling isolation and every verdict surface; complete gates and mutation evidence, converge review, close resolved issues, commit and push.
+  - [x] 8.4 Verify source/runtime-input movement, proof rejection, old-record non-upgrade, sibling isolation and every verdict surface; complete gates and mutation evidence, converge review, close resolved issues, commit and push.
 - [ ] 9. Supply complete and auditable comparison policies.
-  - [ ] 9.1 Triage comparison and rendering issues; specify requested benchmark/unit coverage, missing or skipped comparisons, condition compatibility and freshness admission separately from informational comparison, obtaining consent for any breaking default change.
-  - [ ] 9.2 Implement shared metric definitions, typed coverage/disposition reporting and enforceable comparison policies, including non-finite samples and zero-baseline metrics, with text/JSON parity.
+  - [x] 9.1 Triage comparison and rendering issues; specify requested benchmark/unit coverage, missing or skipped comparisons, condition compatibility and freshness admission separately from informational comparison, obtaining consent for any breaking default change.
+  - [x] 9.2 Implement shared metric definitions, typed coverage/disposition reporting and enforceable comparison policies, including non-finite samples and zero-baseline metrics, with text/JSON parity.
   - [ ] 9.3 Verify partial/empty/new/missing-arm cases and condition mismatches, run gates and mutations, converge review, commit and push.
 - [ ] 10. Add provenance-bound profile capture and subject attribution.
   - [ ] 10.1 Triage profile-companion requirements and specify CPU/allocation capture, integrity, ownership, persistence, attribution and failure behavior under the evidence contract, using the approved github.com/google/pprof/profile dependency.

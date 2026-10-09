@@ -73,10 +73,13 @@ func TestGuardPrecedenceIsTableOrder(t *testing.T) {
 		auditSet("BenchmarkX-8", map[string]string{run.KeyMachine.Name: "m2", run.KeyToolchain.Name: "go2"}, map[string][]float64{"sec/op": seq(1100, 8)}),
 		DefaultOptions(),
 	)
-	if len(res.Notes) != 1 || !strings.Contains(res.Notes[0], "toolchain mismatch (base=go1 new=go2)") {
+	if len(res.Notes) != 1 || !strings.Contains(res.Notes[0], "toolchain mismatch") {
 		t.Fatalf("notes = %v, want the toolchain mismatch named first", res.Notes)
 	}
 	if strings.Contains(res.Notes[0], "machine") {
 		t.Fatalf("note names the later guard: %q", res.Notes[0])
+	}
+	if strings.Contains(res.Notes[0], "go1") || strings.Contains(res.Notes[0], "go2") {
+		t.Fatalf("ordinary note exposes internal guard values: %q", res.Notes[0])
 	}
 }

@@ -29,13 +29,13 @@ func main() {
 // --fail-on-regression empty-comparison failure exits 2, so a CI consumer can
 // tell "measured and regressed" from "measured nothing".
 func exitCode(err error) int {
-	var empty *nothingComparedError
-	if errors.As(err, &empty) {
-		return 2
-	}
 	var stopped *interruptedError
 	if errors.As(err, &stopped) {
 		return 130
+	}
+	var empty *nothingComparedError
+	if errors.As(err, &empty) {
+		return 2
 	}
 	return 1
 }

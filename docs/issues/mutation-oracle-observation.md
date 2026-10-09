@@ -54,6 +54,15 @@ Earlier incomplete selections also require reconciliation at the final gate:
   deadline; the enclosing 30-minute shell deadline terminated it. Shared
   deadline/close-out work is tracked in gomutant
   `docs/issues/campaign-silent-past-its-deadline.md`.
+- Metric-registry campaign `a6d4f75aaf58cae4` used
+  `gomutant run --changed HEAD --symbol github.com/greatliontech/pew/internal/metric.* --budget 4 --jobs 4 --timeout 30m --analysis-budget 30s`.
+  It selected 5 metric functions with their full derived oracles. The
+  freshness-proof pass left 332 subjects unproven; the command deadline
+  arrived while still in baseline work, with no committed measurement.
+  The non-registry delta was not selected. This bounded attempt establishes
+  neither exhaustive coverage nor a passing campaign; the unmeasured
+  remainder stays at chunk 12 with the existing shared-coverage repair
+  and sound remeasurement requirement.
 
 ## Required resolution
 

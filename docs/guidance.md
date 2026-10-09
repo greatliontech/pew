@@ -87,9 +87,12 @@ to re-measure.
 - `alpha` — finite significance level for the Mann-Whitney U test (default 0.05); outside (0,1) refuses.
 - `threshold` — finite regression magnitude floor, in percent (default 3); negative refuses, zero means any significant worse change regresses — legitimate, noisier; a significant zero-to-positive cost clears every finite floor while its percentage remains undefined.
 - `confidence` — finite confidence level for summary intervals (default 0.95); outside (0,1) refuses.
-- `fail-on-regression` — exit non-zero if a gated metric regresses; an empty comparison then exits 2, so a CI consumer can tell measured-and-regressed from measured-nothing.
+- `fail-on-regression` — exit 1 if an eligible gated metric regresses; otherwise empty eligible evidence or unsatisfied complete coverage exits 2. Interruption exits 130 ahead of either. Partial clean coverage still passes by default.
+- `coverage` — partial accepts a nonempty clean eligible subset; complete requires every requested benchmark/unit obligation (default partial). Inventory includes current declarations for working-tree comparisons and recorded identities from both sides; historical comparisons claim only recorded coverage, never unrecorded historical declarations.
+- `freshness` — report ordinary working-tree freshness warnings, or require proven valid working-tree evidence for gate eligibility; historical sides are not applicable (default report). Admitted numerical comparisons remain visible.
+- `conditions` — report conditions, or require compatible known equal governor, turbo, throttled and battery values for gate eligibility; unknown is not proven compatible and load1 remains context (default report). Neither fingerprint nor grouping changes.
 - `explain` — lay out the values behind a one-word skip or warning: a comparison key whose two sides disagree on a guard prints both sides' recorded values naming the moving guard, and a working-tree recording warned non-valid prints its recorded-vs-current explanation; mutually exclusive with the JSON view.
-- `json` — one JSON object per comparison row, note, or empty-comparison marker; the field names are public surface and stable, and internal values (guard digests, closure hashes) are deliberately excluded — they belong to the explanation view.
+- `json` — one JSON object per comparison row, note, or empty-comparison marker; notes include additive code/details for dispositions and coverage. Both views report the same omissions and policies; internal values (guard digests, closure hashes) are deliberately excluded — they belong to the explanation view.
 - `gate` — comma-separated units whose regression fails the build: sec/op, B/op, allocs/op (default sec/op).
 - `vouch` — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), a one-off acceptance extending the store's reviewed `vouches` file (one entry per line at the store root; the standing set every judged verb reads); the same acceptance set run records.
 **when:** use stat as the comparison of record — it runs nothing,
@@ -146,7 +149,7 @@ comparison against a ref, writable-repository and crash-safe, whose
 output is never a stat baseline; gc removes recordings for
 benchmarks that left the code, refusing to act on anything unread.
 Errors — a detected regression included — exit 1; the
-fail-on-regression empty-comparison case exits 2, so a CI consumer
+fail-on-regression empty-eligible or incomplete-required-coverage case exits 2, so a CI consumer
 can tell measured-and-regressed from measured-nothing. The guidance
 verb serves any verb's full section — knobs, when-to-use, example —
 from the tool's own embedded document.
