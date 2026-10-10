@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-pew-comparison-policies"
+reason: "The enforcing command currently inherits informational partial/report/report defaults. The approved gate contract requires complete/require/compatible defaults with explicit exceptions and preserved numerical comparison and exit precedence."
+content_hash: "88d27548d347532357b551796daeaeadc68251e7793b3082a3277904ff87eacf"
+source_hash: "dcd3d0abdf76ddd7739a50ae7c160c3c6547b93c74dd9aac6b2fe78d19e0f013"
+lands { manual { condition: "Enforcing defaults and explicit exceptions are admitted distinctly on the CLI and reports, with missing-both-side, stale/unknown evidence, conditions, scope and exit-precedence regressions; informational comparisons remain available." contradicted: true } }

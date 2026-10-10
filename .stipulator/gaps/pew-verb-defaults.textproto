@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-pew-verb-defaults"
+reason: "The comparison row now distinguishes informational defaults from enforcing complete/require/compatible defaults; current command defaults have not yet adopted that contextual resolution."
+content_hash: "bcb35644e57b02e13a647cf5066377567465a740f2e2683403b3f954e1fd8b5d"
+source_hash: "071200f55d22e33be59971a77edd0f3dc44df6525f66c3e1a61b6c0316fc8f99"
+lands { manual { condition: "The verb-default table and command admission agree on both informational and enforcing modes, including explicit policy overrides and rendered effective defaults." contradicted: true } }

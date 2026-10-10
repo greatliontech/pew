@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-pew-regression-gate"
+reason: "The enforcing command currently inherits informational partial/report/report defaults. The approved gate contract requires complete/require/compatible defaults with explicit exceptions and preserved numerical comparison and exit precedence."
+content_hash: "fa67e6a062b5bb8c5d757e606fdf5eb57128a41c9a877e2fd6a65c8820c7e780"
+source_hash: "fa2b4ae50b265b9d8b5a5816c04246c99ea2f4373204a61ca6fe52c4a22b15ff"
+lands { manual { condition: "Enforcing defaults and explicit exceptions are admitted distinctly on the CLI and reports, with missing-both-side, stale/unknown evidence, conditions, scope and exit-precedence regressions; informational comparisons remain available." contradicted: true } }

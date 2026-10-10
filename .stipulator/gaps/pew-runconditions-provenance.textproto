@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-pew-runconditions-provenance"
+reason: "The enforcing command currently inherits informational partial/report/report defaults. The approved gate contract requires complete/require/compatible defaults with explicit exceptions and preserved numerical comparison and exit precedence."
+content_hash: "1ad2b66594f24231a9394d50b613aea8ad0565a80ed54138018c9499567a73e1"
+source_hash: "0c510b31f1f71e0baf92e9d09b0e86d693f18ff1cdd1adbe8bced0165eba5a96"
+lands { manual { condition: "Enforcing defaults and explicit exceptions are admitted distinctly on the CLI and reports, with missing-both-side, stale/unknown evidence, conditions, scope and exit-precedence regressions; informational comparisons remain available." contradicted: true } }

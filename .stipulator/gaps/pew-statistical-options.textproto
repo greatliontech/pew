@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-pew-statistical-options"
+reason: "Displayed confidence is currently an independent ordinary option rather than derived from alpha. The control migration must establish ordinary confidence derivation, preserve numerical admission, and retain independent confidence only for a supported diagnostic workflow."
+content_hash: "81d027b4ffa06f31668bf6b4e4fa192d7f68928299cfd51b010ef3894dd621d8"
+source_hash: "5f49a9a82408d7ee9ca1941acc0f7f4a0334d5b63c27a7ad1ad8d9caf8331831"
+lands { manual { condition: "The statistical control migration derives ordinary confidence from alpha and verifies numeric limits, rendered intervals and unchanged significance/magnitude/gate authority, with any retained expert interval explicitly scoped." contradicted: true } }
