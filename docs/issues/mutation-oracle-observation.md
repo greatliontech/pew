@@ -14,12 +14,16 @@ Do not weaken or exclude integration tests, or add purity vouches, to obtain a
 reusable verdict or a passing campaign.
 
 Gomutant's parent `-coverprofile` does not collect a self-reexecuted child's
-counters. When other test batches reach the target, narrowing can incorrectly
-use the missing child counters as negative coverage and exempt a mandatory
-subprocess testcase. The shared coverage model needs its own design fix before
-this selection can support a final mutation judgment. The owning-tool issue is
-gomutant `docs/issues/child-coverage-cannot-authorize-negative-exemptions.md`,
-slotted before the performance-evidence chunk 12 final mutation gate.
+counters. A mixed parent-coverage partition therefore cannot justify omitting
+a mandatory subprocess testcase. The governing boundaries are gomutant's
+`docs/specs/execution.md` (`REQ-exec-oracle-run`) and `docs/specs/results.md`
+(`REQ-result-stale`): complete-oracle measurements carry
+`oracleExecutionPolicy: gomutant/full-oracle@1`, and legacy body records without
+supported policy require whole remeasurement rather than retaining scores
+through a serve or partial extension. The final gate needs an installed tool
+enforcing those contracts. Historical campaign results below remain incomplete
+or affected until sound remeasurement; a shared-tool fix is not itself that
+measurement. Any future optimized narrowing needs independent execution authority.
 
 ## Outstanding campaign evidence
 
