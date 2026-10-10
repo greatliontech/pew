@@ -55,7 +55,8 @@
   - [ ] 11.3 Complete gates and mutation evidence, converge review, retire resolved profile/A-B issues and cross-tool references, commit and push.
 - [ ] 12. Close the complete performance-evidence workflow.
   - [ ] 12.1 Triage remaining clean-baseline, per-arm noise-floor, machine-readable/progress and cross-tool items against implemented capabilities; retain only justified, checkably triggered deferrals.
-    - [ ] Repair shared negative-coverage admission for self-reexecuting child oracles and remeasure affected survivor records before the final mutation gate.
+    - [x] Install the shared complete-oracle cutoff for unsupported negative coverage, including self-reexecuting children and historical evidence admission.
+    - [ ] Remeasure affected survivor records under the repaired oracle before the final mutation gate.
     - [ ] Enforce observation-premise isolation with generated producer-boundary evidence and close its invariant-coverage gap before final verification.
   - [ ] 12.2 Reconcile canonical guidance with the complete measurement/profile/comparison workflow and settle final format numbering after the schema is stable, preserving provenance and supported evidence classes.
   - [ ] 12.3 Run the applicable final gates and mutation campaign, converge review, close issues and the plan, commit and push, then install only the clean committed tool.
