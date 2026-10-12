@@ -106,7 +106,7 @@ func TestABAlwaysCapturesAllocations(t *testing.T) {
 	ac := abConfig{
 		bench: ".", count: 1, ref: "HEAD",
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{} },
-		build:    func(string, []string, []string) error { return nil },
+		build:    fixtureABBuild,
 		execute: func(execDir, pin string, env []string, bin string, args []string) ([]byte, error) {
 			runs++
 			for _, a := range args {
@@ -114,7 +114,7 @@ func TestABAlwaysCapturesAllocations(t *testing.T) {
 					withBenchmem++
 				}
 			}
-			return []byte("BenchmarkWork-8 1000 90 ns/op 8 B/op 1 allocs/op\n"), nil
+			return []byte("BenchmarkWork-8 1000 90 ns/op 8 B/op 1 allocs/op\nPASS\n"), nil
 		},
 	}
 	var out, errOut bytes.Buffer

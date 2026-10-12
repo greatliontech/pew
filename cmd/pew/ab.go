@@ -26,6 +26,8 @@ import (
 // abConfig carries pew ab's seams, mirroring runConfig's: tests observe
 // build/execute ordering without real toolchain work.
 type abConfig struct {
+	closingBound              time.Duration
+	closingContext            func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 	diagnostic                func(context.Context, string, string, gotool.Environment, string, []string, io.Writer) ([]byte, error)
 	profile, profileBenchtime string
 	jsonOut                   bool
@@ -336,7 +338,8 @@ type abPreparation struct {
 	rows             [2][]*benchfmt.Result
 	pkg              pkgMeta
 	reference        pkgMeta
-	tmp, binA, binB  string
+	tmp              string
+	executables      [2]retainedExecutable
 	guardsA, guardsB guard.Guards
 	harnessArgs      [2][]string
 	selected         [2][]string
@@ -383,8 +386,7 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 		return nil, err
 	}
 	prep.tmp = tmp
-	prep.binA = filepath.Join(tmp, "a.test")
-	prep.binB = filepath.Join(tmp, "b.test")
+	binaries := [2]string{filepath.Join(tmp, "a.test"), filepath.Join(tmp, "b.test")}
 	beforeA, err := gitblob.Snapshot(p.Module.Dir)
 	if err != nil {
 		return prep, err
@@ -425,7 +427,7 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 		relTarget = "./" + filepath.ToSlash(pkgRelToModule)
 	}
 	buildEnvs := [2]gotool.Environment{env, env}
-	buildArgs := [2][]string{{"test", "-c", "-o", prep.binA, relTarget}, {"test", "-c", "-o", prep.binB, relTarget}}
+	buildArgs := [2][]string{{"test", "-c", "-o", binaries[0], relTarget}, {"test", "-c", "-o", binaries[1], relTarget}}
 	for i, side := range prep.diagnostics {
 		if side == nil {
 			continue
@@ -438,10 +440,7 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 		if err != nil {
 			return prep, err
 		}
-		output := prep.binA
-		if i == 1 {
-			output = prep.binB
-		}
+		output := binaries[i]
 		buildArgs[i] = append([]string{"test", "-c", "-o", output}, description.Flags...)
 		buildArgs[i] = append(buildArgs[i], description.Package)
 	}
@@ -450,6 +449,12 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 	}
 	if err := ac.buildBinary(ctx, sideBModule, buildEnvs[1], buildArgs[1]); err != nil {
 		return prep, fmt.Errorf("ab: building side B (%s): %w", ac.ref, err)
+	}
+	for i, path := range binaries {
+		prep.executables[i], err = retainExecutable(ctx, path)
+		if err != nil {
+			return prep, err
+		}
 	}
 	// Guards are captured at build time, not after measurement: the stamp
 	// claims the BUILD identity of the two standing binaries, and the
@@ -558,7 +563,7 @@ func abGuardsAgree(importPath, ref string, a, b guard.Guards) error {
 }
 
 func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPreparation, index, total int, envs environments) error {
-	p, sideBPkgDir, binA, binB, guardsA, guardsB := prep.pkg, prep.reference.Dir, prep.binA, prep.binB, prep.guardsA, prep.guardsB
+	p, sideBPkgDir, guardsA, guardsB := prep.pkg, prep.reference.Dir, prep.guardsA, prep.guardsB
 	// Both sides measure under the pinned environment. Builds use the analysis
 	// environment; the reference runtime guard describes this measured one.
 	runtimeEnv := envs.measured()
@@ -585,39 +590,85 @@ func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPrep
 		if ctx.Err() != nil {
 			return stopped()
 		}
+		if err := prep.executables[0].check(ctx); err != nil {
+			return fmt.Errorf("ab: side A iteration %d: %w", i+1, err)
+		}
 		reportPhase(ctx, fmt.Sprintf("comparing %s (%d/%d) iteration %d/%d", p.ImportPath, index, total, i+1, ac.count))
 		// A cancellation landing inside a side's process is the
 		// interruption too: the process under measurement is killed and
 		// the pair in flight is lost, the artifact holding the rest.
-		a, err := ac.executeBinary(ctx, p.Dir, ac.pin.List(), runtimeEnv, binA, argsA)
+		a, err := ac.executeBinary(ctx, p.Dir, ac.pin.List(), runtimeEnv, prep.executables[0].path, argsA)
 		if cancelledBy(ctx, err) {
 			return stopped()
 		}
 		if err != nil {
 			return fmt.Errorf("ab: side A iteration %d: %w", i+1, err)
+		}
+		if !run.HarnessCompleted(a) {
+			return fmt.Errorf("ab: side A iteration %d: benchmark harness completion missing", i+1)
 		}
 		streamA, err := admitABStream(errw, a, p.ImportPath, ac.bench, prep.selected[0])
 		if err != nil {
 			return fmt.Errorf("ab: side A iteration %d: %w", i+1, err)
 		}
-		b, err := ac.executeBinary(ctx, sideBPkgDir, ac.pin.List(), runtimeEnv, binB, argsB)
+		if ctx.Err() != nil {
+			return stopped()
+		}
+		if err := prep.executables[1].check(ctx); err != nil {
+			return fmt.Errorf("ab: side B iteration %d: %w", i+1, err)
+		}
+		b, err := ac.executeBinary(ctx, sideBPkgDir, ac.pin.List(), runtimeEnv, prep.executables[1].path, argsB)
 		if cancelledBy(ctx, err) {
 			return stopped()
 		}
 		if err != nil {
 			return fmt.Errorf("ab: side B iteration %d: %w", i+1, err)
 		}
-		streamB, err := admitABStream(errw, b, prep.reference.ImportPath, ac.bench, prep.selected[1])
-		if err != nil {
-			return fmt.Errorf("ab: side B iteration %d: %w", i+1, err)
+		bound := ac.closingBound
+		if bound == 0 {
+			bound = armWriteGateBound
 		}
-		// The artifact is written incrementally, one rewrite per
-		// completed pair, so an interrupted comparison keeps every
-		// iteration it finished (spec REQ-pew-unit-persistence).
-		if ac.artifact != nil {
-			if err := ac.artifact.pair(p.ImportPath, ac.ref, i+1, streamA, streamB); err != nil {
-				return err
+		beginClosing := ac.closingContext
+		if beginClosing == nil {
+			beginClosing = func(ctx context.Context, bound time.Duration) (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.WithoutCancel(ctx), bound)
 			}
+		}
+		gate, cancel := beginClosing(ctx, bound)
+		streamB, err := func() (abStream, error) {
+			defer cancel()
+			reportPhase(gate, fmt.Sprintf("finalizing %s pair %d/%d", p.ImportPath, i+1, ac.count))
+			if !run.HarnessCompleted(b) {
+				return abStream{}, fmt.Errorf("side B benchmark harness completion missing")
+			}
+			for _, executable := range prep.executables {
+				if err := executable.check(gate); err != nil {
+					return abStream{}, err
+				}
+			}
+			streamB, err := admitABStream(errw, b, prep.reference.ImportPath, ac.bench, prep.selected[1])
+			if err != nil {
+				return abStream{}, fmt.Errorf("side B: %w", err)
+			}
+			if err := gate.Err(); err != nil {
+				return abStream{}, err
+			}
+			if ac.artifact != nil {
+				reportPhase(gate, fmt.Sprintf("publishing %s pair %d/%d", p.ImportPath, i+1, ac.count))
+				if err := ac.artifact.pairContext(gate, p.ImportPath, ac.ref, i+1, streamA, streamB); err != nil {
+					return abStream{}, err
+				}
+			}
+			return streamB, nil
+		}()
+		if err != nil {
+			if gate.Err() == context.DeadlineExceeded {
+				err = fmt.Errorf("pair closing gate exceeded %s: %w", bound, err)
+			}
+			if ctx.Err() != nil {
+				return errors.Join(stopped(), fmt.Errorf("pair %d measured but not published: %w", i+1, err))
+			}
+			return fmt.Errorf("ab: pair %d closing: %w", i+1, err)
 		}
 		rowsA = append(rowsA, streamA.rows...)
 		rowsB = append(rowsB, streamB.rows...)

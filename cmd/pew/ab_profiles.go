@@ -157,7 +157,7 @@ func captureABProfiles(ctx context.Context, w, errw io.Writer, ac abConfig, prep
 									return err
 								}
 								sideName := []string{"A", "B"}[i]
-								if err := ac.artifact.publishProfile(gate, abBlock{pkg: c.Package, ref: ac.ref, side: sideName, profile: &c}); err != nil {
+								if err := ac.artifact.publishBlocks(gate, abBlock{pkg: c.Package, ref: ac.ref, side: sideName, profile: &c}); err != nil {
 									return err
 								}
 							}

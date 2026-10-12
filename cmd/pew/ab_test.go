@@ -73,7 +73,7 @@ func TestABInterleavesAfterBothSidesBuild(t *testing.T) {
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{} },
 		build: func(buildDir string, env []string, args []string) error {
 			log = append(log, "build")
-			return nil
+			return fixtureABBuild(buildDir, env, args)
 		},
 		execute: func(execDir, pin string, env []string, bin string, args []string) ([]byte, error) {
 			side, ns := "A", 90
@@ -81,7 +81,7 @@ func TestABInterleavesAfterBothSidesBuild(t *testing.T) {
 				side, ns = "B", 100
 			}
 			log = append(log, "run:"+side+":"+execDir)
-			return []byte(fmt.Sprintf("BenchmarkWork-8 1000 %d ns/op\n", ns)), nil
+			return []byte(fmt.Sprintf("BenchmarkWork-8 1000 %d ns/op\nPASS\n", ns)), nil
 		},
 	}
 	var out, errOut bytes.Buffer
@@ -165,7 +165,7 @@ func TestABStampsGuardProvenance(t *testing.T) {
 	base := abConfig{
 		bench: ".", count: 3, ref: "HEAD",
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{} },
-		build:    func(string, []string, []string) error { return nil },
+		build:    fixtureABBuild,
 	}
 
 	shared := base
@@ -175,7 +175,7 @@ func TestABStampsGuardProvenance(t *testing.T) {
 	shared.build = func(buildDir string, env []string, args []string) error {
 		buildDirs = append(buildDirs, buildDir)
 		buildArgs = append(buildArgs, args)
-		return nil
+		return fixtureABBuild(buildDir, env, args)
 	}
 	shared.guards = func(_ context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
 		events = append(events, "guards")
@@ -189,7 +189,7 @@ func TestABStampsGuardProvenance(t *testing.T) {
 		if strings.HasSuffix(bin, "b.test") {
 			ns = 100
 		}
-		return []byte(fmt.Sprintf("BenchmarkWork-8 1000 %d ns/op\n", ns)), nil
+		return []byte(fmt.Sprintf("BenchmarkWork-8 1000 %d ns/op\nPASS\n", ns)), nil
 	}
 	var out, errOut bytes.Buffer
 	if err := runAB(context.Background(), &out, &errOut, shared, []string{"."}); err != nil {
@@ -351,9 +351,9 @@ func TestABSideBPackageKindFromRef(t *testing.T) {
 	ac := abConfig{
 		bench: ".", count: 1, ref: "HEAD",
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{} },
-		build:    func(string, []string, []string) error { return nil },
+		build:    fixtureABBuild,
 		execute: func(execDir, pin string, env []string, bin string, args []string) ([]byte, error) {
-			return []byte("BenchmarkWork-8 1000 100 ns/op\n"), nil
+			return []byte("BenchmarkWork-8 1000 100 ns/op\nPASS\n"), nil
 		},
 		guards: func(_ context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
 			kinds[moduleDir] = mainPkg

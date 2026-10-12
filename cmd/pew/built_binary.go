@@ -15,23 +15,32 @@ import (
 // supplied its build description. Endpoint checks share the same hold-still
 // premise as source validation; they do not authenticate arbitrary executors.
 type builtBinary struct {
+	retainedExecutable
+	binding gofresh.BuildBinding
+}
+
+type retainedExecutable struct {
 	path, digest string
-	binding      gofresh.BuildBinding
 }
 
 func bindBinary(ctx context.Context, snapshot *gofresh.Snapshot, pkg, path string) (*builtBinary, error) {
-	digest, err := executableDigest(ctx, path)
+	executable, err := retainExecutable(ctx, path)
 	if err != nil {
 		return nil, err
 	}
-	binding, err := snapshot.BindBuilt(pkg, digest)
+	binding, err := snapshot.BindBuilt(pkg, executable.digest)
 	if err != nil {
 		return nil, err
 	}
-	return &builtBinary{path: path, digest: digest, binding: binding}, nil
+	return &builtBinary{retainedExecutable: executable, binding: binding}, nil
 }
 
-func (b *builtBinary) check(ctx context.Context) error {
+func retainExecutable(ctx context.Context, path string) (retainedExecutable, error) {
+	digest, err := executableDigest(ctx, path)
+	return retainedExecutable{path: path, digest: digest}, err
+}
+
+func (b retainedExecutable) check(ctx context.Context) error {
 	digest, err := executableDigest(ctx, b.path)
 	if err != nil {
 		return err

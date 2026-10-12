@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,11 +22,23 @@ func abConfigStub(worktreeDir string) abConfig {
 	return abConfig{
 		bench: ".", count: 1, ref: "HEAD", worktreeDir: worktreeDir,
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{} },
-		build:    func(string, []string, []string) error { return nil },
+		build:    fixtureABBuild,
 		execute: func(execDir, pin string, env []string, bin string, args []string) ([]byte, error) {
-			return []byte("BenchmarkWork-8 1000 90 ns/op\n"), nil
+			return []byte("BenchmarkWork-8 1000 90 ns/op\nPASS\n"), nil
 		},
 	}
+}
+
+// Unit-control fixtures mock execution, but still supply a concrete build
+// artifact whose identity can be checked. Native execution witnesses use the
+// actual builder and executor instead.
+func fixtureABBuild(_ string, _ []string, args []string) error {
+	for i, arg := range args {
+		if arg == "-o" && i+1 < len(args) {
+			return os.WriteFile(args[i+1], []byte("fixture executable"), 0700)
+		}
+	}
+	return fmt.Errorf("fixture build received no output path")
 }
 
 // --worktree-dir places side B's worktree and both binaries in the
@@ -54,7 +67,7 @@ func TestABWorktreeDirPlacesSideBWhereTheOperatorNames(t *testing.T) {
 				seenDirs = append(seenDirs, filepath.Dir(args[i+1]))
 			}
 		}
-		return nil
+		return fixtureABBuild(buildDir, env, args)
 	}
 	var out, errOut bytes.Buffer
 	if err := runAB(context.Background(), &out, &errOut, ac, []string{"."}); err != nil {

@@ -1464,6 +1464,21 @@ statistical rows. Objects use the shared confined store rooted at
 contain no temporary paths as object references. Without `--out`, diagnostic
 nonretention is reported.
 
+**REQ-pew-ab-closing** (behavior): Timed A/B pairs MUST retain the actual build
+artifacts and own their completion and publication boundary. Executable bytes
+are fixed after both builds, checked before each side executes, and rechecked
+before a measured pair can publish. Each side supplies successful execution
+and recognized harness completion independently of its emitted sample rows.
+The pair is the durable unit: a cut before both sides complete keeps earlier
+pairs but does not publish a half-pair. After side B succeeds, one detached
+two-minute default closing budget covers the pair's validation and publication;
+expiry refuses the new pair with its cause, and a concurrent operator signal
+keeps that cause while retaining interruption precedence. A completed rename
+remains committed. Timed rows retain their build-time comparison facts, never
+a fabricated native observation fingerprint or outcome-support claim. The
+underlying hold-still and endpoint-sampling limits remain those of the ordinary
+retained-artifact contract.
+
 **REQ-pew-ab-stream-admission** (behavior): Every timed A/B stream MUST be admitted
 against the side's build-selected benchmark declarations and requested harness
 pattern before it contributes to a published pair or comparison. The same

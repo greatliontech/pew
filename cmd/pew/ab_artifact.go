@@ -31,10 +31,16 @@ type abBlock struct {
 	profile        *profiles.Capture
 }
 
-func (a *abArtifact) pair(pkg, ref string, pair int, sideA, sideB abStream) error {
+func (a *abArtifact) pairContext(ctx context.Context, pkg, ref string, pair int, sideA, sideB abStream) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	for side, stream := range []abStream{sideA, sideB} {
 		children := map[string]bool{}
 		for _, r := range stream.rows {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			children[string(r.Name)] = true
 		}
 		if a.samples == nil {
@@ -46,6 +52,9 @@ func (a *abArtifact) pair(pkg, ref string, pair int, sideA, sideB abStream) erro
 				return fmt.Errorf("ab: child sample set changed between pairs")
 			}
 			for name := range prior {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				if !children[name] {
 					return fmt.Errorf("ab: child sample set changed between pairs")
 				}
@@ -55,21 +64,14 @@ func (a *abArtifact) pair(pkg, ref string, pair int, sideA, sideB abStream) erro
 		}
 	}
 	if a.path == "" {
-		return nil
+		return ctx.Err()
 	}
-	a.blocks = append(a.blocks, abBlock{pkg: sideA.pkg, ref: ref, side: "A", pair: pair, raw: bytes.Clone(sideA.raw)}, abBlock{pkg: sideB.pkg, ref: ref, side: "B", pair: pair, raw: bytes.Clone(sideB.raw)})
-	return a.write()
+	return a.publishBlocks(ctx, abBlock{pkg: sideA.pkg, ref: ref, side: "A", pair: pair, raw: bytes.Clone(sideA.raw)}, abBlock{pkg: sideB.pkg, ref: ref, side: "B", pair: pair, raw: bytes.Clone(sideB.raw)})
 }
 
-func (a *abArtifact) write() error {
-	ctx, cancel := context.WithTimeout(context.Background(), armWriteGateBound)
-	defer cancel()
-	return a.writeContext(ctx)
-}
-
-func (a *abArtifact) publishProfile(ctx context.Context, block abBlock) error {
+func (a *abArtifact) publishBlocks(ctx context.Context, blocks ...abBlock) error {
 	prior := len(a.blocks)
-	a.blocks = append(a.blocks, block)
+	a.blocks = append(a.blocks, blocks...)
 	if err := a.writeContext(ctx); err != nil {
 		a.blocks = a.blocks[:prior]
 		return err

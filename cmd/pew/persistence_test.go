@@ -159,7 +159,7 @@ func TestABArtifactHoldsEachCompletedIteration(t *testing.T) {
 	ac := abConfig{
 		bench: ".", count: 3, ref: "HEAD", out: out,
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{} },
-		build:    func(string, []string, []string) error { return nil },
+		build:    fixtureABBuild,
 		execute: func(_ string, _ string, _ []string, _ string, _ []string) ([]byte, error) {
 			runs++
 			if runs == 2 {

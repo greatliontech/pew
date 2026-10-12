@@ -230,7 +230,7 @@ func TestABPreparesEveryPackageBeforeAnyIteration(t *testing.T) {
 					binaryDirs = append(binaryDirs, filepath.Dir(args[i+1]))
 				}
 			}
-			return nil
+			return fixtureABBuild("", nil, args)
 		},
 		execute: func(string, string, []string, string, []string) ([]byte, error) {
 			iterations++

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -24,8 +25,18 @@ import (
 func TestABPackageSelectsBenchmarkOnlySingleCountProcesses(t *testing.T) {
 	const pattern = "^BenchmarkSelected$/case"
 	dirA, dirB := t.TempDir(), t.TempDir()
+	binA, binB := filepath.Join(dirA, "binary-A"), filepath.Join(dirB, "binary-B")
+	var executables [2]retainedExecutable
+	for i, path := range []string{binA, binB} {
+		writeFile(t, path, "fixture executable")
+		var err error
+		executables[i], err = retainExecutable(t.Context(), path)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	fp := recordingtest.Defaults().Fingerprint
-	prep := &abPreparation{pkg: pkgMeta{ImportPath: "example.com/selection", Dir: dirA}, reference: pkgMeta{ImportPath: "example.com/selection", Dir: dirB}, binA: "binary-A", binB: "binary-B", guardsA: fp.Guards, guardsB: fp.Guards, selected: [2][]string{{"BenchmarkSelected"}, {"BenchmarkSelected"}}}
+	prep := &abPreparation{pkg: pkgMeta{ImportPath: "example.com/selection", Dir: dirA}, reference: pkgMeta{ImportPath: "example.com/selection", Dir: dirB}, executables: executables, guardsA: fp.Guards, guardsB: fp.Guards, selected: [2][]string{{"BenchmarkSelected"}, {"BenchmarkSelected"}}}
 	var order []string
 	ac := abConfig{bench: pattern, count: 3, benchtime: "1x", ref: "baseline", throttle: func() runpkg.ThrottleSnapshot { return runpkg.ThrottleSnapshot{} }}
 	ac.execute = func(dir, pin string, env []string, binary string, args []string) ([]byte, error) {
@@ -45,15 +56,15 @@ func TestABPackageSelectsBenchmarkOnlySingleCountProcesses(t *testing.T) {
 		if *run != "^$" || *bench != pattern || *count != 1 || !*mem || *duration != "1x" || flags.NArg() != 0 {
 			t.Fatalf("wrong measured process selection: args=%q run=%q bench=%q count=%d mem=%t duration=%q positional=%q", args, *run, *bench, *count, *mem, *duration, flags.Args())
 		}
-		wantDir, wantBinary := dirA, "binary-A"
+		wantDir, wantBinary := dirA, binA
 		if len(order)%2 != 0 {
-			wantDir, wantBinary = dirB, "binary-B"
+			wantDir, wantBinary = dirB, binB
 		}
 		if dir != wantDir || binary != wantBinary {
 			t.Fatalf("pair order: %s %s, want %s %s", dir, binary, wantDir, wantBinary)
 		}
 		order = append(order, binary)
-		return []byte("pkg: example.com/selection\nBenchmarkSelected/case-2 1 42 ns/op 8 B/op 1 allocs/op\n"), nil
+		return []byte("pkg: example.com/selection\nBenchmarkSelected/case-2 1 42 ns/op 8 B/op 1 allocs/op\nPASS\n"), nil
 	}
 	var out bytes.Buffer
 	if err := abPackage(t.Context(), &out, io.Discard, ac, prep, 1, 1, newEnvironments(testEnvironment(t, nil), runpkg.Pin{})); err != nil {

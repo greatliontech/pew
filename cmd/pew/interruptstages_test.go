@@ -226,7 +226,7 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	defer cancel()
 	ac := abConfig{
 		bench: ".", count: 1, benchtime: "1x", ref: "HEAD",
-		build: func(string, []string, []string) error { return nil },
+		build: fixtureABBuild,
 		guards: func(ctx context.Context, _, _ string, _ bool, _ []string) (guard.Guards, error) {
 			cancel() // the operator interrupts while the guards are captured
 			return guard.Guards{}, ctx.Err()
@@ -386,7 +386,7 @@ func TestVerbsEndByAnInterruptionReceivedAfterTheLastUnit(t *testing.T) {
 	ac := abConfig{
 		bench: ".", count: 1, ref: "HEAD", out: filepath.Join(t.TempDir(), "ab.txt"),
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{} },
-		build:    func(string, []string, []string) error { return nil },
+		build:    fixtureABBuild,
 		execute: func(_ string, _ string, _ []string, _ string, _ []string) ([]byte, error) {
 			runs++
 			if runs == 2 {
@@ -444,7 +444,7 @@ func TestMeasurementStagesReportTheirCancellationAsInterruption(t *testing.T) {
 		ac := abConfig{
 			bench: ".", count: 2, ref: "HEAD", out: out,
 			throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{} },
-			build:    func(string, []string, []string) error { return nil },
+			build:    fixtureABBuild,
 			execute: func(_ string, _ string, _ []string, _ string, _ []string) ([]byte, error) {
 				runs++
 				if runs == killed {

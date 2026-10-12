@@ -74,6 +74,10 @@ func fixtureABStream(t testing.TB, raw []byte, pkg string, benchmarks ...string)
 	return stream
 }
 
+func (a *abArtifact) pair(pkg, ref string, pair int, sideA, sideB abStream) error {
+	return a.pairContext(context.Background(), pkg, ref, pair, sideA, sideB)
+}
+
 func TestABMultiPackageInterruptedKeepsPairs(t *testing.T) {
 	if testing.Short() {
 		t.Skip("fixture package listing")

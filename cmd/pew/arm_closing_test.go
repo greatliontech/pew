@@ -71,7 +71,7 @@ func TestABArtifactClosingStopsBeforeInstallAndKeepsCommittedState(t *testing.T)
 				}
 			}}
 			block := abBlock{pkg: "example.com/ab", side: "A", raw: []byte("BenchmarkOne-2 1 5 ns/op\n")}
-			err := a.publishProfile(ctx, block)
+			err := a.publishBlocks(ctx, block)
 			data, readErr := os.ReadFile(path)
 			if readErr != nil {
 				t.Fatal(readErr)
@@ -82,7 +82,7 @@ func TestABArtifactClosingStopsBeforeInstallAndKeepsCommittedState(t *testing.T)
 				}
 				// A later successful side cannot publish the refused block.
 				a.observeWrite = nil
-				if err := a.publishProfile(t.Context(), abBlock{pkg: "example.com/ab", side: "B", raw: []byte("BenchmarkTwo-2 1 6 ns/op\n")}); err != nil {
+				if err := a.publishBlocks(t.Context(), abBlock{pkg: "example.com/ab", side: "B", raw: []byte("BenchmarkTwo-2 1 6 ns/op\n")}); err != nil {
 					t.Fatal(err)
 				}
 				data, err = os.ReadFile(path)
