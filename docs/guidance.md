@@ -2,6 +2,16 @@
 
 ## verbs
 
+### version
+**surfaces:** cli
+**does:** Identify this executable and its linked freshness library without loading a project.
+**knobs:** none
+**when:** use version (or --version) before a field report to identify the running
+binary: module version, revision, modified state, compiler and Gofresh dependency.
+Missing facts are unknown; development and local replacements remain explicit.
+It works outside a repository and performs no measurement or store operation.
+**example:** pew version
+
 ### ab
 **surfaces:** cli
 **does:** A/B-compare the working tree against a ref without touching either.

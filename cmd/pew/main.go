@@ -67,11 +67,14 @@ func onlyUnfulfilled(err error) bool {
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "pew",
+		Version:       versionString(),
 		Short:         "Manage Go benchmark provenance, staleness, and comparison",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	root.SetVersionTemplate("{{.Version}}\n")
 	root.AddCommand(
+		newVersionCmd(),
 		newRunCmd(),
 		newABCmd(),
 		newStatusCmd(),

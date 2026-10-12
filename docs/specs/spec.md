@@ -56,6 +56,19 @@ valid for HEAD, or must I re-run it?"** mechanically rather than by guesswork.
   Class-B detection is explicitly best-effort for exotic unrecognized external state. See §7.
 - **Replacing the Go toolchain.** pew orchestrates `go test`/`go list`; it does not compile.
 
+## Executable identity
+
+**REQ-pew-version** (behavior): The CLI MUST expose `version` and `--version`
+as project-independent queries of the running binary's embedded identity.
+Both print the same single line: tool name, module version or development
+identity, revision, modified state, compiler and linked Gofresh version or
+replacement. Missing facts remain unknown, never inferred from cwd, git, a
+selected Go command or the network. The shared toolversion metadata rule is
+the source of those facts. The query loads no project, performs no measurement
+or store operation, and works with malformed project files and without go or
+git on PATH. Help advertises both forms; the subcommand takes no positional
+operands. Executable identity is distinct from recording-format compatibility.
+
 ## 4. Vocabulary
 
 - **Benchmark `B`** — a top-level `BenchmarkXxx` function. Sub-benchmarks (`b.Run`, table cases)
@@ -1680,6 +1693,7 @@ shape of the one text line that carries a count.
 | `ab` | interleaved A/B of the working tree against a ref, nothing stored; the per-benchmark delta table | `--count=6` `--ref=HEAD` `--bench=.` `--profile-benchtime=1s` | `--profile` (independent diagnostics on both sides), `--json` (typed comparison reports), `--benchtime` (a budget other than go's default), `--out` (completed streams and diagnostic indexes for offline analysis), `--pin` (cut scheduler variance on both sides), `--strict` (refuse a noisy machine), `--worktree-dir` (a same-filesystem placement where the repository's parent is unwritable or on another device) |
 | `gc` | remove the recordings of benchmarks gone from the source, each removal reported as it happens | — | `--bench-dir` |
 | `guidance` | the decision map | — | a verb argument (that verb's full section) |
+| `version` | one line identifying the running executable and its compiler/dependency facts, no project or measurement; the root `--version` flag is the same query | — | — |
 
 *Design log — resolved & folded in:* closure-hash storage → in-band `pew-closure`, no sidecar
 (§5/§6); call-graph → RTA (§7.4); std-callback → load stdlib bodies (§7.4); cross-module →

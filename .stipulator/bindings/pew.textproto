@@ -4210,3 +4210,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "cddf269c815e71c81cf7b95496fd54cdbf03f929f7700ac5973b0e120e4626b5"
 }
+
+bindings {
+  requirement_id: "REQ-pew-version"
+  content_hash: "62e8f5eebec55fce9fc69e42a9bc16704bafdc1f8784dca64e469aa748e236e2"
+  source_hash: "0f8f27e864b380c16c0b8a3623c42e7137f7086bac304c5624edcd839b9d2c7e"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestVersionWorksWithoutAProject"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9e4a3566d3c4fa5767271a5b60bbd2554fc4b2c96b9653895442de8df2695052"
+}
+
+bindings {
+  requirement_id: "REQ-pew-version"
+  content_hash: "62e8f5eebec55fce9fc69e42a9bc16704bafdc1f8784dca64e469aa748e236e2"
+  source_hash: "0f8f27e864b380c16c0b8a3623c42e7137f7086bac304c5624edcd839b9d2c7e"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestVersionExecutableNeedsNoGoOrGit"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c21279778d4a9aca8c0ae3ac8c889224d86da157a12247df2f998215f887ba6b"
+}

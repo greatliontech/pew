@@ -2,6 +2,10 @@
 
 `pew` manages Go benchmark recordings with provenance and staleness checks.
 
+Use `pew version` or `pew --version` to identify the installed executable before
+a field report. Both work outside a project and show embedded version, revision,
+modified state, compiler and Gofresh dependency facts without running benchmarks.
+
 ## Workflow
 
 1. Run benchmarks and store recordings:
