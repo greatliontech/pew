@@ -1423,6 +1423,12 @@ objects use `kind: profile`, `package`, `basePackage`, `newPackage`, `benchmark`
 Package contexts use the ref-local subject resolution of §10.1, including root
 packages and module renames; differing side contexts do not acquire today's
 module name as a shared package identity. Empty side contexts remain absent.
+Each requested profile kind is an obligation for every recording-level subject
+in the comparison inventory (REQ-pew-comparison-coverage), including a current
+declaration unrecorded on both sides. Missing measurements retain unavailable
+per-side diagnostics rather than removing the requested comparison; unknown
+child identities are not invented, and two-ref comparisons do not gain today's
+unrecorded declarations.
 An explicit unfulfilled profile request, including two successfully captured but
 incompatible A/B diagnostics, exits 2; an eligible statistical
 regression with its gate enabled exits 1 ahead of it; interruption exits 130

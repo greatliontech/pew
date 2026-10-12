@@ -346,6 +346,9 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 			if err != nil {
 				return err
 			}
+			// Profile requests use the admitted inventory too: absence from
+			// both recordings is an unfulfilled obligation, not an absent one.
+			profileReports = append(profileReports, compareStatProfiles(ctx, m, key, bl, kinds, resolved, analysis)...)
 			if !baseOK && !newOK && baseReadErr == nil && newReadErr == nil {
 				withhold(blockedStatUnits(m, key, bl, resolved, sc.opts, []compare.Cause{{Code: "missing-side", Side: "both", Message: "unrecorded on both sides"}}))
 				continue
@@ -357,7 +360,6 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 			// the format rung on both sides, the strategy rung on the
 			// working-tree side alone.
 			baseAdm, newAdm := m.admission(bl.baseRef, key), m.admission(bl.newRef, key)
-			profileReports = append(profileReports, compareStatProfiles(ctx, m, key, bl, kinds, resolved, analysis)...)
 			var causes []compare.Cause
 			for _, side := range []struct {
 				name       string
