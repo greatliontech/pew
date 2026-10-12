@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/pprof/profile"
+	"github.com/greatliontech/gofresh/guard"
 )
 
 func distribution(t testing.TB, alloc, reorder bool, symbol string, values []byte) []byte {
@@ -135,5 +136,38 @@ func TestProfileComparisonCompatibility(t *testing.T) {
 	}
 	if _, err := Compare(a, a, raw, []byte("corrupt")); err == nil {
 		t.Fatal("corrupt profile compared")
+	}
+}
+
+func TestLiveComparisonKeepsNativeEvidenceApartFromComparisonGuards(t *testing.T) {
+	a, b := testIndex(t).Captures[0], testIndex(t).Captures[0]
+	b.Fingerprint.Guards.BuildConfig = "another-producing-coordinate"
+	beforeA, beforeB := a.Fingerprint, b.Fingerprint
+	raw := distribution(t, false, false, "work", []byte{1, 2})
+	if _, err := Compare(a, b, raw, raw); err == nil {
+		t.Fatal("historical comparison invented a live comparison domain")
+	}
+	ordinary := guard.Guards{Toolchain: "tc", BuildConfig: "flags-and-inputs", Machine: "machine", RuntimeConfig: "runtime"}
+	if _, err := CompareWithGuards(a, b, raw, raw, ordinary, ordinary); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(a.Fingerprint, beforeA) || !reflect.DeepEqual(b.Fingerprint, beforeB) {
+		t.Fatal("comparison rewrote producing evidence")
+	}
+	for _, change := range []func(*guard.Guards){
+		func(g *guard.Guards) { g.Toolchain = "" },
+		func(g *guard.Guards) { g.BuildConfig += "changed" },
+		func(g *guard.Guards) { g.Machine += "changed" },
+		func(g *guard.Guards) { g.RuntimeConfig += "changed" },
+	} {
+		changed := ordinary
+		change(&changed)
+		if _, err := CompareWithGuards(a, b, raw, raw, ordinary, changed); err == nil {
+			t.Fatalf("incompatible live projection admitted: %+v", changed)
+		}
+	}
+	b.Children = []Child{{Name: "other", Iterations: 1}}
+	if _, err := CompareWithGuards(a, b, raw, raw, ordinary, ordinary); err == nil {
+		t.Fatal("live guard projection bypassed workload admission")
 	}
 }

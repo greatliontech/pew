@@ -15,6 +15,7 @@ import (
 	"github.com/greatliontech/gofresh"
 
 	"github.com/greatliontech/pew/internal/compare"
+	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 )
@@ -139,7 +140,7 @@ func TestStatusReportsIndependentRowsAndFailsIncompleteReports(t *testing.T) {
 				}
 			} else {
 				writeStatRecording(t, st, "", "BenchmarkFirst", 100)
-				deps.view = func(*gofresh.Engine, context.Context, []gofresh.Subject, string, gofresh.Kind) (*gofresh.View, error) {
+				deps.view = func(*gofresh.Session, context.Context, []gofresh.Subject, string, gofresh.Kind) (*gofresh.Snapshot, error) {
 					return nil, errors.New("analysis unavailable")
 				}
 			}
@@ -212,13 +213,7 @@ func TestRunRegeneratesUnusableRecordingsWithoutDeletingFirst(t *testing.T) {
 			}
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			stub := armStub(nil)
-			rc := runConfig{opts: run.Options{Count: 1, Benchtime: "1x", Bench: "."}, execute: func(dir, pin string, env, args []string) ([]byte, error) {
-				for _, arg := range args {
-					if arg == "-c" {
-						return nil, nil
-					}
-				}
+			rc := runConfig{opts: run.Options{Count: 1, Benchtime: "1x", Bench: "."}, binary: func(ctx context.Context, dir, pin string, env gotool.Environment, binary string, args []string) ([]byte, error) {
 				if outcome == "interruption" {
 					cancel()
 					return nil, ctx.Err()
@@ -226,8 +221,7 @@ func TestRunRegeneratesUnusableRecordingsWithoutDeletingFirst(t *testing.T) {
 				if outcome == "failure" {
 					return nil, errors.New("measurement failed")
 				}
-				data, err := stub(dir, pin, env, args)
-				return []byte(strings.NewReplacer("goos: linux", "goos: "+runtime.GOOS, "goarch: amd64", "goarch: "+runtime.GOARCH).Replace(string(data))), err
+				return run.ExecuteBinaryContext(ctx, dir, pin, env, binary, args)
 			}}
 			out.Reset()
 			err := runRun(ctx, &out, &bytes.Buffer{}, rc, []string{"."})

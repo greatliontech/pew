@@ -30,6 +30,9 @@ import (
 // Store is a benchmark-recording directory — the configurable bench-dir (§6).
 type Store struct {
 	Root string
+	// observePublication is a test observer for the paid staging and commit
+	// boundaries. It carries no publication policy and is nil in production.
+	observePublication func(stage string)
 }
 
 // WriteRequest is one recording in an atomic package write.
@@ -128,7 +131,10 @@ func (s *Store) Write(pkgRel, bench, label string, results []*benchfmt.Result) e
 	return s.ReplaceContext(ctx, Key{pkgRel, bench, label}, nil, results)
 }
 
-func (s *Store) writeUnlocked(pkgRel, bench, label string, results []*benchfmt.Result) error {
+func (s *Store) writeUnlocked(ctx context.Context, pkgRel, bench, label string, results []*benchfmt.Result) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if len(results) == 0 {
 		return fmt.Errorf("store: refusing to write empty recording for %s", bench)
 	}
@@ -143,8 +149,11 @@ func (s *Store) writeUnlocked(pkgRel, bench, label string, results []*benchfmt.R
 	if err := checkRegularFile(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	encoded, err := encodeRecording(bench, results)
+	encoded, err := encodeRecordingContext(ctx, bench, results)
 	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	temp, err := os.CreateTemp(dir, ".pew-*.tmp")
@@ -160,7 +169,19 @@ func (s *Store) writeUnlocked(pkgRel, bench, label string, results []*benchfmt.R
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tempName, path)
+	if s.observePublication != nil {
+		s.observePublication("staged")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.Rename(tempName, path); err != nil {
+		return err
+	}
+	if s.observePublication != nil {
+		s.observePublication("committed")
+	}
+	return nil
 }
 
 // WriteBatch replaces a set of recordings transactionally for every returned
@@ -172,7 +193,9 @@ func (s *Store) WriteBatch(requests []WriteRequest) error {
 	return s.writeBatch(requests, nil)
 }
 
-// WriteBatchContext bounds lock waiting by the producer's publication context.
+// WriteBatchContext bounds locking, encoding and staging by the publication
+// context. Cancellation before installation keeps the previous set. Once the
+// complete replacement is installed, cancellation cannot erase its disposition.
 func (s *Store) WriteBatchContext(ctx context.Context, requests []WriteRequest) error {
 	unlock, err := s.lock(ctx)
 	if err != nil {
@@ -181,9 +204,9 @@ func (s *Store) WriteBatchContext(ctx context.Context, requests []WriteRequest) 
 	defer unlock()
 	if len(requests) == 1 {
 		r := requests[0]
-		return s.writeUnlocked(r.PkgRel, r.Bench, r.Label, r.Results)
+		return s.writeUnlocked(ctx, r.PkgRel, r.Bench, r.Label, r.Results)
 	}
-	return s.writeBatchUnlocked(requests, nil)
+	return s.writeBatchUnlocked(ctx, requests, nil)
 }
 
 // ValidateLabel refuses a variant label the store cannot name; the
@@ -249,12 +272,15 @@ func (s *Store) writeBatch(requests []WriteRequest, beforeInstall func()) error 
 	defer unlock()
 	if len(requests) == 1 && beforeInstall == nil {
 		r := requests[0]
-		return s.writeUnlocked(r.PkgRel, r.Bench, r.Label, r.Results)
+		return s.writeUnlocked(ctx, r.PkgRel, r.Bench, r.Label, r.Results)
 	}
-	return s.writeBatchUnlocked(requests, beforeInstall)
+	return s.writeBatchUnlocked(ctx, requests, beforeInstall)
 }
 
-func (s *Store) writeBatchUnlocked(requests []WriteRequest, beforeInstall func()) error {
+func (s *Store) writeBatchUnlocked(ctx context.Context, requests []WriteRequest, beforeInstall func()) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	type stagedWrite struct {
 		path, temp, backup string
 		existed            bool
@@ -283,13 +309,17 @@ func (s *Store) writeBatchUnlocked(requests []WriteRequest, beforeInstall func()
 		return err
 	}
 	for i, request := range requests {
+		if err := ctx.Err(); err != nil {
+			cleanupTemps()
+			return err
+		}
 		path := dests[i].Path
 		dir := filepath.Dir(path)
 		if err := s.ensureDir(dir); err != nil {
 			cleanupTemps()
 			return err
 		}
-		encoded, err := encodeRecording(request.Bench, request.Results)
+		encoded, err := encodeRecordingContext(ctx, request.Bench, request.Results)
 		if err != nil {
 			cleanupTemps()
 			return err
@@ -334,6 +364,9 @@ func (s *Store) writeBatchUnlocked(requests []WriteRequest, beforeInstall func()
 		return errors.Join(errs...)
 	}
 	for i := range staged {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(err, rollback())
+		}
 		item := &staged[i]
 		if !item.existed {
 			continue
@@ -358,13 +391,22 @@ func (s *Store) writeBatchUnlocked(requests []WriteRequest, beforeInstall func()
 	if beforeInstall != nil {
 		beforeInstall()
 	}
+	if s.observePublication != nil {
+		s.observePublication("staged")
+	}
 	for i := range staged {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(err, rollback())
+		}
 		item := &staged[i]
 		if err := os.Rename(item.temp, item.path); err != nil {
 			return errors.Join(err, rollback())
 		}
 		item.temp = ""
 		item.installed = true
+	}
+	if s.observePublication != nil {
+		s.observePublication("committed")
 	}
 	for _, item := range staged {
 		if item.backup != "" {
@@ -787,12 +829,22 @@ func checkRegularFile(path string) error {
 // (REQ-pew-artifact-format). The results themselves are untouched:
 // the in-memory config stays one value per row.
 func encodeRecording(bench string, results []*benchfmt.Result) ([]byte, error) {
+	return encodeRecordingContext(context.Background(), bench, results)
+}
+
+func encodeRecordingContext(ctx context.Context, bench string, results []*benchfmt.Result) ([]byte, error) {
 	var buf bytes.Buffer
 	w := benchfmt.NewWriter(&buf)
 	for _, result := range results {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		split := result.Clone()
 		split.Config = run.SplitChunked(result.Config)
 		for _, c := range split.Config {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			// The clause is enforced here, not argued row by row: a
 			// line past benchfmt's scanner bound is never written —
 			// an unbounded non-chunked row (an operator-supplied
@@ -822,6 +874,9 @@ func encodeRecording(bench string, results []*benchfmt.Result) ([]byte, error) {
 		if err := w.Write(split); err != nil {
 			return nil, fmt.Errorf("store: encode %s: %w", bench, err)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	return buf.Bytes(), nil
 }

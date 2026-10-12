@@ -1,5 +1,9 @@
 package run
 
+// The direct-facade conformance fixtures deliberately construct their own
+// inputs to exercise classification failures and process-coordinate boundaries.
+// Production benchmark arms use Gofresh's owned session units instead.
+
 import (
 	"context"
 	"path/filepath"

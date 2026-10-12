@@ -257,7 +257,7 @@ func Relation(c Capture, rows []*benchfmt.Result, fp gofresh.Fingerprint) error 
 // CheckedRelation uses an applicability endpoint only after the shared engine
 // proves the exact recorded measurement valid and closes its checking view.
 // Neither the measurement's producing evidence nor the diagnostic is rewritten.
-func CheckedRelation(ctx context.Context, c Capture, rows []*benchfmt.Result, fp gofresh.Fingerprint, parent *gofresh.View) error {
+func CheckedRelation(ctx context.Context, c Capture, rows []*benchfmt.Result, fp gofresh.Fingerprint, parent *gofresh.Snapshot) error {
 	if err := pairRelation(c, rows, fp); err != nil {
 		return err
 	}
@@ -265,18 +265,10 @@ func CheckedRelation(ctx context.Context, c Capture, rows []*benchfmt.Result, fp
 		return Relation(c, rows, fp)
 	}
 	subject := gofresh.Subject{Package: c.Package, Symbol: c.Benchmark}
-	check, err := parent.Sibling([]gofresh.Subject{subject})
-	if err != nil {
-		return err
-	}
-	verdicts, err := check.CheckObservedBatch(ctx, map[gofresh.Subject]gofresh.Fingerprint{subject: fp})
+	v, err := parent.Check(ctx, subject, fp)
 	if err != nil {
 		return applicabilityFailure(err)
 	}
-	if err := check.Validate(ctx); err != nil {
-		return applicabilityFailure(err)
-	}
-	v := verdicts[subject]
 	if v.Status != gofresh.Valid {
 		return fmt.Errorf("%w: measurement applicability not proven: %s (%s)", ErrRelationUnproven, v.Status, v.Reason)
 	}

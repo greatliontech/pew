@@ -107,13 +107,10 @@ func TestPrivateRunDefaultEffortAndPreparationAttribution(t *testing.T) {
 		}
 	}
 	var budgets []string
-	rc := runConfig{all: true, benchDir: filepath.Join(dir, "recordings"), opts: run.Options{Count: 1, Bench: "."}, execute: func(_ string, _ string, _, args []string) ([]byte, error) {
-		for i, arg := range args {
-			if arg == "-c" {
-				return nil, nil
-			}
-			if arg == "-benchtime" {
-				budgets = append(budgets, args[i+1])
+	rc := runConfig{all: true, benchDir: filepath.Join(dir, "recordings"), opts: run.Options{Count: 1, Bench: "."}, binary: func(_ context.Context, _, _ string, _ testEnvironmentValue, _ string, args []string) ([]byte, error) {
+		for _, arg := range args {
+			if value, ok := strings.CutPrefix(arg, "-test.benchtime="); ok {
+				budgets = append(budgets, value)
 				return nil, errors.New("fixture stops after observing admitted effort")
 			}
 		}

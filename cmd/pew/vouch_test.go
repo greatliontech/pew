@@ -108,33 +108,33 @@ func BenchmarkCount(b *testing.B) {
 	capture := func(vouches ...string) gofresh.Fingerprint {
 		t.Helper()
 		owned := context.WithValue(ctx, invocationKey{}, &invocation{vouches: &vouchSource{flags: vouches}})
-		e, err := buildEngine(owned, dir, testEnvironment(t, os.Environ()), nil, "")
+		e, err := buildEngine(owned, dir, dir, testEnvironment(t, os.Environ()), nil, "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		view, err := e.NewView(ctx, []gofresh.Subject{subject}, dir)
+		view, err := e.Snapshot(ctx, []gofresh.Subject{subject}, gofresh.CodeResult)
 		if err != nil {
 			t.Fatal(err)
 		}
-		fp, err := view.Capture(ctx, subject)
+		fp, err := view.CurrentFacts(ctx, subject)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return fp
 	}
-	plainEngine, err := buildEngine(context.Background(), dir, testEnvironment(t, os.Environ()), nil, "")
+	plainEngine, err := buildEngine(context.Background(), dir, dir, testEnvironment(t, os.Environ()), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	plainView, err := plainEngine.NewView(ctx, []gofresh.Subject{subject}, dir)
+	plainView, err := plainEngine.Snapshot(ctx, []gofresh.Subject{subject}, gofresh.CodeResult)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plainFP, err := plainView.Capture(ctx, subject)
+	plainFP, err := plainView.CurrentFacts(ctx, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := plainView.Check(ctx, plainFP, subject)
+	verdict, err := plainView.Check(ctx, subject, plainFP)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,19 +159,19 @@ func BenchmarkCount(b *testing.B) {
 	// The vouched VERDICT no longer names the culprit - the discharge is
 	// load-bearing, not merely recorded.
 	owned := context.WithValue(ctx, invocationKey{}, &invocation{vouches: &vouchSource{flags: []string{culprit}}})
-	vouchedEngine, err := buildEngine(owned, dir, testEnvironment(t, os.Environ()), nil, "")
+	vouchedEngine, err := buildEngine(owned, dir, dir, testEnvironment(t, os.Environ()), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	vouchedView, err := vouchedEngine.NewView(ctx, []gofresh.Subject{subject}, dir)
+	vouchedView, err := vouchedEngine.Snapshot(ctx, []gofresh.Subject{subject}, gofresh.CodeResult)
 	if err != nil {
 		t.Fatal(err)
 	}
-	vouchedFP, err := vouchedView.Capture(ctx, subject)
+	vouchedFP, err := vouchedView.CurrentFacts(ctx, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
-	vouchedVerdict, err := vouchedView.Check(ctx, vouchedFP, subject)
+	vouchedVerdict, err := vouchedView.Check(ctx, subject, vouchedFP)
 	if err != nil {
 		t.Fatal(err)
 	}

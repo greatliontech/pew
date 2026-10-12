@@ -16,6 +16,7 @@ import (
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/pew/internal/compare"
+	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 )
@@ -37,27 +38,16 @@ func twoArmFixture(t *testing.T) (dir string) {
 	return dir
 }
 
-// armStub is an execute seam that fakes a measured arm and lets the
-// test act between arms.
-func armStub(between func(arm int)) func(moduleDir, pin string, env, args []string) ([]byte, error) {
+// armExecution observes entry to each real retained-binary execution. The
+// harness, testlog and terminal result come from that process, never a stub.
+func armExecution(between func(arm int)) func(context.Context, string, string, gotool.Environment, string, []string) ([]byte, error) {
 	arms := 0
-	return func(moduleDir, pin string, env, args []string) ([]byte, error) {
-		for _, a := range args {
-			if a == "-c" {
-				return nil, nil
-			}
-		}
+	return func(ctx context.Context, dir, pin string, env gotool.Environment, binary string, args []string) ([]byte, error) {
 		arms++
 		if between != nil {
 			between(arms)
 		}
-		name := "BenchmarkFirst"
-		for _, a := range args {
-			if strings.Contains(a, "BenchmarkSecond") {
-				name = "BenchmarkSecond"
-			}
-		}
-		return []byte("goos: linux\ngoarch: amd64\npkg: example.com/arms\ncpu: T\n" + name + "-8 1 5 ns/op\nPASS\n"), nil
+		return run.ExecuteBinaryContext(ctx, dir, pin, env, binary, args)
 	}
 }
 
@@ -75,7 +65,7 @@ func TestRunPersistsEachArmAsItMeasures(t *testing.T) {
 		benchDir: benchDir,
 		opts:     run.Options{Count: 1, Benchtime: "1x", Bench: "."},
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
-		execute: armStub(func(arm int) {
+		binary: armExecution(func(arm int) {
 			if arm != 2 {
 				return
 			}
@@ -131,7 +121,7 @@ func TestRunInterruptedKeepsRecordedArms(t *testing.T) {
 		benchDir: benchDir,
 		opts:     run.Options{Count: 1, Benchtime: "1x", Bench: "."},
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
-		execute: armStub(func(arm int) {
+		binary: armExecution(func(arm int) {
 			if arm == 2 {
 				cancel() // the operator interrupts while the second arm runs
 			}
@@ -313,7 +303,7 @@ func TestRunPerArmGateRefusesTheArmAlone(t *testing.T) {
 				benchDir: benchDir,
 				opts:     run.Options{Count: 1, Benchtime: "1x", Bench: "."},
 				throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
-				execute:  armStub(nil),
+				binary:   armExecution(nil),
 				beforePersist: func(bench string) {
 					if bench == "BenchmarkSecond" {
 						move(t, dir)
@@ -370,7 +360,7 @@ func TestRunInterruptedArmsAreNeverEntered(t *testing.T) {
 		benchDir: filepath.Join(dir, "benchmarks"),
 		opts:     run.Options{Count: 1, Benchtime: "1x", Bench: "."},
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
-		execute: armStub(func(arm int) {
+		binary: armExecution(func(arm int) {
 			arms = arm
 			if arm == 1 {
 				if err := os.MkdirAll(leftover, 0o755); err != nil {

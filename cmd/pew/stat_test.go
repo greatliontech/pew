@@ -376,7 +376,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := gofresh.Subject{Package: "example.com/statdirective", Symbol: "BenchmarkPureRead"}
-	fp, err := e.CaptureFor(t.Context(), subject, dir, gofresh.Measurement)
+	fp, err := fixtureFacts(t.Context(), e, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -461,7 +461,7 @@ func TestStatRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := gofresh.Subject{Package: "example.com/statstrategy", Symbol: "BenchmarkNop"}
-	fp, err := e.CaptureFor(t.Context(), subject, dir, gofresh.Measurement)
+	fp, err := fixtureFacts(t.Context(), e, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -990,13 +990,13 @@ func TestNonValidUsesLabel(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
-	e, err := gofresh.New()
+	e, err := staticFixtureSession(".")
 	if err != nil {
 		t.Fatalf("New engine: %v", err)
 	}
 	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
 	const bench = "BenchmarkDecode"
-	fp, err := e.CaptureFor(t.Context(), gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
+	fp, err := fixtureFacts(t.Context(), e, gofresh.Subject{Package: pkg, Symbol: bench})
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
@@ -1040,13 +1040,13 @@ func TestRunConditionsDoNotAffectValidity(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
-	e, err := gofresh.New()
+	e, err := staticFixtureSession(".")
 	if err != nil {
 		t.Fatalf("New engine: %v", err)
 	}
 	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
 	const bench = "BenchmarkDecode"
-	fp, err := e.CaptureFor(t.Context(), gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
+	fp, err := fixtureFacts(t.Context(), e, gofresh.Subject{Package: pkg, Symbol: bench})
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
@@ -1117,13 +1117,13 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
-	e, err := gofresh.New()
+	e, err := staticFixtureSession(".")
 	if err != nil {
 		t.Fatalf("New engine: %v", err)
 	}
 	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
 	const bench = "BenchmarkDecode"
-	fp, err := e.CaptureFor(t.Context(), gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
+	fp, err := fixtureFacts(t.Context(), e, gofresh.Subject{Package: pkg, Symbol: bench})
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}

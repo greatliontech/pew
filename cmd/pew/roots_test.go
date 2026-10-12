@@ -2,13 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/run"
 )
 
@@ -16,47 +18,37 @@ func TestRunOwnsObservationRootsPerInvocation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain")
 	}
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX shell toolchain counter")
-	}
 	dir := twoArmFixture(t)
-	// The stub's root-open observation must belong to the analyzed program:
-	// an empty benchmark cannot legitimately produce that operation under a
-	// supported empty-effect inventory.
-	writeFile(t, filepath.Join(dir, "bench_test.go"), `package arms
+	// A subpackage separates the classification-root query's process cwd
+	// from the analysis/build queries' module cwd, without guessing their cost.
+	pkgdir := filepath.Join(dir, "p")
+	writeFile(t, filepath.Join(pkgdir, "bench_test.go"), `package arms
 import ("os"; "testing")
 func readRoot() { f, _ := os.Open("/"); if f != nil { _ = f.Close() } }
 func BenchmarkFirst(b *testing.B) { readRoot() }
 func BenchmarkSecond(b *testing.B) { readRoot() }
 `)
+	if err := os.Remove(filepath.Join(dir, "bench_test.go")); err != nil {
+		t.Fatal(err)
+	}
 	withWorkingDir(t, dir)
-	realGo, err := exec.LookPath("go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	bin := t.TempDir()
-	active, count := filepath.Join(bin, "active"), filepath.Join(bin, "queries")
-	t.Setenv("PEW_ROOTS_ACTIVE", active)
-	t.Setenv("PEW_ROOTS_QUERIES", count)
-	t.Setenv("PEW_ROOTS_GO", realGo)
-	writeFile(t, filepath.Join(bin, "go"), "#!/bin/sh\nif [ -e \"$PEW_ROOTS_ACTIVE\" ] && [ \"$1\" = env ]; then printf 'query\\n' >> \"$PEW_ROOTS_QUERIES\"; fi\nexec \"$PEW_ROOTS_GO\" \"$@\"\n")
-	if err := os.Chmod(filepath.Join(bin, "go"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	stub := armStub(nil)
 	invocation, arms := 0, 0
 	wantEnvironment := ""
 	t.Setenv("PEW_ADMITTED_ENVIRONMENT", "")
-	samples := 0
+	rootQueries := 0
 	ctx, deps := testDependencies(t)
-	deps.prepare = func(*exec.Cmd) { samples++ }
+	deps.prepare = func(cmd *exec.Cmd) {
+		if cmd.Dir == gotool.CommandDir(pkgdir) && slices.Equal(cmd.Args[1:], []string{"env", "-json"}) {
+			rootQueries++
+		}
+	}
 	rc := runConfig{
 		all:  true,
 		opts: run.Options{Count: 1, Benchtime: "1x", Bench: "."},
-		execute: func(moduleDir, pin string, env, args []string) ([]byte, error) {
+		binary: func(ctx context.Context, dir, pin string, env gotool.Environment, binary string, args []string) ([]byte, error) {
+			arms++
 			found := false
-			for _, entry := range env {
+			for _, entry := range env.Values() {
 				if value, ok := strings.CutPrefix(entry, "PEW_ADMITTED_ENVIRONMENT="); ok {
 					found = true
 					if value != wantEnvironment {
@@ -67,31 +59,10 @@ func BenchmarkSecond(b *testing.B) { readRoot() }
 			if !found {
 				t.Fatal("measurement lost the admitted environment")
 			}
-			for _, arg := range args {
-				if log, ok := strings.CutPrefix(arg, "-test.testlogfile="); ok {
-					if err := os.Setenv("PEW_ADMITTED_ENVIRONMENT", "changed-after-preparation"); err != nil {
-						t.Fatal(err)
-					}
-					writeFile(t, log, "# test log\nopen /\n")
-					writeFile(t, active, "")
-				}
-			}
-			out, err := stub(moduleDir, pin, env, args)
-			out = []byte(strings.NewReplacer("goos: linux", "goos: "+runtime.GOOS, "goarch: amd64", "goarch: "+runtime.GOARCH).Replace(string(out)))
-			return out, err
-		},
-		beforePersist: func(string) {
-			arms++
-			if samples != invocation {
-				t.Fatalf("invocation %d, arm %d: %d provenance samples", invocation, arms, samples)
-			}
-			if err := os.Remove(active); err != nil {
+			if err := os.Setenv("PEW_ADMITTED_ENVIRONMENT", "changed-after-preparation"); err != nil {
 				t.Fatal(err)
 			}
-			data, err := os.ReadFile(count)
-			if err != nil || strings.Count(string(data), "query\n") != invocation {
-				t.Fatalf("invocation %d, arm %d: root queries %q, error %v", invocation, arms, data, err)
-			}
+			return run.ExecuteBinaryContext(ctx, dir, pin, env, binary, args)
 		},
 	}
 	for invocation = 1; invocation <= 2; invocation++ {
@@ -100,8 +71,11 @@ func BenchmarkSecond(b *testing.B) { readRoot() }
 			t.Fatal(err)
 		}
 		var out, errout bytes.Buffer
-		if err := runRun(ctx, &out, &errout, rc, []string{"."}); err != nil {
+		if err := runRun(ctx, &out, &errout, rc, []string{"./p"}); err != nil {
 			t.Fatalf("run: %v\n%s\n%s", err, &out, &errout)
+		}
+		if rootQueries != invocation {
+			t.Fatalf("invocation %d: %d package-root queries, want one per invocation shared by both arms", invocation, rootQueries)
 		}
 		if strings.Count(errout.String(), `open "/" in `) != 2 || !strings.Contains(errout.String(), "external directory input: /") {
 			t.Fatalf("observation refusals lost their producing operations:\n%s", &errout)

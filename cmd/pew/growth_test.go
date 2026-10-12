@@ -41,18 +41,18 @@ func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	e, err := gofresh.New(gofresh.WithDir(tmp))
+	e, err := staticFixtureSession(tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
 	const pkg = "example.com/grow"
 	const bench = "BenchmarkValue"
 	subject := gofresh.Subject{Package: pkg, Symbol: bench}
-	view, err := e.NewViewFor(context.Background(), []gofresh.Subject{subject}, tmp, gofresh.Measurement)
+	view, err := e.Snapshot(context.Background(), []gofresh.Subject{subject}, gofresh.Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fp, err := view.Capture(context.Background(), subject)
+	fp, err := view.CurrentFacts(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}

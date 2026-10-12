@@ -35,6 +35,7 @@ func BenchmarkSecond(b *testing.B) { _,_=os.ReadFile("fixture.txt") }
 	writeFile(t, filepath.Join(root, "fixture.txt"), "stable file")
 	t.Setenv("PEW_OBSERVED_VALUE", "before")
 	withWorkingDir(t, root)
+	buildEnvironment := testEnvironment(t, os.Environ())
 	st := store.New(filepath.Join(root, "benchmarks"))
 	repo, err := gogit.PlainOpen(root)
 	if err != nil {
@@ -63,18 +64,19 @@ func BenchmarkSecond(b *testing.B) { _,_=os.ReadFile("fixture.txt") }
 		t.Fatal("missing producing proof")
 	}
 	subject := gofresh.Subject{Package: "example.com/arms", Symbol: "BenchmarkFirst"}
-	engine := func() *gofresh.Engine {
+	engine := func() *gofresh.Session {
 		t.Helper()
-		e, _, err := newEngineAt(context.Background(), root, root, false, testEnvironment(t, os.Environ()))
+		runtimeEnvironment := testEnvironment(t, os.Environ())
+		e, _, err := newEngineAtProducer(context.Background(), root, root, false, buildEnvironment, &runtimeEnvironment)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return e
 	}
-	judge := func(e *gofresh.Engine) map[string]*benchVerdict {
+	judge := func(e *gofresh.Session) map[string]*benchVerdict {
 		t.Helper()
-		rows, err := checkPackage(context.Background(), st, func(subjects []gofresh.Subject) (*gofresh.View, error) {
-			return e.NewViewFor(context.Background(), subjects, root, gofresh.Measurement)
+		rows, err := checkPackage(context.Background(), st, func(subjects []gofresh.Subject) (*gofresh.Snapshot, error) {
+			return e.Snapshot(context.Background(), subjects, gofresh.Measurement)
 		}, subject.Package, "", root, []string{"BenchmarkFirst", "BenchmarkSecond"}, "", nil)
 		if err != nil {
 			t.Fatal(err)
@@ -87,7 +89,9 @@ func BenchmarkSecond(b *testing.B) { _,_=os.ReadFile("fixture.txt") }
 		return rows
 	}
 	e := engine()
-	ordinary, err := e.Check(context.Background(), original.fp, subject, root)
+	unsupported := original.fp
+	unsupported.ObservationAssertion, unsupported.ObservationProof = "", gofresh.ObservationProof{}
+	ordinary, err := fixtureCheck(context.Background(), e, unsupported, subject)
 	if err != nil || ordinary.Status != gofresh.Unverifiable {
 		t.Fatalf("ordinary=%+v %v; sibling file dependence must remain", ordinary, err)
 	}
@@ -115,7 +119,7 @@ func BenchmarkSecond(b *testing.B) { _,_=os.ReadFile("fixture.txt") }
 	statCtx, deps := testDependencies(t)
 	loads := 0
 	load := deps.view
-	deps.view = func(e *gofresh.Engine, ctx context.Context, subjects []gofresh.Subject, dir string, kind gofresh.Kind) (*gofresh.View, error) {
+	deps.view = func(e *gofresh.Session, ctx context.Context, subjects []gofresh.Subject, dir string, kind gofresh.Kind) (*gofresh.Snapshot, error) {
 		loads++
 		return load(e, ctx, subjects, dir, kind)
 	}
@@ -136,8 +140,8 @@ func BenchmarkSecond(b *testing.B) { _,_=os.ReadFile("fixture.txt") }
 		if row.v != verdictValid || row.grownLedger == "" {
 			t.Fatalf("extension %d: %+v", generation, row)
 		}
-		if err := row.view.Validate(context.Background()); err != nil {
-			t.Fatal(err)
+		if final, err := row.view.Check(context.Background(), subject, row.fp); err != nil || final.Status != gofresh.Valid {
+			t.Fatalf("closed extension: %+v %v", final, err)
 		}
 		if err := publishRefresh(st, "", subject.Symbol, "", row.admitted, row.fp, row.grownLedger); err != nil {
 			t.Fatal(err)
@@ -175,7 +179,7 @@ func BenchmarkSecond(b *testing.B) { _,_=os.ReadFile("fixture.txt") }
 		t.Run(mutate.name, func(t *testing.T) {
 			f := read().fp
 			mutate.apply(&f)
-			v, err := engine().CheckObserved(context.Background(), f, subject, root)
+			v, err := fixtureCheck(context.Background(), engine(), f, subject)
 			if err != nil {
 				t.Fatal(err)
 			}

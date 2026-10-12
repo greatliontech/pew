@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gofresh"
+	"github.com/greatliontech/pew/internal/recordingtest"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 )
@@ -75,25 +77,49 @@ func TestArmWriteGateRequiresOutcomeValidation(t *testing.T) {
 	p := pkgMeta{ImportPath: "example.com/arms", Name: "arms", Dir: dir, TestGoFiles: []string{"bench_test.go"}}
 	p.Module.Path, p.Module.Dir = "example.com/arms", dir
 	env := testEnvironment(t, os.Environ())
-	engine, pgo, err := newEngineForPkg(context.Background(), p, env)
+	engine, _, err := newEngineForPkg(context.Background(), p, env)
 	if err != nil {
 		t.Fatal(err)
 	}
 	subject := gofresh.Subject{Package: p.ImportPath, Symbol: "BenchmarkFirst"}
-	parent, err := engine.NewViewFor(context.Background(), []gofresh.Subject{subject}, dir, gofresh.Measurement)
+	parent, err := engine.Snapshot(context.Background(), []gofresh.Subject{subject}, gofresh.Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
-	observed, err := parent.Sibling([]gofresh.Subject{subject})
+	_, binding := fixtureArtifact(t, t.Context(), parent, p.ImportPath)
+	unit, err := parent.Begin(subject)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := observed.CaptureObserved(context.Background(), subject); err != nil {
+	if _, err := unit.Register(t.Context(), binding, gofresh.ProcessDescription{Identity: "unsettled", Capture: filepath.Join(t.TempDir(), "testlog")}); err != nil {
 		t.Fatal(err)
 	}
-	prep := &packagePreparation{pkg: p, st: store.New(filepath.Join(t.TempDir(), "benchmarks")), pgoInput: pgo}
-	err = persistArm(context.Background(), io.Discard, io.Discard, runConfig{}, newGitStateCache(nil), p, prep, parent, "", true, "", subject.Symbol, armMeasurement{outcomeView: observed}, env)
-	if err == nil || !strings.Contains(err.Error(), "no attached completed observation") {
-		t.Fatalf("write gate bypassed outcome validation: %v", err)
+	if result, err := unit.Close(t.Context()); !errors.Is(err, gofresh.ErrUnitIncomplete) || result.Fingerprint.MaximalClosure != "" {
+		t.Fatalf("missing terminal/capture became final evidence: %v", err)
+	}
+	st := store.New(filepath.Join(t.TempDir(), "benchmarks"))
+	if err := st.Write("", "BenchmarkSecond", "", recordingtest.Results("Second", []float64{999})); err != nil {
+		t.Fatal(err)
+	}
+	key := store.Key{Bench: "BenchmarkSecond"}
+	before, err := st.ReadBytes(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc := runConfig{all: true, benchDir: st.Root, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}, beforePersist: func(name string) {
+		if name == "BenchmarkSecond" {
+			writeFile(t, filepath.Join(dir, "after_test.go"), "package arms\nfunc AddedAfterExecution() {}\n")
+		}
+	}}
+	var output bytes.Buffer
+	if err := runRun(t.Context(), &output, io.Discard, rc, []string{"."}); err == nil || !strings.Contains(output.String(), "analysis view changed") {
+		t.Fatalf("failed closing escaped publication: %v\n%s", err, &output)
+	}
+	after, err := st.ReadBytes(key)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("failed second closing replaced prior bytes: %v", err)
+	}
+	if _, err := st.ReadBytes(store.Key{Bench: "BenchmarkFirst"}); err != nil {
+		t.Fatalf("successful first sibling was lost: %v", err)
 	}
 }

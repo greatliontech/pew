@@ -6,12 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"runtime/pprof"
 	"strconv"
 	"strings"
@@ -287,7 +285,9 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 			if v != verdictValid || !fp.ObservationProof.Observable || fp.ObservationAssertion == "" {
 				t.Fatalf("%s recording = {%s %q}, want supported observed validity", bench, v, reason)
 			}
-			ordinary, err := e.Check(context.Background(), fp, gofresh.Subject{Package: "example.com/incompleterun/" + pkgRel, Symbol: bench}, dir)
+			unsupported := fp
+			unsupported.ObservationAssertion, unsupported.ObservationProof = "", gofresh.ObservationProof{}
+			ordinary, err := fixtureCheck(context.Background(), e, unsupported, gofresh.Subject{Package: "example.com/incompleterun/" + pkgRel, Symbol: bench})
 			if err != nil || ordinary.Status != gofresh.Unverifiable {
 				t.Fatalf("ordinary policy = %+v, %v; observed proof must be load-bearing", ordinary, err)
 			}
@@ -495,14 +495,12 @@ func TestRunPackageRecordsThrottleDelta(t *testing.T) {
 				return runpkg.ThrottleSnapshot{"c0": 1}
 			},
 			execute: func(moduleDir, pin string, env, args []string) ([]byte, error) {
-				for _, a := range args {
-					if a == "-c" {
-						events = append(events, "build")
-						return nil, nil
-					}
-				}
+				events = append(events, "build")
+				return runpkg.Execute(moduleDir, pin, testEnvironment(t, env), args)
+			},
+			binary: func(ctx context.Context, dir, pin string, env testEnvironmentValue, binary string, args []string) ([]byte, error) {
 				events = append(events, "measure")
-				return []byte("goos: linux\ngoarch: amd64\npkg: example.com/throttlewire\ncpu: T\nBenchmarkHot-8 1 5 ns/op\nPASS\n"), nil
+				return runpkg.ExecuteBinaryContext(ctx, dir, pin, env, binary, args)
 			},
 		}
 		if err := runPackage(io.Discard, io.Discard, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
@@ -1185,11 +1183,11 @@ func TestSourceInputsDirtyIncludesIgnoredAndMetadataStableSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	engine, err := gofresh.New(gofresh.WithDir(dir))
+	engine, err := staticFixtureSession(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView(t.Context(), []gofresh.Subject{{Package: "example.com/buildinputs", Symbol: "BenchmarkValue"}}, dir)
+	view, err := engine.Snapshot(t.Context(), []gofresh.Subject{{Package: "example.com/buildinputs", Symbol: "BenchmarkValue"}}, gofresh.CodeResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1217,7 +1215,7 @@ func TestSourceInputsDirtyIncludesIgnoredAndMetadataStableSource(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "generated.go"), []byte("package buildinputs\n\nfunc init() { Value = 2 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	view, err = engine.NewView(t.Context(), []gofresh.Subject{{Package: "example.com/buildinputs", Symbol: "BenchmarkValue"}}, dir)
+	view, err = engine.Snapshot(t.Context(), []gofresh.Subject{{Package: "example.com/buildinputs", Symbol: "BenchmarkValue"}}, gofresh.CodeResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1795,16 +1793,14 @@ func TestRunPackagePerArmThrottleAttribution(t *testing.T) {
 			return runpkg.ThrottleSnapshot{"c0": n}
 		},
 		execute: func(moduleDir, pin string, env, args []string) ([]byte, error) {
-			for _, a := range args {
-				if a == "-c" {
-					events = append(events, "build")
-					return nil, nil
-				}
-			}
+			events = append(events, "build")
+			return runpkg.Execute(moduleDir, pin, testEnvironment(t, env), args)
+		},
+		binary: func(ctx context.Context, dir, pin string, env testEnvironmentValue, binary string, args []string) ([]byte, error) {
 			pattern := ""
-			for i, a := range args {
-				if a == "-bench" && i+1 < len(args) {
-					pattern = args[i+1]
+			for _, a := range args {
+				if value, ok := strings.CutPrefix(a, "-test.bench="); ok {
+					pattern = value
 				}
 			}
 			name := "First"
@@ -1812,7 +1808,7 @@ func TestRunPackagePerArmThrottleAttribution(t *testing.T) {
 				name = "Second"
 			}
 			events = append(events, "measure"+name)
-			return []byte(fmt.Sprintf("goos: %s\ngoarch: %s\npkg: example.com/armthrottle\ncpu: T\nBenchmark%s-8 1 5 ns/op\nPASS\n", runtime.GOOS, runtime.GOARCH, name)), nil
+			return runpkg.ExecuteBinaryContext(ctx, dir, pin, env, binary, args)
 		},
 	}
 	var out, errOut bytes.Buffer
@@ -1963,26 +1959,15 @@ func TestRunPackageRefusesForeignCorruptEvidence(t *testing.T) {
 	rc := runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
-		execute: func(moduleDir, pin string, env, args []string) ([]byte, error) {
-			for _, a := range args {
-				if a == "-c" {
-					return nil, nil
-				}
-			}
-			pattern := ""
-			for i, a := range args {
-				if a == "-bench" && i+1 < len(args) {
-					pattern = args[i+1]
-				}
-			}
-			header := fmt.Sprintf("goos: %s\ngoarch: %s\npkg: example.com/foreigncorrupt\ncpu: T\n", runtime.GOOS, runtime.GOARCH)
-			if strings.Contains(pattern, "Subject") {
+		binary: func(ctx context.Context, dir, pin string, env testEnvironmentValue, binary string, args []string) ([]byte, error) {
+			out, err := runpkg.ExecuteBinaryContext(ctx, dir, pin, env, binary, args)
+			if bytes.Contains(out, []byte("BenchmarkSubject")) {
 				// The subject's clean row plus one unparseable line that
 				// begins with the sibling's name: corrupt evidence attributed
 				// to a benchmark this invocation did not run.
-				return []byte(header + "BenchmarkSubject-8 1 5 ns/op\nBenchmarkOther-8 1x 5 ns/op\nPASS\n"), nil
+				out = append(out, []byte("BenchmarkOther-8 1x 5 ns/op\n")...)
 			}
-			return []byte(header + "BenchmarkOther-8 1 5 ns/op\nPASS\n"), nil
+			return out, err
 		},
 	}
 	var out, errOut bytes.Buffer
@@ -2086,7 +2071,7 @@ func TestRunPerArmScratchSweepIsolation(t *testing.T) {
 // the shape the per-package tests drive, preparation included, so every
 // preparation-time refusal they exercise fires where the command fires
 // it.
-func runPackage(w, errw io.Writer, e *gofresh.Engine, gc *gitStateCache, rc runConfig, p pkgMeta, env []string, conditions runpkg.Conditions, pgoInput string) error {
+func runPackage(w, errw io.Writer, e *gofresh.Session, gc *gitStateCache, rc runConfig, p pkgMeta, env []string, conditions runpkg.Conditions, pgoInput string) error {
 	prep, err := preparePackageInputs(rc, p)
 	if err != nil {
 		return err

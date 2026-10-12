@@ -9,8 +9,8 @@ import (
 
 // explainRecordAgainstCurrent supplies a fresh fixture capture to the same
 // renderer used by status and stat. It implements no alternative explanation.
-func explainRecordAgainstCurrent(ctx context.Context, w io.Writer, e *gofresh.Engine, moduleDir, importPath, bench string, fp gofresh.Fingerprint, env []string) error {
-	current, err := e.CaptureFor(ctx, gofresh.Subject{Package: importPath, Symbol: bench}, moduleDir, gofresh.Measurement)
+func explainRecordAgainstCurrent(ctx context.Context, w io.Writer, e *gofresh.Session, moduleDir, importPath, bench string, fp gofresh.Fingerprint, env []string) error {
+	current, err := fixtureFacts(ctx, e, gofresh.Subject{Package: importPath, Symbol: bench})
 	if err != nil {
 		return err
 	}

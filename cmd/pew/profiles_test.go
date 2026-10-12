@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	git "github.com/go-git/go-git/v5"
 	pprof "github.com/google/pprof/profile"
@@ -180,7 +181,7 @@ func BenchmarkFirst(b *testing.B) {
 	if !strings.Contains(stdout.String(), "integrity=verified") || !strings.Contains(stdout.String(), "relation=unverified") || !strings.Contains(stdout.String(), "flat=") {
 		t.Fatalf("missing profile judgments: %s", &stdout)
 	}
-	for n, mode := range []string{"failure", "missing-output", "empty", "corrupt", "source-drift", "executable-changed", "executable-missing", "cancel-in-flight", "cancel-completed", "concurrent-replacement"} {
+	for n, mode := range []string{"failure", "missing-output", "empty", "corrupt", "source-drift", "executable-changed", "executable-missing", "cancel-in-flight", "cancel-completed", "concurrent-replacement", "cancel-source-drift", "cancel-closing-expiry"} {
 		t.Run(mode, func(t *testing.T) {
 			key := store.Key{Bench: "BenchmarkFirst"}
 			prior, err := st.ReadBytes(key)
@@ -196,6 +197,9 @@ func BenchmarkFirst(b *testing.B) {
 			testRC := rc
 			testRC.profile = "cpu"
 			testRC.profileBenchtime = fmt.Sprintf("%dms", 400+n*10)
+			if mode == "cancel-closing-expiry" {
+				testRC.writeGateBound = time.Nanosecond
+			}
 			var concurrent []byte
 			testRC.diagnostic = func(c context.Context, dir, pin string, env gotool.Environment, bin string, args []string, diagnostics io.Writer) ([]byte, error) {
 				switch mode {
@@ -231,8 +235,11 @@ func BenchmarkFirst(b *testing.B) {
 					return nil, err
 				}
 				switch mode {
-				case "source-drift":
+				case "source-drift", "cancel-source-drift":
 					writeFile(t, filepath.Join(root, "bench_test.go"), string(fixture)+"\nfunc AddedSource() {}\n")
+					if mode == "cancel-source-drift" {
+						cancel()
+					}
 				case "executable-changed":
 					if err := os.WriteFile(bin, []byte("different regular executable bytes"), 0600); err != nil {
 						t.Fatal(err)
@@ -241,7 +248,7 @@ func BenchmarkFirst(b *testing.B) {
 					if err := os.Remove(bin); err != nil {
 						t.Fatal(err)
 					}
-				case "cancel-completed":
+				case "cancel-completed", "cancel-closing-expiry":
 					cancel()
 				case "concurrent-replacement":
 					rows, err := st.Read("", key.Bench, "")
@@ -286,8 +293,18 @@ func BenchmarkFirst(b *testing.B) {
 			if mode == "missing-output" && (!strings.Contains(log.String(), "profiling startup refused") || strings.Contains(out.String(), "empty cpu")) {
 				t.Fatalf("startup failure became empty: %s %s", &out, &log)
 			}
-			if mode == "source-drift" {
+			if mode == "source-drift" || mode == "cancel-source-drift" {
 				writeFile(t, filepath.Join(root, "bench_test.go"), string(fixture))
+			}
+			if mode == "cancel-source-drift" || mode == "cancel-closing-expiry" {
+				want := "analysis view changed"
+				if mode == "cancel-closing-expiry" {
+					want = "write gate exceeded 1ns"
+				}
+				var interrupted *interruptedError
+				if !errors.As(err, &interrupted) || !strings.Contains(err.Error(), "BenchmarkFirst cpu") || !strings.Contains(err.Error(), want) {
+					t.Fatalf("completed diagnostic's refusal hidden by cancellation: %v\n%s", err, &out)
+				}
 			}
 			if mode == "executable-changed" && (!strings.Contains(out.String(), "profile: executable changed during diagnostic") || strings.Contains(out.String(), "%!w")) {
 				t.Fatalf("misreported byte mismatch: %v\n%s", err, &out)
@@ -430,7 +447,7 @@ func BenchmarkFirst(b *testing.B) { for i:=0;i<b.N;i++ { sink=make([]byte, Alloc
 		if err != nil {
 			t.Fatal(err)
 		}
-		v, err := e.NewViewFor(t.Context(), []gofresh.Subject{{Package: c.Package, Symbol: c.Benchmark}}, root, gofresh.Measurement)
+		v, err := e.Snapshot(t.Context(), []gofresh.Subject{{Package: c.Package, Symbol: c.Benchmark}}, gofresh.Measurement)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -449,7 +466,7 @@ func BenchmarkFirst(b *testing.B) { for i:=0;i<b.N;i++ { sink=make([]byte, Alloc
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, err := e.NewViewFor(t.Context(), []gofresh.Subject{{Package: capture.Package, Symbol: capture.Benchmark}}, root, gofresh.Measurement)
+	v, err := e.Snapshot(t.Context(), []gofresh.Subject{{Package: capture.Package, Symbol: capture.Benchmark}}, gofresh.Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}

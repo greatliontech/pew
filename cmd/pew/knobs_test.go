@@ -195,23 +195,23 @@ func TestPinnedRunGuardsItsPin(t *testing.T) {
 		opts:     run.Options{Count: 1, Benchtime: "1x", Bench: "."},
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
 		execute: func(moduleDir, pin string, env, args []string) ([]byte, error) {
-			for _, a := range args {
-				if a == "-c" {
-					for _, kv := range env {
-						if strings.HasPrefix(kv, "GOMAXPROCS=") && kv != "GOMAXPROCS=" {
-							buildMaxprocs = append(buildMaxprocs, kv)
-						}
-					}
-					return nil, nil
+			for _, kv := range env {
+				if strings.HasPrefix(kv, "GOMAXPROCS=") && kv != "GOMAXPROCS=" {
+					buildMaxprocs = append(buildMaxprocs, kv)
 				}
 			}
+			return run.Execute(moduleDir, pin, testEnvironment(t, env), args)
+		},
+		binary: func(ctx context.Context, dir, pin string, env testEnvironmentValue, binary string, args []string) ([]byte, error) {
 			pins = append(pins, pin)
-			for _, kv := range env {
+			for _, kv := range env.Values() {
 				if strings.HasPrefix(kv, "GOMAXPROCS=") {
 					maxprocs = append(maxprocs, kv)
 				}
 			}
-			return []byte("goos: linux\ngoarch: amd64\npkg: example.com/pinned/a\ncpu: T\nBenchmarkA-2 1 5 ns/op\nPASS\n"), nil
+			// This pin checks the handoff of the derived affinity and width;
+			// the arbitrary fixture CPUs need not exist on the running host.
+			return run.ExecuteBinaryContext(ctx, dir, "", env, binary, args)
 		},
 	}
 	var out bytes.Buffer
@@ -317,14 +317,6 @@ func TestRunRecordsFromALinkedWorktree(t *testing.T) {
 		benchDir: filepath.Join(linked, "benchmarks"),
 		opts:     run.Options{Count: 1, Benchtime: "1x", Bench: "."},
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
-		execute: func(moduleDir, pin string, env, args []string) ([]byte, error) {
-			for _, a := range args {
-				if a == "-c" {
-					return nil, nil
-				}
-			}
-			return []byte("goos: linux\ngoarch: amd64\npkg: example.com/linked/a\ncpu: T\nBenchmarkA-2 1 5 ns/op\nPASS\n"), nil
-		},
 	}
 	var out, errw bytes.Buffer
 	if err := runRun(context.Background(), &out, &errw, rc, []string{"./..."}); err != nil {

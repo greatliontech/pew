@@ -30,7 +30,7 @@ func TestEnginePreparationReportsTheCheckedSample(t *testing.T) {
 	defer stop()
 	var phases []string
 	setPhaseHook(ctx, func(phase string) { phases = append(phases, phase) })
-	if _, err := buildEngine(ctx, t.TempDir(), testEnvironment(t, nil), nil, ""); err != nil {
+	if _, err := buildEngine(ctx, t.TempDir(), "", testEnvironment(t, nil), nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 1 || !strings.Contains(strings.Join(phases, "\n"), sampled) {
@@ -57,7 +57,7 @@ func TestBuildEngineRefusesToolchainSkew(t *testing.T) {
 	}
 	dir := t.TempDir()
 	env := append(os.Environ(), "PEW_PROVENANCE_PROBE=1")
-	if _, err := buildEngine(ctx, dir, testEnvironment(t, env), nil, ""); err == nil {
+	if _, err := buildEngine(ctx, dir, dir, testEnvironment(t, env), nil, ""); err == nil {
 		t.Fatal("buildEngine accepted an ambient toolchain a whole major ahead of the binary")
 	} else if !strings.Contains(err.Error(), "cross-major") {
 		t.Fatalf("skew refusal = %v, want the cross-major class named", err)
@@ -96,7 +96,7 @@ func TestBuildEngineRefusesUnidentifiableToolchain(t *testing.T) {
 	deps.sample = func(_ context.Context, dir string, env testEnvironmentValue) (string, error) {
 		return "devel +abc123", nil
 	}
-	if _, err := buildEngine(ctx, t.TempDir(), testEnvironment(t, os.Environ()), nil, ""); err == nil {
+	if _, err := buildEngine(ctx, t.TempDir(), "", testEnvironment(t, os.Environ()), nil, ""); err == nil {
 		t.Fatal("buildEngine accepted an unidentifiable ambient toolchain")
 	} else if !strings.Contains(err.Error(), "unidentifiable") {
 		t.Fatalf("refusal = %v, want the unidentifiable class named", err)

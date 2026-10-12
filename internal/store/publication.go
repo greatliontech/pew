@@ -66,7 +66,7 @@ func (s *Store) ReplaceContext(ctx context.Context, k Key, expected []byte, rows
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return s.writeUnlocked(k.PkgRel, k.Bench, k.Label, rows)
+	return s.writeUnlocked(ctx, k.PkgRel, k.Bench, k.Label, rows)
 }
 
 var digestName = regexp.MustCompile(`^[0-9a-f]{64}$`)

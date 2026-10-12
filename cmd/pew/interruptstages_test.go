@@ -154,7 +154,7 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 		t.Fatal(err)
 	}
 	subjects := []gofresh.Subject{{Package: "example.com/stattwo/pkg", Symbol: "BenchmarkA"}, {Package: "example.com/stattwo/pkg", Symbol: "BenchmarkB"}}
-	view, err := engine.NewViewFor(owned, subjects, twoDir, gofresh.Measurement)
+	view, err := engine.Snapshot(owned, subjects, gofresh.Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, subject := range subjects {
-		fp, err := view.Capture(owned, subject)
+		fp, err := view.CurrentFacts(owned, subject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -253,7 +253,7 @@ func TestMeasuredArmPersistsUnderAnInterruptedGate(t *testing.T) {
 		benchDir: benchDir,
 		opts:     run.Options{Count: 1, Benchtime: "1x", Bench: "."},
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
-		execute:  armStub(nil),
+		binary:   armExecution(nil),
 		beforePersist: func(bench string) {
 			if bench == "BenchmarkFirst" {
 				cancel() // the operator interrupts after the arm measured, before its write
@@ -341,7 +341,7 @@ func TestVerbsEndByAnInterruptionReceivedAfterTheLastUnit(t *testing.T) {
 		benchDir: benchDir,
 		opts:     run.Options{Count: 1, Benchtime: "1x", Bench: "."},
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
-		execute:  armStub(nil),
+		binary:   armExecution(nil),
 		beforePersist: func(bench string) {
 			if bench == "BenchmarkSecond" {
 				cancel()
@@ -499,7 +499,7 @@ func TestMeasurementStagesReportTheirCancellationAsInterruption(t *testing.T) {
 		benchDir:       filepath.Join(dir, "benchmarks"),
 		opts:           run.Options{Count: 1, Benchtime: "1x", Bench: "."},
 		throttle:       func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
-		execute:        armStub(nil),
+		binary:         armExecution(nil),
 	}
 	w.Reset()
 	err := runRun(context.Background(), &w, &ew, rc, []string{"."})

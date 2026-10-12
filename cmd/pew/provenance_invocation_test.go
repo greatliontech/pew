@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	gofreshtool "github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/pew/internal/compare"
 	"github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
@@ -90,12 +91,17 @@ func TestJudgedVerbsShareSamplesOnlyWithinInvocation(t *testing.T) {
 			commitFixture(t, dir)
 			withWorkingDir(t, dir)
 			ctx, deps := testDependencies(t)
-			checks, spawns := 0, 0
+			checks := 0
+			readers := map[*gofreshtool.EnvReader]int{}
 			deps.sample = func(ctx context.Context, dir string, env testEnvironmentValue) (string, error) {
 				checks++
+				reader, err := preparationReader(ctx, dir, env)
+				if err != nil {
+					return "", err
+				}
+				readers[reader]++
 				return sampleGoVersion(ctx, dir, env)
 			}
-			deps.prepare = func(*exec.Cmd) { spawns++ }
 			for invocation := 1; invocation <= 2; invocation++ {
 				before := checks
 				var out, errout bytes.Buffer
@@ -124,8 +130,16 @@ func TestJudgedVerbsShareSamplesOnlyWithinInvocation(t *testing.T) {
 				if verb == "status" {
 					wantChecks = 4
 				} // invocation preflight, then the two lazy engines
-				if checks-before != wantChecks || spawns != invocation {
-					t.Fatalf("invocation %d: %d provenance checks, %d total spawns; want %d checks and %d spawns\n%s\n%s", invocation, checks-before, spawns, wantChecks, invocation, &out, &errout)
+				// Each invocation owns one provenance reader, independently of
+				// the session's construction and analysis queries. The reader's
+				// physical query memo is pinned by TestProvenanceReadsPreparationSnapshot.
+				if checks-before != wantChecks || len(readers) != invocation {
+					t.Fatalf("invocation %d: %d provenance checks, %d readers; want %d checks and %d readers\n%s\n%s", invocation, checks-before, len(readers), wantChecks, invocation, &out, &errout)
+				}
+				for _, uses := range readers {
+					if uses != wantChecks {
+						t.Fatalf("preparation reader used %d times; want one invocation's %d checks", uses, wantChecks)
+					}
 				}
 			}
 		})

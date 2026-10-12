@@ -17,7 +17,7 @@ import (
 
 type abProfileSide struct {
 	prep *packagePreparation
-	view *gofresh.View
+	view *gofresh.Snapshot
 }
 
 func prepareABProfiles(ctx context.Context, ac abConfig, a pkgMeta, dirB string, envs environments) ([2]*abProfileSide, error) {
@@ -39,6 +39,10 @@ func prepareABProfiles(ctx context.Context, ac abConfig, a pkgMeta, dirB string,
 		if err != nil {
 			return sides, err
 		}
+		harnessArgs, err := prepareHarnessArgs(ctx, p.Module.Dir, envs.analysis)
+		if err != nil {
+			return sides, err
+		}
 		engine, pgo, err := newEngineForPkgProducer(ctx, p, envs.analysis, envs.runtime)
 		if err != nil {
 			return sides, err
@@ -51,7 +55,7 @@ func prepareABProfiles(ctx context.Context, ac abConfig, a pkgMeta, dirB string,
 		if err != nil {
 			return sides, err
 		}
-		prep := &packagePreparation{pkg: p, pkgRel: packageRel(p), runBenches: names, scratch: scratch, engine: engine, pgoInput: pgo}
+		prep := &packagePreparation{pkg: p, pkgRel: packageRel(p), runBenches: names, scratch: scratch, engine: engine, pgoInput: pgo, harnessArgs: harnessArgs}
 		sides[i] = &abProfileSide{prep: prep, view: view}
 	}
 	return sides, nil
@@ -108,15 +112,29 @@ func captureABProfiles(ctx context.Context, w, errw io.Writer, ac abConfig, prep
 					}
 					if err == nil {
 						err = captureDiagnostic(ctx, errw, rc, gc, side.prep, envs, conditions, side.view, name, kind, ac.profileBenchtime, selection, rows, nil, func(gate context.Context, c profiles.Capture, blob []byte) error {
-							// These are reference build facts, not a fabricated timed fingerprint.
-							if err := side.view.Validate(gate); err != nil {
+							// The ordinary comparison domain permits different source
+							// coordinates. Bind it to this producing side through the
+							// same native closing check; never rewrite native evidence.
+							p := side.prep.pkg
+							ordinary, err := ac.sideGuards(gate, p.Module.Dir, p.Dir, p.Name == "main", envs.analysis)
+							if err != nil {
 								return err
 							}
-							want := prep.guardsA
+							expected := prep.guardsA
 							if i == 1 {
-								want = prep.guardsB
+								expected = prep.guardsB
 							}
-							if c.Fingerprint.Guards != want {
+							if ordinary != expected {
+								return fmt.Errorf("ab: diagnostic comparison guards changed since its timed build")
+							}
+							if err := validateProfileSnapshot(gate, side.view, gofresh.Subject{Package: c.Package, Symbol: c.Benchmark}); err != nil {
+								return err
+							}
+							facts, err := side.view.CurrentFacts(gate, gofresh.Subject{Package: c.Package, Symbol: c.Benchmark})
+							if err != nil {
+								return err
+							}
+							if c.Fingerprint.Guards != facts.Guards {
 								return fmt.Errorf("ab: diagnostic guards differ from its timed build facts")
 							}
 							if len(c.Children) == 0 {
@@ -146,8 +164,7 @@ func captureABProfiles(ctx context.Context, w, errw io.Writer, ac abConfig, prep
 									return err
 								}
 								sideName := []string{"A", "B"}[i]
-								ac.artifact.blocks = append(ac.artifact.blocks, abBlock{pkg: c.Package, ref: ac.ref, side: sideName, profile: &c})
-								if err := ac.artifact.write(); err != nil {
+								if err := ac.artifact.publishProfile(gate, abBlock{pkg: c.Package, ref: ac.ref, side: sideName, profile: &c}); err != nil {
 									return err
 								}
 							}
@@ -174,7 +191,7 @@ func captureABProfiles(ctx context.Context, w, errw io.Writer, ac abConfig, prep
 				}
 				if captures[0] != nil && captures[1] != nil {
 					var err error
-					report.Differences, err = profiles.Compare(*captures[1], *captures[0], blobs[1], blobs[0])
+					report.Differences, err = profiles.CompareWithGuards(*captures[1], *captures[0], blobs[1], blobs[0], prep.guardsB, prep.guardsA)
 					if err != nil {
 						report.Reason = err.Error()
 						unfulfilled = true

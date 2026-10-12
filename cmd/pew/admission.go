@@ -22,10 +22,11 @@ type admission struct {
 	// fp and ledger are the decoded fingerprint and test-variant ledger
 	// of an admitted recording (or of one refused at the strategy rung,
 	// whose fingerprint still decoded).
-	fp     gofresh.Fingerprint
-	ledger string
-	rows   []*benchfmt.Result
-	raw    []byte
+	fp       gofresh.Fingerprint
+	ledger   string
+	rows     []*benchfmt.Result
+	raw      []byte
+	workload *workload
 }
 
 // admitRecording climbs the ladder over the WHOLE recording: every row
@@ -58,6 +59,9 @@ func admitRecording(recs []*benchfmt.Result, workingTree bool) admission {
 				return admission{class: "format"}
 			}
 		}
+		if value, present := keys[runpkg.KeyWorkload.Name]; present && value == "" {
+			return admission{class: "format"}
+		}
 		if keys[runpkg.KeyDirty.Name] != "true" && keys[runpkg.KeyDirty.Name] != "false" {
 			return admission{class: "format"}
 		}
@@ -73,6 +77,11 @@ func admitRecording(recs []*benchfmt.Result, workingTree bool) admission {
 			return admission{class: "format"}
 		}
 	}
+	w, err := decodeWorkload(recs[0].GetConfig(runpkg.KeyWorkload.Name))
+	if err != nil {
+		return admission{class: "format"}
+	}
+	first.workload = w
 	if workingTree && first.fp.DynamicStateStrategy != gofresh.DynamicStateStrategy {
 		first.class = "dynamic-state strategy"
 		return first

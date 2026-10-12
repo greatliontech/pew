@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/spf13/cobra"
 
@@ -347,6 +348,7 @@ type abPreparation struct {
 	sideBPkgDir      string
 	tmp, binA, binB  string
 	guardsA, guardsB guard.Guards
+	harnessArgs      [2][]string
 }
 
 // prepareABPackage builds a package's A/B preparation record, firing
@@ -367,6 +369,12 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 		return nil, err
 	}
 	prep := &abPreparation{pkg: p, sideBPkgDir: sideBPkgDir}
+	for i, moduleDir := range []string{p.Module.Dir, sideBModule} {
+		prep.harnessArgs[i], err = prepareHarnessArgs(ctx, moduleDir, env)
+		if err != nil {
+			return prep, err
+		}
+	}
 	// Both sides build BEFORE either side measures: two standing
 	// binaries make interleaving free, and the shared build cache makes
 	// the second build cheap. Every package's binaries stand for the
@@ -424,10 +432,31 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 	if pkgRelToModule != "." {
 		relTarget = "./" + filepath.ToSlash(pkgRelToModule)
 	}
-	if err := ac.buildBinary(ctx, p.Module.Dir, env, []string{"test", "-c", "-o", prep.binA, relTarget}); err != nil {
+	buildEnvs := [2]gotool.Environment{env, env}
+	buildArgs := [2][]string{{"test", "-c", "-o", prep.binA, relTarget}, {"test", "-c", "-o", prep.binB, relTarget}}
+	for i, side := range prep.diagnostics {
+		if side == nil {
+			continue
+		}
+		description, err := side.view.BuildDescription(p.ImportPath)
+		if err != nil {
+			return prep, err
+		}
+		buildEnvs[i], err = gotool.NewEnvironment(description.Environment)
+		if err != nil {
+			return prep, err
+		}
+		output := prep.binA
+		if i == 1 {
+			output = prep.binB
+		}
+		buildArgs[i] = append([]string{"test", "-c", "-o", output}, description.Flags...)
+		buildArgs[i] = append(buildArgs[i], description.Package)
+	}
+	if err := ac.buildBinary(ctx, p.Module.Dir, buildEnvs[0], buildArgs[0]); err != nil {
 		return prep, fmt.Errorf("ab: building side A (working tree): %w", err)
 	}
-	if err := ac.buildBinary(ctx, sideBModule, env, []string{"test", "-c", "-o", prep.binB, relTarget}); err != nil {
+	if err := ac.buildBinary(ctx, sideBModule, buildEnvs[1], buildArgs[1]); err != nil {
 		return prep, fmt.Errorf("ab: building side B (%s): %w", ac.ref, err)
 	}
 	// Guards are captured at build time, not after measurement: the stamp
@@ -465,8 +494,10 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 	}
 	for _, side := range prep.diagnostics {
 		if side != nil {
-			if err := side.view.Validate(ctx); err != nil {
-				return prep, err
+			for _, name := range side.prep.runBenches {
+				if err := validateProfileSnapshot(ctx, side.view, gofresh.Subject{Package: side.prep.pkg.ImportPath, Symbol: name}); err != nil {
+					return prep, err
+				}
 			}
 		}
 	}
@@ -556,6 +587,8 @@ func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPrep
 	if ac.benchtime != "" {
 		args = append(args, "-test.benchtime="+ac.benchtime)
 	}
+	argsA := append(append([]string{}, prep.harnessArgs[0]...), args...)
+	argsB := append(append([]string{}, prep.harnessArgs[1]...), args...)
 	// Interleaved A/B per iteration: block ordering folds slow machine
 	// drift (thermal, page cache) into the measured delta; alternation
 	// cancels it. Each binary runs from its own tree so cwd-sensitive
@@ -575,7 +608,7 @@ func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPrep
 		// A cancellation landing inside a side's process is the
 		// interruption too: the process under measurement is killed and
 		// the pair in flight is lost, the artifact holding the rest.
-		a, err := ac.executeBinary(ctx, p.Dir, ac.pin.List(), runtimeEnv, binA, args)
+		a, err := ac.executeBinary(ctx, p.Dir, ac.pin.List(), runtimeEnv, binA, argsA)
 		if cancelledBy(ctx, err) {
 			return stopped()
 		}
@@ -583,7 +616,7 @@ func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPrep
 			return fmt.Errorf("ab: side A iteration %d: %w", i+1, err)
 		}
 		outA = append(outA, a...)
-		b, err := ac.executeBinary(ctx, sideBPkgDir, ac.pin.List(), runtimeEnv, binB, args)
+		b, err := ac.executeBinary(ctx, sideBPkgDir, ac.pin.List(), runtimeEnv, binB, argsB)
 		if cancelledBy(ctx, err) {
 			return stopped()
 		}

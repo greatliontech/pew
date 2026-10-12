@@ -23,11 +23,11 @@ func TestNewEngineHonorsDirectives(t *testing.T) {
 		t.Fatalf("newEngineAt: %v", err)
 	}
 	subj := gofresh.Subject{Package: pkg, Symbol: bench}
-	fp, err := e.CaptureFor(t.Context(), subj, ".", gofresh.Measurement)
+	fp, err := fixtureFacts(t.Context(), e, subj)
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	v, err := e.Check(t.Context(), fp, subj, ".")
+	v, err := fixtureCheck(t.Context(), e, fp, subj)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}

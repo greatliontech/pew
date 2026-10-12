@@ -417,7 +417,7 @@ func TestStatFreshnessPolicyUsesSharedValidAndStaleJudgments(t *testing.T) {
 		t.Fatal(err)
 	}
 	commitAll(t, repo, "pure benchmarks")
-	rc := runConfig{opts: run.Options{Count: 1, Benchtime: "1x", Bench: "."}, execute: armStub(nil)}
+	rc := runConfig{opts: run.Options{Count: 1, Benchtime: "1x", Bench: "."}, binary: armExecution(nil)}
 	var recorded, diagnostics bytes.Buffer
 	if err := runRun(context.Background(), &recorded, &diagnostics, rc, []string{"."}); err != nil {
 		t.Fatalf("record: %v\n%s\n%s", err, recorded.String(), diagnostics.String())

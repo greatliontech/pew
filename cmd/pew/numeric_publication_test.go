@@ -5,9 +5,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 )
@@ -30,11 +32,15 @@ func TestRunInvalidSampleKeepsPriorRecordingAndSibling(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			stub := armStub(nil)
-			rc := runConfig{benchDir: st.Root, all: true, opts: run.Options{Count: 1, Benchtime: "1x", Bench: "."}, execute: func(dir, pin string, env, args []string) ([]byte, error) {
-				out, err := stub(dir, pin, env, args)
+			rc := runConfig{benchDir: st.Root, all: true, opts: run.Options{Count: 1, Benchtime: "1x", Bench: "."}, binary: func(ctx context.Context, dir, pin string, env gotool.Environment, binary string, args []string) ([]byte, error) {
+				out, err := run.ExecuteBinaryContext(ctx, dir, pin, env, binary, args)
 				if bytes.Contains(out, []byte("BenchmarkFirst")) {
-					out = bytes.ReplaceAll(out, []byte("5 ns/op"), []byte(bad+" ns/op"))
+					pattern := regexp.MustCompile(`[0-9.]+ ns/op`)
+					changed := pattern.ReplaceAll(out, []byte(bad+" ns/op"))
+					if bytes.Equal(changed, out) {
+						t.Fatalf("sample corruption did not reach an emitted metric: %s", out)
+					}
+					out = changed
 				}
 				return out, err
 			}}

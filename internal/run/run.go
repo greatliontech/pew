@@ -35,7 +35,7 @@ type Options struct {
 
 // RecordingFormat identifies the native-fingerprint benchmark envelope.
 // Earlier formats regenerate without interpreting or upgrading their evidence.
-const RecordingFormat = "5"
+const RecordingFormat = "6"
 
 // TestArgs builds the `go test` argument list for benchmarking pkg.
 func TestArgs(pkg string, o Options) []string {
@@ -43,6 +43,24 @@ func TestArgs(pkg string, o Options) []string {
 		"test", "-run", "^$", "-bench", o.Bench, "-benchmem",
 		"-count", strconv.Itoa(o.Count), "-benchtime", o.Benchtime, pkg,
 	}
+}
+
+// BinaryArgs carries admitted benchmark effort to an already-built test binary.
+// Compilation flags belong to its build description, never this execution.
+func BinaryArgs(o Options) []string {
+	return []string{"-test.run=^$", "-test.bench=" + o.Bench, "-test.benchmem", "-test.count=" + strconv.Itoa(o.Count), "-test.benchtime=" + o.Benchtime}
+}
+
+// HarnessCompleted recognizes the ordinary benchmark harness's terminal marker.
+// It supplements process health and sample admission; arbitrary output is never
+// ingested as a producer invocation by Pew.
+func HarnessCompleted(output []byte) bool {
+	for line := range bytes.SplitSeq(output, []byte{'\n'}) {
+		if bytes.Equal(bytes.TrimSuffix(line, []byte{'\r'}), []byte("PASS")) {
+			return true
+		}
+	}
+	return false
 }
 
 // Execute runs the benchmark command in dir under a background context
@@ -444,7 +462,11 @@ func PGOPath(moduleDir, pkgDir string, mainPkg bool, goflags string) (string, er
 	profile := ""
 	found := false
 	// The last -pgo flag wins, matching the go command's own resolution.
-	for _, f := range strings.Fields(goflags) {
+	flags, err := GoFlagFields(goflags)
+	if err != nil {
+		return "", err
+	}
+	for _, f := range flags {
 		if v, ok := strings.CutPrefix(f, "-pgo="); ok {
 			profile = v
 			found = true

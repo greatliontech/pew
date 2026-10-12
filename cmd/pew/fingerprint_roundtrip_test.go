@@ -14,6 +14,8 @@ func TestFingerprintConfigRoundTrip(t *testing.T) {
 	want := gofresh.Fingerprint{
 		MaximalClosure:     "closure-hash",
 		TestVariantClosure: "variant-hash",
+		ToolchainContent:   "toolchain-content",
+		AdmissionPolicy:    "admission-policy",
 		Guards: guard.Guards{
 			Toolchain:     "go-toolchain",
 			Machine:       "machine-fp",

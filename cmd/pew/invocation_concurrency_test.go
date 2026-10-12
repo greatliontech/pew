@@ -77,7 +77,7 @@ func TestConcurrentInvocationsKeepEvidenceIsolated(t *testing.T) {
 			}
 			return sampleGoVersion(ctx, dir, env)
 		}
-		deps.view = func(_ *gofresh.Engine, _ context.Context, subjects []gofresh.Subject, dir string, kind gofresh.Kind) (*gofresh.View, error) {
+		deps.view = func(_ *gofresh.Session, _ context.Context, subjects []gofresh.Subject, dir string, kind gofresh.Kind) (*gofresh.Snapshot, error) {
 			l.views++
 			if dir != module || kind != gofresh.Measurement || len(subjects) != 1 || subjects[0].Symbol != l.marker {
 				return nil, errors.New("foreign analysis dependency")
@@ -88,9 +88,16 @@ func TestConcurrentInvocationsKeepEvidenceIsolated(t *testing.T) {
 	finished := make(chan error, len(lanes))
 	for _, l := range lanes {
 		go func() {
-			for range 2 {
+			for iteration := range 2 {
 				if _, _, err := newEngineAt(l.ctx, module, module, false, l.inv.env); err != nil {
 					finished <- err
+					return
+				}
+				// Preparation takes one memoized snapshot; each independent
+				// session takes its own construction snapshot under the same
+				// owned runner. Neither query may bypass the lane's observer.
+				if l.spawns != iteration+2 {
+					finished <- fmt.Errorf("%s construction %d: %d queries, want %d", l.marker, iteration, l.spawns, iteration+2)
 					return
 				}
 				vouches, err := invocationVouches(l.ctx, module)
@@ -126,7 +133,7 @@ func TestConcurrentInvocationsKeepEvidenceIsolated(t *testing.T) {
 		}
 	}
 	for _, l := range lanes {
-		if l.spawns != 1 || l.samples != 2 || l.views != 2 || len(l.phases) != 2 {
+		if l.spawns != 3 || l.samples != 2 || l.views != 2 || len(l.phases) != 2 {
 			t.Fatalf("%s resources: spawns=%d samples=%d views=%d phases=%v", l.marker, l.spawns, l.samples, l.views, l.phases)
 		}
 		if l.log.String() != strings.Repeat("gofresh: isolation — "+l.marker+"\n", 2) {

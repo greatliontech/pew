@@ -34,12 +34,12 @@ func TestLanguageShapeCanaries(t *testing.T) {
 				return
 			}
 			subj := gofresh.Subject{Package: "example.com/shape", Symbol: "BenchmarkSubject"}
-			fp, err := e.CaptureFor(t.Context(), subj, dir, gofresh.Measurement)
+			fp, err := fixtureFacts(t.Context(), e, subj)
 			if err != nil {
 				t.Errorf("canary capture: %v", err)
 				return
 			}
-			if _, err := e.Check(t.Context(), fp, subj, dir); err != nil {
+			if _, err := fixtureCheck(t.Context(), e, fp, subj); err != nil {
 				t.Errorf("canary check: %v", err)
 			}
 		})

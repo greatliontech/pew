@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/google/pprof/profile"
+	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/pew/internal/run"
 )
 
@@ -34,10 +35,19 @@ type FunctionDifference struct {
 // closures, producing paths and executable digests deliberately need not agree.
 // Each side's exact-source attribution remains in its separately rendered metrics.
 func Compare(a, b Capture, rawA, rawB []byte) ([]Difference, error) {
+	return CompareWithGuards(a, b, rawA, rawB, a.Fingerprint.Guards, b.Fingerprint.Guards)
+}
+
+// CompareWithGuards compares live, independently admitted builds using their
+// ordinary comparison domain. The caller validates each projection against its
+// side's producing build through closing; equal values alone establish no such
+// binding. Native fingerprints are retained unchanged and confer no additional
+// freshness or outcome authority through this comparison.
+func CompareWithGuards(a, b Capture, rawA, rawB []byte, guardsA, guardsB guard.Guards) ([]Difference, error) {
 	if a.Kind != b.Kind || a.Package != b.Package || a.Benchmark != b.Benchmark || a.Selection != b.Selection || a.Budget != b.Budget || a.Protocol != b.Protocol || a.Scope != b.Scope || a.Sampling != b.Sampling {
 		return nil, fmt.Errorf("profile: incompatible workload or capture protocol")
 	}
-	ga, gb := run.GuardConfig(a.Fingerprint.Guards), run.GuardConfig(b.Fingerprint.Guards)
+	ga, gb := run.GuardConfig(guardsA), run.GuardConfig(guardsB)
 	for i := range ga {
 		if len(ga[i].Value) == 0 || string(ga[i].Value) != string(gb[i].Value) {
 			return nil, fmt.Errorf("profile: incompatible %s", ga[i].Key)

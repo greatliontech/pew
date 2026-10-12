@@ -48,11 +48,11 @@ func TestNoncallAndMutableLocalMovementStalesStoredMeasurement(t *testing.T) {
 				t.Fatal(err)
 			}
 			subject := gofresh.Subject{Package: "example.com/movement", Symbol: "BenchmarkValue"}
-			view, err := engine.NewViewFor(context.Background(), []gofresh.Subject{subject}, root, gofresh.Measurement)
+			view, err := engine.Snapshot(context.Background(), []gofresh.Subject{subject}, gofresh.Measurement)
 			if err != nil {
 				t.Fatal(err)
 			}
-			fp, err := view.Capture(context.Background(), subject)
+			fp, err := view.CurrentFacts(context.Background(), subject)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -74,8 +74,8 @@ func TestNoncallAndMutableLocalMovementStalesStoredMeasurement(t *testing.T) {
 			}
 			judge := func() *benchVerdict {
 				t.Helper()
-				rows, err := checkPackage(context.Background(), st, func(subjects []gofresh.Subject) (*gofresh.View, error) {
-					return engine.NewViewFor(context.Background(), subjects, root, gofresh.Measurement)
+				rows, err := checkPackage(context.Background(), st, func(subjects []gofresh.Subject) (*gofresh.Snapshot, error) {
+					return engine.Snapshot(context.Background(), subjects, gofresh.Measurement)
 				}, subject.Package, "", root, []string{subject.Symbol}, "", nil)
 				if err != nil || rows[subject.Symbol].err != nil {
 					t.Fatalf("judgment: %v %+v", err, rows)
@@ -89,8 +89,8 @@ func TestNoncallAndMutableLocalMovementStalesStoredMeasurement(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			deferred, err := judgeRecordings(context.Background(), func(subjects []gofresh.Subject) (*gofresh.View, error) {
-				view, err := engine.NewViewFor(context.Background(), subjects, root, gofresh.Measurement)
+			deferred, err := judgeRecordings(context.Background(), func(subjects []gofresh.Subject) (*gofresh.Snapshot, error) {
+				view, err := engine.Snapshot(context.Background(), subjects, gofresh.Measurement)
 				if err == nil {
 					writeFile(t, filepath.Join(root, tc.path), tc.replacement)
 				}

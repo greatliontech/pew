@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,10 +17,11 @@ import (
 // abArtifact owns all completed packages and pairs of one invocation. Raw streams
 // stay benchmark-format data; configuration is cleared at each section boundary.
 type abArtifact struct {
-	ownership *abOutputOwnership
-	path      string
-	blocks    []abBlock
-	samples   map[string]map[string]bool
+	ownership    *abOutputOwnership
+	path         string
+	blocks       []abBlock
+	samples      map[string]map[string]bool
+	observeWrite func(string)
 }
 
 type abBlock struct {
@@ -80,6 +82,25 @@ func (a *abArtifact) pair(pkg, ref string, pair int, rawA, rawB []byte) error {
 }
 
 func (a *abArtifact) write() error {
+	ctx, cancel := context.WithTimeout(context.Background(), armWriteGateBound)
+	defer cancel()
+	return a.writeContext(ctx)
+}
+
+func (a *abArtifact) publishProfile(ctx context.Context, block abBlock) error {
+	prior := len(a.blocks)
+	a.blocks = append(a.blocks, block)
+	if err := a.writeContext(ctx); err != nil {
+		a.blocks = a.blocks[:prior]
+		return err
+	}
+	return nil
+}
+
+func (a *abArtifact) writeContext(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if a.path == "" {
 		return nil
 	}
@@ -91,6 +112,9 @@ func (a *abArtifact) write() error {
 	var out bytes.Buffer
 	previous := map[string]bool{}
 	for _, b := range a.blocks {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		keys := make([]string, 0, len(previous))
 		for k := range previous {
 			keys = append(keys, k)
@@ -117,6 +141,9 @@ func (a *abArtifact) write() error {
 		} else {
 			r := benchfmt.NewReader(bytes.NewReader(b.raw), "ab")
 			for r.Scan() {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				if row, ok := r.Result().(*benchfmt.Result); ok {
 					for _, cfg := range row.Config {
 						if cfg.File {
@@ -127,6 +154,9 @@ func (a *abArtifact) write() error {
 			}
 			// Include trailing configuration as well as configuration on rows.
 			for _, line := range strings.Split(string(b.raw), "\n") {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				key, _, ok := strings.Cut(line, ":")
 				if ok && key != "" && key[0] >= 'a' && key[0] <= 'z' && !strings.ContainsAny(key, " \t\r") {
 					previous[key] = true
@@ -151,10 +181,22 @@ func (a *abArtifact) write() error {
 	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
 		return err
 	}
+	if a.observeWrite != nil {
+		a.observeWrite("staged")
+	}
 	if a.ownership != nil {
 		if err := a.ownership.validate(); err != nil {
 			return err
 		}
 	}
-	return os.Rename(tmp.Name(), a.path)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp.Name(), a.path); err != nil {
+		return err
+	}
+	if a.observeWrite != nil {
+		a.observeWrite("committed")
+	}
+	return nil
 }

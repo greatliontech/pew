@@ -112,14 +112,12 @@ func TestRunPreparesEveryPackageBeforeAnyMeasurement(t *testing.T) {
 		opts:     run.Options{Count: 1, Benchtime: "1x", Bench: "."},
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
 		execute: func(moduleDir, pin string, env, args []string) ([]byte, error) {
-			for _, a := range args {
-				if a == "-c" {
-					events = append(events, "build")
-					return nil, nil
-				}
-			}
+			events = append(events, "build")
+			return run.Execute(moduleDir, pin, testEnvironment(t, env), args)
+		},
+		binary: func(ctx context.Context, dir, pin string, env testEnvironmentValue, binary string, args []string) ([]byte, error) {
 			events = append(events, "measure")
-			return []byte("goos: linux\ngoarch: amd64\npkg: example.com/prep/a\ncpu: T\nBenchmarkA-8 1 5 ns/op\nPASS\n"), nil
+			return run.ExecuteBinaryContext(ctx, dir, pin, env, binary, args)
 		},
 	}
 	var out bytes.Buffer
@@ -351,17 +349,9 @@ func TestRunServesValidRecordingsByDefault(t *testing.T) {
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
 		// The real executor, counted: a valid recording needs the test
 		// binary's own log and observation, which a stub cannot forge.
-		execute: func(moduleDir, pin string, env, args []string) ([]byte, error) {
-			build := false
-			for _, a := range args {
-				if a == "-c" {
-					build = true
-				}
-			}
-			if !build {
-				measurements++
-			}
-			return run.Execute(moduleDir, pin, testEnvironment(t, env), args)
+		binary: func(ctx context.Context, dir, pin string, env testEnvironmentValue, binary string, args []string) ([]byte, error) {
+			measurements++
+			return run.ExecuteBinaryContext(ctx, dir, pin, env, binary, args)
 		},
 	}
 	var out bytes.Buffer
@@ -377,7 +367,7 @@ func TestRunServesValidRecordingsByDefault(t *testing.T) {
 	loads := 0
 	ctx, deps := testDependencies(t)
 	prior := deps.view
-	deps.view = func(e *gofresh.Engine, ctx context.Context, subjects []gofresh.Subject, moduleDir string, kind gofresh.Kind) (*gofresh.View, error) {
+	deps.view = func(e *gofresh.Session, ctx context.Context, subjects []gofresh.Subject, moduleDir string, kind gofresh.Kind) (*gofresh.Snapshot, error) {
 		loads++
 		return prior(e, ctx, subjects, moduleDir, kind)
 	}

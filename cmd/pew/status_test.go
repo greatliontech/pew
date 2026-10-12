@@ -28,13 +28,10 @@ func TestStatusPackageUsesLabel(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
-	e, err := gofresh.New()
-	if err != nil {
-		t.Fatalf("New engine: %v", err)
-	}
+	e := fixtureSession(t, ".")
 	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
 	const bench = "BenchmarkDecode"
-	fp, err := e.CaptureFor(t.Context(), gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
+	fp, err := fixtureFacts(t.Context(), e, gofresh.Subject{Package: pkg, Symbol: bench})
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
@@ -96,7 +93,7 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fp, err := e.CaptureFor(t.Context(), gofresh.Subject{Package: pkg, Symbol: bench}, dir, gofresh.Measurement)
+	fp, err := fixtureFacts(t.Context(), e, gofresh.Subject{Package: pkg, Symbol: bench})
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
@@ -143,7 +140,7 @@ func TestStatusExplainNamesTheMovingGuard(t *testing.T) {
 	}
 	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
 	const bench = "BenchmarkDecode"
-	fp, err := e.CaptureFor(t.Context(), gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
+	fp, err := fixtureFacts(t.Context(), e, gofresh.Subject{Package: pkg, Symbol: bench})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +197,7 @@ func TestStatusExplainNamesMovedInputs(t *testing.T) {
 	}
 	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
 	const bench = "BenchmarkDecode"
-	fp, err := e.CaptureFor(t.Context(), gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
+	fp, err := fixtureFacts(t.Context(), e, gofresh.Subject{Package: pkg, Symbol: bench})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,13 +339,13 @@ func TestStatusWarnsOnForeignConfigKeys(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
-	e, err := gofresh.New()
+	e, err := staticFixtureSession(".")
 	if err != nil {
 		t.Fatalf("New engine: %v", err)
 	}
 	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
 	const bench = "BenchmarkDecode"
-	fp, err := e.CaptureFor(t.Context(), gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
+	fp, err := fixtureFacts(t.Context(), e, gofresh.Subject{Package: pkg, Symbol: bench})
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
@@ -383,13 +380,13 @@ func TestStatusRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
-	e, err := gofresh.New()
+	e, err := staticFixtureSession(".")
 	if err != nil {
 		t.Fatalf("New engine: %v", err)
 	}
 	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
 	const bench = "BenchmarkDecode"
-	fp, err := e.CaptureFor(t.Context(), gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
+	fp, err := fixtureFacts(t.Context(), e, gofresh.Subject{Package: pkg, Symbol: bench})
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
@@ -427,7 +424,7 @@ func TestStatusRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 
 // statusPackageOf runs statusPackage over a package's own declarations,
 // the shape runStatus drives it in.
-func statusPackageOf(w, errw io.Writer, e *gofresh.Engine, benchDir, label string, staleOnly, explain, jsonOut bool, p pkgMeta) error {
+func statusPackageOf(w, errw io.Writer, e *gofresh.Session, benchDir, label string, staleOnly, explain, jsonOut bool, p pkgMeta) error {
 	benches, err := declaredBenchmarks(p)
 	if err != nil || len(benches) == 0 {
 		return err
@@ -436,7 +433,7 @@ func statusPackageOf(w, errw io.Writer, e *gofresh.Engine, benchDir, label strin
 	if err != nil {
 		return err
 	}
-	return statusPackage(context.Background(), w, errw, func() (*gofresh.Engine, error) { return e, nil }, benchDir, label, staleOnly, explain, jsonOut, p, benches, env)
+	return statusPackage(context.Background(), w, errw, func() (*gofresh.Session, error) { return e, nil }, benchDir, label, staleOnly, explain, jsonOut, p, benches, env)
 }
 
 // An explanation names a closure-derivation move as such: a recording
@@ -489,7 +486,7 @@ func TestExplainNamesAClosureDerivationMove(t *testing.T) {
 
 // explainFixture is the explanation tests' engine over the repo's own
 // bench fixture with the benchmark's current fingerprint.
-func explainFixture(t *testing.T) (*gofresh.Engine, string, string, gofresh.Fingerprint) {
+func explainFixture(t *testing.T) (*gofresh.Session, string, string, gofresh.Fingerprint) {
 	t.Helper()
 	e, _, err := newEngineAt(context.Background(), ".", ".", false, testEnvironment(t, os.Environ()))
 	if err != nil {
@@ -497,7 +494,7 @@ func explainFixture(t *testing.T) (*gofresh.Engine, string, string, gofresh.Fing
 	}
 	const pkg = "github.com/greatliontech/pew/internal/fixtures/bench"
 	const bench = "BenchmarkDecode"
-	fp, err := e.CaptureFor(t.Context(), gofresh.Subject{Package: pkg, Symbol: bench}, ".", gofresh.Measurement)
+	fp, err := fixtureFacts(t.Context(), e, gofresh.Subject{Package: pkg, Symbol: bench})
 	if err != nil {
 		t.Fatal(err)
 	}

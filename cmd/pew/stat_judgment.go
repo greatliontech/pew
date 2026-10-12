@@ -34,11 +34,11 @@ func (m *statModule) judgePackage(ctx context.Context, analysis *statAnalysis, c
 		benches = append(benches, key.bench)
 	}
 	sort.Strings(benches)
-	return judgeRecordings(ctx, func(subjects []gofresh.Subject) (*gofresh.View, error) {
+	return judgeRecordings(ctx, func(subjects []gofresh.Subject) (*gofresh.Snapshot, error) {
 		parent, err := analysis.view(ctx, m, current, label)
 		if err != nil {
 			return nil, err
 		}
-		return parent.Sibling(subjects)
+		return parent, nil
 	}, current.importPath, benches, rows, nil)
 }

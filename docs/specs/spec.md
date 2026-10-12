@@ -84,13 +84,14 @@ configuration envelope, uniform across every sample in one recording:
 
 | key | meaning | source-of-truth? | class | audit? | guard? | chunked? | display |
 |-----|---------|------------------|-------|--------|--------|----------|---------|
-| `pew-format` | exact recording format version, `5` | yes | discriminator | no | no | no | format |
+| `pew-format` | exact recording format version, `6` | yes | discriminator | no | no | no | format |
 | `commit` | full measured HEAD SHA | yes | mandatory | no | no | no | commit |
 | `dirty` | whether measured sources differed from the commit | yes | mandatory | no | no | no | dirty |
 | `pew-runconditions` | observed transient conditions (§9) | yes | mandatory | yes | no | no | run conditions |
 | `pew-fingerprint` | Gofresh native JSON fingerprint, wrapped in unpadded URL-safe base64 | yes | mandatory | no | no | yes | fingerprint |
 | `pew-test-variant-ledger` | encoded compartment declaration ledger (§7.9) | derived | mandatory | no | no | yes | test-variant ledger |
 | `pew-profiles` | diagnostic companion index (§6.2), unpadded URL-safe base64 JSON | yes | omittable | no | no | yes | profiles |
+| `pew-workload` | admitted benchmark selection, sample count and calibration budget | yes | omittable | no | no | yes | requested workload |
 
 The fingerprint payload is the sole persisted fingerprint representation. Gofresh's
 native JSON encoder and decoder own its complete field set and record grammar
@@ -105,7 +106,7 @@ does not become a new Pew format refusal or confer observation-based reuse.
 
 Commit, dirty, conditions and the test-variant ledger are Pew-owned facts beside
 that payload. No parallel fingerprint config lines are persisted or admitted in
-format 5. Comparison and explanation values below are projections from the admitted
+format 6. Comparison and explanation values below are projections from the admitted
 native fingerprint, never additional stored evidence. Absence remains absence;
 neither decoding nor refresh supplies historical observation or strategy evidence.
 An inert-growth refresh changes only the native fingerprint's versioned
@@ -113,6 +114,15 @@ applicability endpoint and the companion ledger after §7.9's recheck. Every
 producing constituent, including the original test-variant hash and outcome
 support, remains unchanged. Unknown applicability strategies remain structurally
 readable but confer no reuse.
+
+The optional workload is canonical unpadded URL-safe base64 of JSON with fields
+in this order: `version` (1), `selection` (the admitted per-benchmark harness
+pattern), `count` (positive integer), and `budget` (positive duration or iteration
+form). The duration has Go's canonical duration spelling and an iteration count
+its canonical decimal spelling followed by `x`. Unknown fields, duplicate fields,
+trailing data and noncanonical encodings refuse. Absence remains unknown workload;
+it cannot establish that a subsequent run request is fulfilled. This account is
+Pew-owned result scope, not a second native fingerprint representation.
 
 The following vocabulary describes **non-persisted projections**. Legacy config
 spellings are display identifiers only; references elsewhere to fingerprint lines
@@ -149,9 +159,9 @@ acceptances, absent when empty; they are audit, never comparison guards. Freshne
 judgments derive from the current engine's own vouch set. Runtime manifests are
 chunked only as part of the native fingerprint payload.
 
-`pew-format` occurs exactly once as the byte-exact LF-terminated line `pew-format: 5`. A recording
+`pew-format` occurs exactly once as the byte-exact LF-terminated line `pew-format: 6`. A recording
 with no discriminator, a duplicate, alternate whitespace or line endings, or another value —
-formats 1 through 4 included — is
+formats 1 through 5 included — is
 `stale (format)` and is regenerated, never interpreted as an earlier shape. Benchmark
 output that attempts to define `pew-*` or any other Pew-owned provenance or guard key is
 refused before storage, including the former fingerprint config names. A recording
@@ -163,7 +173,7 @@ The envelope table's `class` column states its mandatory key set. Projection
 guards (§10.1); the first guard mixed, missing or differing is the one a note or
 A/B refusal names. Projection order is display and precedence order. A file's
 line order is unconstrained; readers key lines by name. The envelope rows
-marked `chunked?` — fingerprint payload, ledger and profile index — are stored as
+marked `chunked?` — fingerprint payload, ledger, profile index and workload — are stored as
 continuation lines of at most 32 KiB each: the row's own line carries the first part and `<key>.2`, `<key>.3`, … the rest in order, a
 continuation spelling being that row on the wire (closed-set and duplicate rules included: a repeated
 continuation is a repeated recording key, `stale (format)`); the reader rejoins them before any
@@ -779,9 +789,10 @@ Go's testlog stream records operation identities but omits behavior-affecting re
 counts, and errors, so testlog identities alone prove neither operation outcomes nor complete path
 coverage. Pew completes the observation the way its sibling producers do — through the producer
 facade owning the conjunction the Gofresh runtime-input contract
-defines: each benchmark's measurement invocation — one `go test` process per benchmark (§9,
-single-subject execution) — carries its own `-test.testlogfile` capture
-(passed through `go test`'s argument passthrough), an observation **bracket** is fingerprinted over
+defines: each benchmark's measurement invocation — one retained test-binary
+process per benchmark (§9, single-subject execution) — carries its own
+`-test.testlogfile` capture passed directly to the harness. An observation
+**bracket** is fingerprinted over
 the package directory immediately before each invocation (VCS bookkeeping excluded), and each
 capture is ingested with an independently prepared outcome capability and a
 normal-completion receipt under the measured process's
@@ -943,10 +954,42 @@ refuses the invocation and names both owners. Normalization preserves
 the benchmark harness's supported budget spellings. Diagnostic effort remains
 separate from ordinary effort even though both use the same value-domain rule.
 
-pew drives `go test` rather than ingesting arbitrary output, so results are statistics-grade and
+**REQ-pew-requested-workload** (behavior): A recording served for a run request
+MUST cover that request's admitted per-benchmark selection, canonical calibration
+budget and sample count in addition to passing native freshness. Selection and
+budget agree exactly; a greater recorded sample count may cover a smaller request.
+Absent historical workload is not inferred from rows or current flags. The
+producing stream is checked against the restricted selection, retaining every
+full emitted row name as its own sample population. The harness omits the CPU
+suffix at width one, so a terminal canonical `-N` with N greater than one can
+denote a literal child name or the harness's CPU suffix: either representation
+may match the known executed selection, but this ambiguity never changes the
+recorded request or merges populations. Row text is not authentication of a
+process's behavior.
+
+**REQ-pew-built-arm** (behavior): Each ordinary arm MUST execute a retained test
+binary built from the same immutable build description as its analysis snapshot.
+Its bytes are bound after building and checked before each execution and during
+that arm's closing; a replaced or unreadable artifact cannot lend the snapshot's
+code facts to a later execution.
+Compilation precedes the throttle bracket; only the measured runtime environment
+receives the CPU pin's width. Each arm owns one contribution and one terminal
+disposition, a distinct capture and a closed contributor roster. Successful
+executor return, recognized harness completion and admissible sample rows are
+separate required facts; neither output bytes nor native freshness invent a
+successful measurement. On successful executor return, a two-minute default
+closing bound begins over finalization, native validation and publication,
+detached from the operator's cancellation. Expiry before installation keeps prior
+recordings intact and names the closing failure. A committed recording remains
+committed if cancellation arrives afterwards. Progress names preparation,
+measurement, finalization and publication at their actual boundaries. Source
+and runtime hold-still obligations extend through publication; an endpoint
+validation is not a filesystem lock.
+
+pew builds through `go test` and executes its retained harness rather than ingesting arbitrary output, so results are statistics-grade and
 provenance is captured atomically with the run:
 
-- **Single-subject execution: each benchmark measures in its own `go test` process.** The
+- **Single-subject execution: each benchmark measures in its own test-binary process.** The
   measurement invocation's `-bench` pattern is restricted to exactly one top-level benchmark (the
   caller's sub-benchmark selections preserved), so subjects never share process state — warmed
   caches, `sync.Pool` contents, testing-framework state — and a recording is a function of
@@ -980,6 +1023,18 @@ provenance is captured atomically with the run:
   n=3 gives a degenerate interval), **`-benchtime=1s`** time-based (works with Go 1.24+ `b.Loop()`;
   per-op comparison makes the auto-scaled iteration count fine). The benchmark pattern, count, and
   benchtime are configurable run-selection/statistical knobs.
+- Effective GOFLAGS are read in cmd/go's quoted-field grammar. Pew's explicit
+  benchmark-only selection, count, benchtime and benchmem supersede inherited
+  values. Supported inherited test policy (short, failfast, fullpath, verbose,
+  timeout, parallel and shuffle) is forwarded to the retained binary with the
+  driver-to-harness value normalization. The usual ten-minute harness timeout
+  and panic-on-exit-zero policy stand unless the supported inherited setting
+  overrides them. Flags selecting a different executor, CPU population, tests,
+  fuzz run or unmanaged profile/capture output refuse before measurement; an
+  unclassified flag is named rather than silently omitted. Explicit false
+  driver modes such as `-json=false` and `-n=false` do not alter execution;
+  `-e` applies to listing, not the retained harness. Build-only flags remain on
+  the admitted build description, never the test binary's argument list.
 - **`-benchmem` is always on** for every pew measurement, `ab`'s sides included, so allocation
   metrics (`B/op`, `allocs/op`) are captured alongside timing. It is cheap, keeps stored results
   comparable, and lets `pew stat` flag allocation regressions without requiring a second run.
@@ -1027,9 +1082,8 @@ provenance is captured atomically with the run:
   **Thermal throttling is run-scoped evidence, not a pre-check.** The CPU
   `thermal_throttle/*_throttle_count` counters are cumulative since boot, so their standing value
   says nothing about this run; pew compiles the package's test binary **before** any bracket
-  opens (compilation is a thermal-event source of its own — the discarded artifact warms the
-  build cache every measurement invocation reuses; each measured invocation still performs its
-  own link of the cached objects, the far smaller residual inside its bracket), then snapshots
+  opens (compilation is a thermal-event source of its own); that artifact is retained
+  and no measured invocation relinks it. Pew then snapshots
   the counters bracketing each benchmark's measurement invocation and records the delta verdict
   per benchmark: `throttled=true` iff a counter increased within that arm's bracket,
   `false` when counters were comparable and still, `unknown` when none were. A throttled benchmark
@@ -1342,6 +1396,12 @@ iteration counts remain producing facts, not a normalization divisor. Source
 closures and binary identities may differ: comparing source revisions is the
 purpose of the operation. Each diagnostic's relation to its own measurement is
 admitted independently of cross-side comparison.
+For a live A/B comparison, ordinary comparison guards are captured for each
+timed build and rechecked inside that side's diagnostic closing interval, whose
+native build identity is also validated. These comparison facts permit distinct
+checkout coordinates; they do not replace either native fingerprint or assert
+equivalent compiled behavior. A historical comparison lacking that live binding
+uses the recorded native guards without inventing a comparison projection.
 
 **REQ-pew-profile-comparison-metrics** (behavior): Profile differences MUST match
 sample types by exact native type and unit, independently of table order.
@@ -1678,7 +1738,7 @@ REQ-pew-closure-soundness. *Kind:* entailed.
 
 **REQ-pew-preparation** (behavior): **Every refusal a verb's inputs decide fires before its first measurement.** A verb MUST prepare every listed package before any package spends a build or a measurement: `run` derives, for each package after the listing, its benchmark declarations, its scratch directives, and the ones the pattern selects, and — for each package the pattern selects a benchmark in — its recording store and each recording's destination (a label the store cannot name, a malformed package or benchmark path, two recordings sharing a destination, a destination that is not a regular file), the effective GOFLAGS and PGO input, and the module's toolchain provenance — and refuses on any of them there; the two refusals its typed view decides (a measured source under the recording store, a destination overlapping a source input) fire the moment the view exists, before the warm-up build; the flag values the verb alone decides (`--label` on every verb that takes one, `--bench` on `run` and `ab`, `ab`'s `--count`) refuse at command entry. `ab` prepares every package — the module's containment in the repository, the B side's existence, the pattern selecting a benchmark on both sides, both builds (their standing binaries kept beside the repository, as the worktree is, never under a temp root that may be memory-backed), both guard captures — and refuses a guard disagreeing on any comparison key naming the guard and both values, before the first iteration of any package. *Violation:* `pew run --label 'a b'` measures every arm of the first package (`count` × `benchtime` per benchmark) and refuses at the write gate with the invalid label — every measured sample discarded; every other invariant holds. *Kind:* entailed (§9 "own the run" spends measurement only on recordings the run can keep; §12's ab refusal wording). *Anchor tests:* a run with an invalid label refuses before its first `go test`; a run whose second package's recording destination is occupied reports it before the first package measures; an ab whose B side pins a different toolchain, or different PGO bytes, refuses with the mismatch named and executes no iteration.
 
-**REQ-pew-serve-proven** (behavior): **`run` serves what is proven and measures the rest.** `run` MUST leave a selected benchmark whose recording is valid against the current tree unmeasured by default — `--all` is the explicit re-measurement of every selected benchmark — reading one typed view of the package for both the freshness judgment and the measurement's capture: the view the judgment was made against is the view the fingerprints are captured from, never a second view built over the same subjects (the observations the engine itself performs inside a check are the engine's). *Violation:* a campaign over an unchanged tree re-measures every benchmark (count × benchtime each) to record what the store already proves, or judges freshness on one view and captures on another so a source edit between the two loads records a fingerprint the judgment never saw. *Kind:* entailed (§7's staleness contract exists so a valid recording serves; §9 spends measurement only where it is owed). *Anchor tests:* a run over a tree whose recording is valid launches no measurement and says so; a run with `--all` measures it; the run's freshness check and its capture share one view.
+**REQ-pew-serve-proven** (behavior): **`run` serves what is proven and measures the rest.** `run` MUST leave a selected benchmark whose recording is valid against the current tree and fulfills the requested workload (REQ-pew-requested-workload) unmeasured by default — `--all` is the explicit re-measurement of every selected benchmark — reading one typed snapshot of the package for both the freshness judgment and the measurement's capture: the snapshot the judgment was made against is the snapshot the fingerprints are captured from, never a second snapshot built over the same subjects (the observations the engine itself performs inside a check are the engine's). *Violation:* a campaign over an unchanged tree re-measures every benchmark (count × benchtime each) to record what the store already proves, or judges freshness on one snapshot and captures on another so a source edit between the two loads records a fingerprint the judgment never saw. *Kind:* entailed (§7's staleness contract exists so a valid recording serves; §9 spends measurement only where it is owed). *Anchor tests:* a run over a tree whose recording is valid and covers the request launches no measurement and says so; a run with `--all` measures it; the run's freshness check and its capture share one snapshot.
 
 **REQ-pew-progress** (behavior): **No stretch stays silent.** Every verb MUST name the stretch in flight — the listing, a package's preparation with its index over the count, a package's typed load (the engine's own phases named as they begin), a build, a measurement arm with its index over the count, a comparison iteration, a store scan — on the operator's log at a fixed cadence of thirty seconds with the elapsed time, so no load, build, or measurement is silent longer than the cadence; the line is the operator's, never the machine-readable stdout's. *Violation:* a run over a large package prints nothing for the whole of its typed load, build, and every arm — minutes — and the operator cannot tell a hang from work. *Kind:* entailed (§9's own-the-run: an operator who cannot see the run cannot own it). *Anchor tests:* the reporter repeats the phase with the elapsed time on its cadence and stops with the verb; the engine's detail-free keep-alives name the analysis stretch.
 

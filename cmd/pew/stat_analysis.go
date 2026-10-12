@@ -10,7 +10,7 @@ import (
 )
 
 type statPreparation struct {
-	engine *gofresh.Engine
+	engine *gofresh.Session
 	err    error
 	reason string
 	fatal  bool
@@ -23,7 +23,7 @@ type statViewKey struct {
 }
 
 type statView struct {
-	view *gofresh.View
+	view *gofresh.Snapshot
 	err  error
 }
 
@@ -32,7 +32,7 @@ type statView struct {
 type statAnalysis struct {
 	env      gotool.Environment
 	prepared map[currentBench]statPreparation
-	engines  map[[2]string]*gofresh.Engine
+	engines  map[[3]string]*gofresh.Session
 	flags    map[string]struct {
 		value string
 		err   error
@@ -41,7 +41,7 @@ type statAnalysis struct {
 }
 
 func newStatAnalysis(env gotool.Environment) *statAnalysis {
-	return &statAnalysis{env: env, prepared: map[currentBench]statPreparation{}, engines: map[[2]string]*gofresh.Engine{}, flags: map[string]struct {
+	return &statAnalysis{env: env, prepared: map[currentBench]statPreparation{}, engines: map[[3]string]*gofresh.Session{}, flags: map[string]struct {
 		value string
 		err   error
 	}{}, views: map[statViewKey]statView{}}
@@ -68,10 +68,10 @@ func (a *statAnalysis) prepare(ctx context.Context, cur currentBench) (p statPre
 	if err != nil {
 		return statPreparation{err: err, reason: "PGO input unavailable"}
 	}
-	key := [2]string{cur.moduleDir, pgo}
+	key := [3]string{cur.moduleDir, cur.pkgDir, pgo}
 	engine := a.engines[key]
 	if engine == nil {
-		engine, err = buildEngine(ctx, cur.moduleDir, a.env, nil, pgo)
+		engine, err = buildEngine(ctx, cur.moduleDir, cur.pkgDir, a.env, nil, pgo)
 		if err != nil {
 			return statPreparation{err: err, reason: "engine unavailable", fatal: true}
 		}
@@ -80,7 +80,7 @@ func (a *statAnalysis) prepare(ctx context.Context, cur currentBench) (p statPre
 	return statPreparation{engine: engine}
 }
 
-func (a *statAnalysis) view(ctx context.Context, m *statModule, cur currentBench, label string) (*gofresh.View, error) {
+func (a *statAnalysis) view(ctx context.Context, m *statModule, cur currentBench, label string) (*gofresh.Snapshot, error) {
 	key := statViewKey{m, cur, label}
 	if result, ok := a.views[key]; ok {
 		return result.view, result.err
