@@ -929,6 +929,20 @@ by identity.
 
 ## 9. Run hygiene (own the run)
 
+**REQ-pew-invocation-admission** (behavior): An ordinary run MUST admit a
+positive sample count and a positive Go benchmark duration or iteration budget
+before listing, resolving build configuration or serving any recording. Every
+recording destination of a package admitted by declaration-local validation is
+owned by exactly one selected benchmark over the whole invocation, including
+different packages or modules sharing an explicit store. A locally refused
+package owns no pending write; its failure does not discard independent admitted
+packages. Declaration-derived destinations are compared at their resolved filesystem
+coordinates before any package's build configuration, refresh or measurement;
+a collision, including a recording required as another recording's directory,
+refuses the invocation and names both owners. Normalization preserves
+the benchmark harness's supported budget spellings. Diagnostic effort remains
+separate from ordinary effort even though both use the same value-domain rule.
+
 pew drives `go test` rather than ingesting arbitrary output, so results are statistics-grade and
 provenance is captured atomically with the run:
 

@@ -74,6 +74,9 @@ func newRunCmd() *cobra.Command {
 		Short: guidanceShort("run"),
 		Long:  guidanceHelp("run"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rc.opts.ValidateEffort(); err != nil {
+				return err
+			}
 			if _, err := profiles.Kinds(rc.profile); err != nil {
 				return err
 			}
@@ -122,6 +125,14 @@ func newRunCmd() *cobra.Command {
 }
 
 func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []string) error {
+	// Internal callers may leave the duration unset; command entry has
+	// already distinguished an explicit empty flag from its 1s default.
+	if rc.opts.Benchtime == "" {
+		rc.opts.Benchtime = "1s"
+	}
+	if err := rc.opts.ValidateEffort(); err != nil {
+		return err
+	}
 	if _, err := profiles.Kinds(rc.profile); err != nil {
 		return err
 	}
@@ -197,17 +208,12 @@ func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []str
 			return preparing()
 		}
 		reportPhase(ctx, fmt.Sprintf("preparing %s (%d/%d)", p.ImportPath, i+1, len(pkgs)))
-		prep, err := preparePackage(ctx, rc, p, envs)
+		prep, err := preparePackageInputs(rc, p)
 		if err != nil {
-			// The interruption outranks a provenance refusal raised in
-			// the same window: both end the verb, and the signal is the
-			// operator's own fact.
+			// A cancellation during declaration preparation ends the verb
+			// instead of becoming a package-local failure.
 			if cancelledBy(ctx, err) {
 				return preparing()
-			}
-			var pe *toolchainProvenanceError
-			if errors.As(err, &pe) {
-				return err
 			}
 			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", p.ImportPath, err)
 			failures = append(failures, p.ImportPath)
@@ -221,6 +227,35 @@ func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []str
 			continue
 		}
 		prepared = append(prepared, prep)
+	}
+	if err := admitInvocationDestinations(prepared); err != nil {
+		return err
+	}
+	// Destination ownership is known from declarations alone. Admit the whole
+	// invocation before resolving expensive per-package build configuration.
+	for i, prep := range prepared {
+		if len(prep.runBenches) == 0 {
+			continue
+		}
+		if ctx.Err() != nil {
+			return interrupted("interrupted while preparing %s; nothing measured", prep.pkg.ImportPath)
+		}
+		reportPhase(ctx, fmt.Sprintf("preparing build configuration %s (%d/%d)", prep.pkg.ImportPath, i+1, len(prepared)))
+		engine, pgo, err := newEngineForPkgProducer(ctx, prep.pkg, envs.analysis, envs.runtime)
+		if err != nil {
+			if cancelledBy(ctx, err) {
+				return interrupted("interrupted while preparing %s; nothing measured", prep.pkg.ImportPath)
+			}
+			var pe *toolchainProvenanceError
+			if errors.As(err, &pe) {
+				return err
+			}
+			fmt.Fprintf(w, "%-12s %s  (%v)\n", "error", prep.pkg.ImportPath, err)
+			failures = append(failures, prep.pkg.ImportPath)
+			prep.runBenches = nil
+			continue
+		}
+		prep.engine, prep.pgoInput = engine, pgo
 	}
 	// The scratch sweep runs before the module state cache pins its
 	// baseline: a leftover carrying git-visible files would otherwise
@@ -403,26 +438,13 @@ type packagePreparation struct {
 	pgoInput            string
 }
 
-// preparePackage builds a package's preparation record, firing every
+// preparePackageInputs builds a package's declaration-derived preparation, firing every
 // refusal its inputs decide. The order is the cost order: the
 // declarations (a parse) and the destinations (path rules and one
-// Lstat each) before the engine (two `go env` processes and the PGO
-// digest), so the cheapest refusal fires first. A refused package
+// Lstat each) before build configuration, so the cheapest refusal fires first. A refused package
 // still returns the record it got as far as — its scratch directives
 // drive the entry sweep whether or not it runs — beside the error.
-func preparePackage(ctx context.Context, rc runConfig, p pkgMeta, envs environments) (*packagePreparation, error) {
-	// A pinned run's engine judges and captures the runtime-configuration
-	// guard under the measured process's environment (its producer
-	// environment), while loads and builds stay on the analysis one.
-	return preparePackageWith(rc, p, func() (*gofresh.Engine, string, error) {
-		return newEngineForPkgProducer(ctx, p, envs.analysis, envs.runtime)
-	})
-}
-
-// preparePackageWith is preparePackage over a caller-supplied engine
-// constructor — the seam tests inject a prebuilt engine through; the
-// constructor carries the verb's context, nothing else here waits.
-func preparePackageWith(rc runConfig, p pkgMeta, newEngine func() (*gofresh.Engine, string, error)) (*packagePreparation, error) {
+func preparePackageInputs(rc runConfig, p pkgMeta) (*packagePreparation, error) {
 	scratch, err := scratchPatterns(p)
 	if err != nil {
 		return nil, err
@@ -456,12 +478,42 @@ func preparePackageWith(rc runConfig, p pkgMeta, newEngine func() (*gofresh.Engi
 	if err != nil {
 		return prep, err
 	}
-	e, pgoInput, err := newEngine()
-	if err != nil {
-		return prep, err
-	}
-	prep.runBenches, prep.benchDir, prep.pkgRel, prep.st, prep.destinations, prep.engine, prep.pgoInput = runBenches, dir, pkgRel, st, destinations, e, pgoInput
+	prep.runBenches, prep.benchDir, prep.pkgRel, prep.st, prep.destinations = runBenches, dir, pkgRel, st, destinations
 	return prep, nil
+}
+
+// admitInvocationDestinations judges ownership over every selected package,
+// including different modules sharing an explicit store. No measurement or
+// refresh may overwrite another requested recording's destination.
+func admitInvocationDestinations(prepared []*packagePreparation) error {
+	owners := make(map[string]string)
+	var paths []string
+	for _, prep := range prepared {
+		for _, destination := range prep.destinations {
+			absolute, err := filepath.Abs(destination.Path)
+			if err != nil {
+				return err
+			}
+			path := resolveExistingPrefix(absolute)
+			owner := prep.pkg.ImportPath + "." + destination.Bench
+			if previous, exists := owners[path]; exists {
+				return fmt.Errorf("run: recording destination %s is shared by %s and %s", path, previous, owner)
+			}
+			owners[path] = owner
+			paths = append(paths, path)
+		}
+	}
+	for _, path := range paths {
+		for parent := filepath.Dir(path); ; parent = filepath.Dir(parent) {
+			if owner, exists := owners[parent]; exists {
+				return fmt.Errorf("run: recording destination %s for %s is required as a directory by %s for %s", parent, owner, path, owners[path])
+			}
+			if filepath.Dir(parent) == parent {
+				break
+			}
+		}
+	}
+	return nil
 }
 
 func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCache, rc runConfig, prep *packagePreparation, envs environments, conditions run.Conditions) error {

@@ -3840,3 +3840,73 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "34df5e9279fe5e825409721110d8518661e95c241c92dda1f67d528c9f739700"
 }
+
+bindings {
+  requirement_id: "REQ-pew-invocation-admission"
+  content_hash: "3292144705b75b03768a6121ea6f49628f8e4ae921c20d177404b2c684f48571"
+  source_hash: "367dd8b581849a86feca4f7b8d72ba27bc41673fceedf8af23bbea047bdbf906"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/internal/run.TestMeasurementEffortAdmission"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9cb1ede78f4270d9dce88be290bfbe66ee825fec4d6aaa32fabcbc0efa4c4a88"
+}
+
+bindings {
+  requirement_id: "REQ-pew-invocation-admission"
+  content_hash: "3292144705b75b03768a6121ea6f49628f8e4ae921c20d177404b2c684f48571"
+  source_hash: "367dd8b581849a86feca4f7b8d72ba27bc41673fceedf8af23bbea047bdbf906"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestOrdinaryEffortRefusesBeforeListing"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4e75f174dfbc2c86f52d26dcd25e20b024ca2a3a90b9c27ce281e83392ab1f61"
+}
+
+bindings {
+  requirement_id: "REQ-pew-invocation-admission"
+  content_hash: "3292144705b75b03768a6121ea6f49628f8e4ae921c20d177404b2c684f48571"
+  source_hash: "367dd8b581849a86feca4f7b8d72ba27bc41673fceedf8af23bbea047bdbf906"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestInvocationRefusesCrossModuleDestinationCollision"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a68d1cbe8616f49a0b74956bb8053bbcf9dde0ad53a46dc9b0a164d47d82e766"
+}
+
+bindings {
+  requirement_id: "REQ-pew-invocation-admission"
+  content_hash: "3292144705b75b03768a6121ea6f49628f8e4ae921c20d177404b2c684f48571"
+  source_hash: "367dd8b581849a86feca4f7b8d72ba27bc41673fceedf8af23bbea047bdbf906"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestInvocationDestinationsCannotBeDirectoriesOfOtherRecordings"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "64d69e9107a29046a5c917f798b527bfe41475dec5598a83cd48a213a13d4fa4"
+}
+
+bindings {
+  requirement_id: "REQ-pew-invocation-admission"
+  content_hash: "3292144705b75b03768a6121ea6f49628f8e4ae921c20d177404b2c684f48571"
+  source_hash: "367dd8b581849a86feca4f7b8d72ba27bc41673fceedf8af23bbea047bdbf906"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestLocallyRefusedPackageOwnsNoInvocationDestination"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "183621fc0a2760eacf231b9a81475b220a17659a20e599ded5d35214103bcae2"
+}
+
+bindings {
+  requirement_id: "REQ-pew-invocation-admission"
+  content_hash: "3292144705b75b03768a6121ea6f49628f8e4ae921c20d177404b2c684f48571"
+  source_hash: "367dd8b581849a86feca4f7b8d72ba27bc41673fceedf8af23bbea047bdbf906"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestPrivateRunDefaultEffortAndPreparationAttribution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7e36e02f58cfab5024758b8213ed9c9fd9bcae5f492af1aa6387831a06e52009"
+}
+
+bindings {
+  requirement_id: "REQ-pew-progress"
+  content_hash: "85521a23d73aeac90a8167852c7398a9295ac5c2b64bc0f82d7b95709fac52c2"
+  source_hash: "ffbd1af0652bde02f803739b60424568c85e6d7ea5c562772f9d319fb62730e6"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestPrivateRunDefaultEffortAndPreparationAttribution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7e36e02f58cfab5024758b8213ed9c9fd9bcae5f492af1aa6387831a06e52009"
+}

@@ -12,9 +12,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/google/pprof/profile"
 	"github.com/greatliontech/gofresh"
@@ -109,15 +107,10 @@ func Kinds(s string) ([]string, error) {
 
 // ValidateBudget accepts positive Go benchmark time or iteration budgets.
 func ValidateBudget(s string) error {
-	if v, ok := strings.CutSuffix(s, "x"); ok {
-		n, err := strconv.ParseInt(v, 10, 64)
-		if err == nil && n > 0 && strconv.FormatInt(n, 10) == v {
-			return nil
-		}
-	} else if d, err := time.ParseDuration(s); err == nil && d > 0 {
-		return nil
+	if err := run.ValidateBudget(s); err != nil {
+		return fmt.Errorf("profile: %w", err)
 	}
-	return fmt.Errorf("profile: invalid positive budget %q", s)
+	return nil
 }
 
 // Encode emits canonical JSON wrapped as a benchmark-format token.
