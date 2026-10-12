@@ -2768,7 +2768,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.prepareABProfiles"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "b15869c7fdc81f519ed63be2bccc4a110c42c1c3039a019ebd91b0a7b9a58449"
+  shape_hash: "51fa677ed221f56c28eda41a4bf61b4cbb0523281493e5a1a685de4a29366bb9"
 }
 
 bindings {
@@ -2858,7 +2858,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.abArtifact.pair"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "dd6e22df79e86dbf702eee0eb1a72fa775b91e177223e77e00a9da0980fc3958"
+  shape_hash: "3541312b3a508e28f5b149aa1dbec2a158dc98ec4eba382543d97f17d26fce49"
 }
 
 bindings {
@@ -3138,7 +3138,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.prepareABProfiles"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "b15869c7fdc81f519ed63be2bccc4a110c42c1c3039a019ebd91b0a7b9a58449"
+  shape_hash: "51fa677ed221f56c28eda41a4bf61b4cbb0523281493e5a1a685de4a29366bb9"
 }
 
 bindings {
@@ -3218,7 +3218,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.abArtifact.pair"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "dd6e22df79e86dbf702eee0eb1a72fa775b91e177223e77e00a9da0980fc3958"
+  shape_hash: "3541312b3a508e28f5b149aa1dbec2a158dc98ec4eba382543d97f17d26fce49"
 }
 
 bindings {
@@ -4069,4 +4069,94 @@ bindings {
   symbol: "github.com/greatliontech/pew/cmd/pew.TestProfileRequestIncludesBenchmarksUnrecordedOnBothSides"
   role: BINDING_ROLE_TESTS
   shape_hash: "15fc2b836f7db24a4b94f5a98947ceff2470c8255f80b9185c6ccaa919506992"
+}
+
+bindings {
+  requirement_id: "REQ-pew-ab-stream-admission"
+  content_hash: "f5456e33beee3c7f76c8341043188635a3c23d5dd9424fe67dfe0ea5089f02f3"
+  source_hash: "d9678a1aa9b06baaf68b0fb7e09ccceff9dec61af92820e3d3ae20ae0b5e2064"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestABRejectsRowsOutsideItsRequestedInventoryBeforePublication"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ae6c67e71350ff1b412040032023635fd9de4e4d38558e760a46bbc5aae4c786"
+}
+
+bindings {
+  requirement_id: "REQ-pew-ab-stream-admission"
+  content_hash: "f5456e33beee3c7f76c8341043188635a3c23d5dd9424fe67dfe0ea5089f02f3"
+  source_hash: "d9678a1aa9b06baaf68b0fb7e09ccceff9dec61af92820e3d3ae20ae0b5e2064"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.FuzzABStreamAdmissionUsesTheDeclaredSelection"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d9d92600f6e39273a677d1e0920ca114c6204f8b1dde3959048a497cf6bd8b8b"
+}
+
+bindings {
+  requirement_id: "REQ-pew-ab-stream-admission"
+  content_hash: "f5456e33beee3c7f76c8341043188635a3c23d5dd9424fe67dfe0ea5089f02f3"
+  source_hash: "d9678a1aa9b06baaf68b0fb7e09ccceff9dec61af92820e3d3ae20ae0b5e2064"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestABUsesBuildSelectedReferenceDeclarationsBeforeBuilding"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2f038049096f2013421216c8fb43781e3b10b9e7af693f138f3e90f013220f76"
+}
+
+bindings {
+  requirement_id: "REQ-pew-ab-stream-admission"
+  content_hash: "f5456e33beee3c7f76c8341043188635a3c23d5dd9424fe67dfe0ea5089f02f3"
+  source_hash: "d9678a1aa9b06baaf68b0fb7e09ccceff9dec61af92820e3d3ae20ae0b5e2064"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestABPreservesTheValidPairBeforeARejectedSide"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "253039e30cae9825d0afcbcdb6f60f3c70e8575eaa2b1f0fc3b4299002a74449"
+}
+
+bindings {
+  requirement_id: "REQ-pew-ab-stream-admission"
+  content_hash: "f5456e33beee3c7f76c8341043188635a3c23d5dd9424fe67dfe0ea5089f02f3"
+  source_hash: "d9678a1aa9b06baaf68b0fb7e09ccceff9dec61af92820e3d3ae20ae0b5e2064"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestABAdmitsEachSidesDistinctSelectedPopulation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "aebe1cdd90607cefafba2d53a51c58920e10e3b8bb4fc927f9ea0e1d6360f477"
+}
+
+bindings {
+  requirement_id: "REQ-pew-ab-stream-admission"
+  content_hash: "f5456e33beee3c7f76c8341043188635a3c23d5dd9424fe67dfe0ea5089f02f3"
+  source_hash: "d9678a1aa9b06baaf68b0fb7e09ccceff9dec61af92820e3d3ae20ae0b5e2064"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestABStreamReportsCorruptLineAndKeepsItsOwnSideHistory"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8dafdc9c1b5c451d0eb6ec9de0e30ce63519ebc1997dbb35ca2cffbb93afad79"
+}
+
+bindings {
+  requirement_id: "REQ-pew-ab-stream-admission"
+  content_hash: "f5456e33beee3c7f76c8341043188635a3c23d5dd9424fe67dfe0ea5089f02f3"
+  source_hash: "d9678a1aa9b06baaf68b0fb7e09ccceff9dec61af92820e3d3ae20ae0b5e2064"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestABUsesEachSidesOwnPackageIdentity"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "70046c02f4dc7ccbe6b9b56e5f4647ade3e069a2e784696565094e77ebd8ce5f"
+}
+
+bindings {
+  requirement_id: "REQ-pew-ab-stream-admission"
+  content_hash: "f5456e33beee3c7f76c8341043188635a3c23d5dd9424fe67dfe0ea5089f02f3"
+  source_hash: "d9678a1aa9b06baaf68b0fb7e09ccceff9dec61af92820e3d3ae20ae0b5e2064"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestABArtifactHeadersKeepPreparedIdentityWithoutStreamHeaders"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7c197dc1c04660d2d4f2bb29b0f8d943a4f48f653c28dcdd787de9ee6a1c759c"
+}
+
+bindings {
+  requirement_id: "REQ-pew-ab-stream-admission"
+  content_hash: "f5456e33beee3c7f76c8341043188635a3c23d5dd9424fe67dfe0ea5089f02f3"
+  source_hash: "d9678a1aa9b06baaf68b0fb7e09ccceff9dec61af92820e3d3ae20ae0b5e2064"
+  backend: "go"
+  symbol: "github.com/greatliontech/pew/cmd/pew.TestABNameInterpretationsCannotBorrowEachOthersScope"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bbd6de73ae18bd95f045532b838e7fd9c997848249657e2e5d7d354054cec32a"
 }

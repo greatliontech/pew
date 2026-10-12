@@ -25,7 +25,7 @@ func TestABPackageSelectsBenchmarkOnlySingleCountProcesses(t *testing.T) {
 	const pattern = "^BenchmarkSelected$/case"
 	dirA, dirB := t.TempDir(), t.TempDir()
 	fp := recordingtest.Defaults().Fingerprint
-	prep := &abPreparation{pkg: pkgMeta{ImportPath: "example.com/selection", Dir: dirA}, sideBPkgDir: dirB, binA: "binary-A", binB: "binary-B", guardsA: fp.Guards, guardsB: fp.Guards}
+	prep := &abPreparation{pkg: pkgMeta{ImportPath: "example.com/selection", Dir: dirA}, reference: pkgMeta{ImportPath: "example.com/selection", Dir: dirB}, binA: "binary-A", binB: "binary-B", guardsA: fp.Guards, guardsB: fp.Guards, selected: [2][]string{{"BenchmarkSelected"}, {"BenchmarkSelected"}}}
 	var order []string
 	ac := abConfig{bench: pattern, count: 3, benchtime: "1x", ref: "baseline", throttle: func() runpkg.ThrottleSnapshot { return runpkg.ThrottleSnapshot{} }}
 	ac.execute = func(dir, pin string, env []string, binary string, args []string) ([]byte, error) {

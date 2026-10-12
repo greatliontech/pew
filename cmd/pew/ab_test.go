@@ -423,7 +423,8 @@ func TestSameDevice(t *testing.T) {
 // The artifact is marked out of every stat-baseline path by shape.
 func TestABArtifactIsDirtyMarked(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ab.txt")
-	if err := writeABArtifact(path, "example.com/p", "HEAD", []byte("BenchmarkA-8 1 9 ns/op\n"), []byte("BenchmarkA-8 1 10 ns/op\n")); err != nil {
+	a := &abArtifact{path: path}
+	if err := a.pair("example.com/p", "HEAD", 1, fixtureABStream(t, []byte("BenchmarkA-8 1 9 ns/op\n"), "example.com/p", "BenchmarkA"), fixtureABStream(t, []byte("BenchmarkA-8 1 10 ns/op\n"), "example.com/p", "BenchmarkA")); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)

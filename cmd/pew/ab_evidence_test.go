@@ -31,7 +31,7 @@ func FuzzABArtifactPairs(f *testing.F) {
 			raw := func(side string) []byte {
 				return []byte(fmt.Sprintf("custom: %s\npkg: %s\nBenchmarkWork-8 7 %d ns/op\nPASS\n", side, pkg, int(v)+1))
 			}
-			if err := a.pair(pkg, "ref", i+1, raw("A"), raw("B")); err != nil {
+			if err := a.pair(pkg, "ref", i+1, fixtureABStream(t, raw("A"), pkg, "BenchmarkWork"), fixtureABStream(t, raw("B"), pkg, "BenchmarkWork")); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -63,6 +63,15 @@ func FuzzABArtifactPairs(f *testing.F) {
 			t.Fatalf("lost completed rows: %d", n)
 		}
 	})
+}
+
+func fixtureABStream(t testing.TB, raw []byte, pkg string, benchmarks ...string) abStream {
+	t.Helper()
+	stream, err := admitABStream(io.Discard, raw, pkg, ".", benchmarks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stream
 }
 
 func TestABMultiPackageInterruptedKeepsPairs(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -103,7 +104,11 @@ func decodeWorkload(value string) (*workload, error) {
 }
 
 func workloadAcceptsRows(w workload, rows []*benchfmt.Result) error {
-	alternatives, err := splitBenchmarkPattern(w.Selection)
+	return selectionAcceptsRows(w.Selection, w.Count, rows, nil)
+}
+
+func selectionAcceptsRows(selection string, count int, rows []*benchfmt.Result, declarations []string) error {
+	alternatives, err := splitBenchmarkPattern(selection)
 	if err != nil {
 		return err
 	}
@@ -129,6 +134,9 @@ func workloadAcceptsRows(w workload, rows []*benchfmt.Result) error {
 		accepted := false
 		for _, spelling := range names {
 			name := strings.Split(spelling, "/")
+			if declarations != nil && !slices.Contains(declarations, name[0]) {
+				continue
+			}
 			for _, alternative := range patterns {
 				if len(alternative) > len(name) {
 					continue
@@ -150,16 +158,16 @@ func workloadAcceptsRows(w workload, rows []*benchfmt.Result) error {
 			}
 		}
 		if !accepted {
-			return fmt.Errorf("result %s lies outside requested benchmark selection %q", row.Name, w.Selection)
+			return fmt.Errorf("result %s lies outside requested benchmark selection %q", row.Name, selection)
 		}
 		counts[string(row.Name)]++
 	}
 	if len(counts) == 0 {
 		return fmt.Errorf("requested workload produced no samples")
 	}
-	for name, count := range counts {
-		if count < w.Count {
-			return fmt.Errorf("requested workload %s has %d samples, want at least %d", name, count, w.Count)
+	for name, got := range counts {
+		if got < count {
+			return fmt.Errorf("requested workload %s has %d samples, want at least %d", name, got, count)
 		}
 	}
 	return nil

@@ -107,7 +107,7 @@ func TestABOutputRechecksTopologyBeforePublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &abArtifact{path: out, ownership: owned}
-	if err := a.pair("example.com/p", "HEAD", 1, []byte("BenchmarkWork-8 1 1 ns/op\n"), []byte("BenchmarkWork-8 1 2 ns/op\n")); err == nil {
+	if err := a.pair("example.com/p", "HEAD", 1, fixtureABStream(t, []byte("BenchmarkWork-8 1 1 ns/op\n"), "example.com/p", "BenchmarkWork"), fixtureABStream(t, []byte("BenchmarkWork-8 1 2 ns/op\n"), "example.com/p", "BenchmarkWork")); err == nil {
 		t.Fatal("changed topology accepted")
 	}
 	info, err := os.Lstat(out)

@@ -1464,6 +1464,21 @@ statistical rows. Objects use the shared confined store rooted at
 contain no temporary paths as object references. Without `--out`, diagnostic
 nonretention is reported.
 
+**REQ-pew-ab-stream-admission** (behavior): Every timed A/B stream MUST be admitted
+against the side's build-selected benchmark declarations and requested harness
+pattern before it contributes to a published pair or comparison. The same
+prepared inventory governs that side's diagnostic obligations. A well-formed
+row cannot authorize an undeclared, unselected or pattern-excluded benchmark
+or child. Each emitted full row name carries one sample per pair, with each
+side's observed child set stable across pairs; different valid populations
+across the two sides remain visible to comparison. Dynamic children never
+observed are not invented. The result-name CPU-suffix interpretation is the
+requested-workload rule, and malformed streams, invalid samples and disagreement
+with the side's own prepared package identity refuse before installation. The
+reference side never borrows the working tree's import path; artifact blocks
+retain each side's actual package identity. Failure keeps any
+already published prefix; absence of `--out` never bypasses admission.
+
 **REQ-pew-ab-output-ownership** (behavior): A/B MUST never replace normal
 recordings, their permanent lock files or selected source inputs with its outputs.
 Before either side builds, `--out` and its requested companion home are checked

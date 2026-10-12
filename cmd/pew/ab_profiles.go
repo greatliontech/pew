@@ -20,21 +20,10 @@ type abProfileSide struct {
 	view *gofresh.Snapshot
 }
 
-func prepareABProfiles(ctx context.Context, ac abConfig, a pkgMeta, dirB string, envs environments) ([2]*abProfileSide, error) {
+func prepareABProfiles(ctx context.Context, packages [2]pkgMeta, selected [2][]string, envs environments) ([2]*abProfileSide, error) {
 	var sides [2]*abProfileSide
-	b, err := abPackageMetadata(ctx, dirB, envs.analysis)
-	if err != nil {
-		return sides, err
-	}
-	for i, p := range []pkgMeta{a, b} {
-		names, err := selectedBenchmarks(p)
-		if err != nil {
-			return sides, err
-		}
-		names, err = matchingBenchmarks(names, ac.bench)
-		if err != nil {
-			return sides, err
-		}
+	for i, p := range packages {
+		names := selected[i]
 		scratch, err := scratchPatterns(p)
 		if err != nil {
 			return sides, err
@@ -93,6 +82,10 @@ func captureABProfiles(ctx context.Context, w, errw io.Writer, ac abConfig, prep
 		for _, name := range ordered {
 			for _, kind := range kinds {
 				report := profileComparison{Kind: "profile", Package: prep.pkg.ImportPath, Benchmark: name, Profile: kind}
+				report.BasePackage, report.NewPackage = prep.reference.ImportPath, prep.pkg.ImportPath
+				if report.BasePackage != report.NewPackage {
+					report.Package = ""
+				}
 				var captures [2]*profiles.Capture
 				var blobs [2][]byte
 				for i, side := range prep.diagnostics {

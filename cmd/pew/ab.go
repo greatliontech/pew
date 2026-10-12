@@ -79,16 +79,6 @@ func (ac abConfig) sideGuards(ctx context.Context, moduleDir, pkgDir string, mai
 	return guard.Capture(ctx, reader, newEnvironments(env, ac.pin).measured().Values(), guard.Measurement, buildInputs...)
 }
 
-// abPackageName resolves a package directory's package name with the same
-// toolchain environment the builds use.
-func abPackageName(ctx context.Context, dir string, env gotool.Environment) (string, error) {
-	out, err := gotool.List(ctx, dir, env, "-f", "{{.Name}}", ".")
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
 func abPackageMetadata(ctx context.Context, dir string, env gotool.Environment) (pkgMeta, error) {
 	data, err := gotool.List(ctx, dir, env, "-json", ".")
 	if err != nil {
@@ -345,10 +335,11 @@ type abPreparation struct {
 	diagnostics      [2]*abProfileSide
 	rows             [2][]*benchfmt.Result
 	pkg              pkgMeta
-	sideBPkgDir      string
+	reference        pkgMeta
 	tmp, binA, binB  string
 	guardsA, guardsB guard.Guards
 	harnessArgs      [2][]string
+	selected         [2][]string
 }
 
 // prepareABPackage builds a package's A/B preparation record, firing
@@ -365,10 +356,15 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 	}
 	// The pattern must name a benchmark on both sides: the declarations
 	// are parseable from source before any build or run.
-	if err := abPatternSelects(p, sideBPkgDir, ac); err != nil {
+	b, err := abPackageMetadata(ctx, sideBPkgDir, env)
+	if err != nil {
 		return nil, err
 	}
-	prep := &abPreparation{pkg: p, sideBPkgDir: sideBPkgDir}
+	selected, err := abPatternSelects(p, b, ac)
+	if err != nil {
+		return nil, err
+	}
+	prep := &abPreparation{pkg: p, reference: b, selected: selected}
 	for i, moduleDir := range []string{p.Module.Dir, sideBModule} {
 		prep.harnessArgs[i], err = prepareHarnessArgs(ctx, moduleDir, env)
 		if err != nil {
@@ -397,20 +393,16 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 	if err != nil {
 		return prep, err
 	}
-	nameB, err := abPackageName(ctx, sideBPkgDir, env)
-	if err != nil {
-		return prep, err
-	}
 	guardsA, err := ac.sideGuards(ctx, p.Module.Dir, p.Dir, p.Name == "main", env)
 	if err != nil {
 		return prep, err
 	}
-	guardsB, err := ac.sideGuards(ctx, sideBModule, sideBPkgDir, nameB == "main", env)
+	guardsB, err := ac.sideGuards(ctx, sideBModule, sideBPkgDir, b.Name == "main", env)
 	if err != nil {
 		return prep, err
 	}
 	if ac.profile != "" {
-		prep.diagnostics, err = prepareABProfiles(ctx, ac, p, sideBPkgDir, newEnvironments(env, ac.pin))
+		prep.diagnostics, err = prepareABProfiles(ctx, [2]pkgMeta{p, b}, selected, newEnvironments(env, ac.pin))
 		if err != nil {
 			return prep, err
 		}
@@ -438,7 +430,7 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 		if side == nil {
 			continue
 		}
-		description, err := side.view.BuildDescription(p.ImportPath)
+		description, err := side.view.BuildDescription(side.prep.pkg.ImportPath)
 		if err != nil {
 			return prep, err
 		}
@@ -471,7 +463,7 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 	if err != nil {
 		return prep, fmt.Errorf("ab: capturing side A guards: %w", err)
 	}
-	prep.guardsB, err = ac.sideGuards(ctx, sideBModule, sideBPkgDir, nameB == "main", env)
+	prep.guardsB, err = ac.sideGuards(ctx, sideBModule, sideBPkgDir, b.Name == "main", env)
 	if err != nil {
 		return prep, fmt.Errorf("ab: capturing side B guards: %w", err)
 	}
@@ -524,34 +516,23 @@ func abReferenceDirs(p pkgMeta, repoRoot, worktree, ref string) (string, string,
 }
 
 // abPatternSelects refuses a pattern naming no benchmark on either side.
-func abPatternSelects(p pkgMeta, sideBPkgDir string, ac abConfig) error {
-	benchesA, err := selectedBenchmarks(p)
-	if err != nil {
-		return err
-	}
-	setB, _, err := sourceBenchmarks(sideBPkgDir)
-	if err != nil {
-		return fmt.Errorf("ab: scanning side B benchmarks at %s: %w", ac.ref, err)
-	}
-	benchesB := make([]string, 0, len(setB))
-	for b := range setB {
-		benchesB = append(benchesB, b)
-	}
-	// Side A first: the listing's declarations are exact, the B side's
-	// scan is over every test file in the directory.
-	for _, side := range []struct {
-		name    string
-		benches []string
-	}{{"side A", benchesA}, {"side B", benchesB}} {
-		matched, err := matchingBenchmarks(side.benches, ac.bench)
+func abPatternSelects(a, b pkgMeta, ac abConfig) ([2][]string, error) {
+	var selected [2][]string
+	for i, side := range []pkgMeta{a, b} {
+		benches, err := selectedBenchmarks(side)
 		if err != nil {
-			return err
+			return selected, err
+		}
+		matched, err := matchingBenchmarks(benches, ac.bench)
+		if err != nil {
+			return selected, err
 		}
 		if len(matched) == 0 {
-			return fmt.Errorf("ab: %s: pattern %q selects no benchmark on %s", p.ImportPath, ac.bench, side.name)
+			return selected, fmt.Errorf("ab: %s: pattern %q selects no benchmark on side %s", a.ImportPath, ac.bench, []string{"A", "B"}[i])
 		}
+		selected[i] = matched
 	}
-	return nil
+	return selected, nil
 }
 
 // abGuardsAgree refuses a B side whose build identity differs from A's
@@ -577,7 +558,7 @@ func abGuardsAgree(importPath, ref string, a, b guard.Guards) error {
 }
 
 func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPreparation, index, total int, envs environments) error {
-	p, sideBPkgDir, binA, binB, guardsA, guardsB := prep.pkg, prep.sideBPkgDir, prep.binA, prep.binB, prep.guardsA, prep.guardsB
+	p, sideBPkgDir, binA, binB, guardsA, guardsB := prep.pkg, prep.reference.Dir, prep.binA, prep.binB, prep.guardsA, prep.guardsB
 	// Both sides measure under the pinned environment. Builds use the analysis
 	// environment; the reference runtime guard describes this measured one.
 	runtimeEnv := envs.measured()
@@ -593,7 +574,7 @@ func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPrep
 	// drift (thermal, page cache) into the measured delta; alternation
 	// cancels it. Each binary runs from its own tree so cwd-sensitive
 	// arms (disk media, testdata) resolve correctly.
-	var outA, outB []byte
+	var rowsA, rowsB []*benchfmt.Result
 	throttleBase := ac.snapshotThrottle()
 	for i := 0; i < ac.count; i++ {
 		// Interruption stops before the next pair; the artifact written
@@ -615,7 +596,10 @@ func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPrep
 		if err != nil {
 			return fmt.Errorf("ab: side A iteration %d: %w", i+1, err)
 		}
-		outA = append(outA, a...)
+		streamA, err := admitABStream(errw, a, p.ImportPath, ac.bench, prep.selected[0])
+		if err != nil {
+			return fmt.Errorf("ab: side A iteration %d: %w", i+1, err)
+		}
 		b, err := ac.executeBinary(ctx, sideBPkgDir, ac.pin.List(), runtimeEnv, binB, argsB)
 		if cancelledBy(ctx, err) {
 			return stopped()
@@ -623,15 +607,20 @@ func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPrep
 		if err != nil {
 			return fmt.Errorf("ab: side B iteration %d: %w", i+1, err)
 		}
-		outB = append(outB, b...)
+		streamB, err := admitABStream(errw, b, prep.reference.ImportPath, ac.bench, prep.selected[1])
+		if err != nil {
+			return fmt.Errorf("ab: side B iteration %d: %w", i+1, err)
+		}
 		// The artifact is written incrementally, one rewrite per
 		// completed pair, so an interrupted comparison keeps every
 		// iteration it finished (spec REQ-pew-unit-persistence).
 		if ac.artifact != nil {
-			if err := ac.artifact.pair(p.ImportPath, ac.ref, i+1, a, b); err != nil {
+			if err := ac.artifact.pair(p.ImportPath, ac.ref, i+1, streamA, streamB); err != nil {
 				return err
 			}
 		}
+		rowsA = append(rowsA, streamA.rows...)
+		rowsB = append(rowsB, streamB.rows...)
 	}
 	throttled := throttleBase.Delta(ac.snapshotThrottle())
 	if throttled != nil && *throttled {
@@ -639,20 +628,6 @@ func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPrep
 		if ac.strict {
 			return fmt.Errorf("ab: %s: thermal throttling during measurement (--strict)", p.ImportPath)
 		}
-	}
-	rowsA, corruptA, droppedA, err := run.Parse(outA)
-	if err != nil {
-		return err
-	}
-	rowsB, corruptB, droppedB, err := run.Parse(outB)
-	if err != nil {
-		return err
-	}
-	for _, dc := range append(droppedA, droppedB...) {
-		fmt.Fprintf(errw, "pew: warning: dropping stream configuration key %q (value %q): not a toolchain benchmark key (spec §5)\n", dc.Key, dc.Value)
-	}
-	for _, cl := range append(corruptA, corruptB...) {
-		fmt.Fprintf(errw, "pew: warning: corrupt benchmark output line: %q (%s)\n", cl.Text, cl.Cause)
 	}
 	if len(rowsA) == 0 || len(rowsB) == 0 {
 		return fmt.Errorf("ab: %s: pattern %q produced no results on %s", p.ImportPath, ac.bench, map[bool]string{true: "side A", false: "side B"}[len(rowsA) == 0])
@@ -687,14 +662,6 @@ func abPackage(ctx context.Context, w, errw io.Writer, ac abConfig, prep *abPrep
 		fmt.Fprintf(errw, "pew: ab artifact written to %s (derivation artifact - never a stat baseline)\n", ac.out)
 	}
 	return nil
-}
-
-// writeABArtifact stores both raw streams as one marked derivation
-// artifact. The dirty mark and the pew-ab mark keep it out of every
-// stat baseline path by shape (spec §12).
-func writeABArtifact(path, importPath, ref string, outA, outB []byte) error {
-	a := &abArtifact{path: path}
-	return a.pair(importPath, ref, 1, outA, outB)
 }
 
 // abPlacement is the directory side B's worktree and both sides' binaries

@@ -31,31 +31,11 @@ type abBlock struct {
 	profile        *profiles.Capture
 }
 
-func (a *abArtifact) pair(pkg, ref string, pair int, rawA, rawB []byte) error {
-	for side, raw := range [][]byte{rawA, rawB} {
-		rows, corrupt, _, err := run.Parse(raw)
-		if err != nil {
-			return err
-		}
-		if len(rows) == 0 || len(corrupt) != 0 {
-			return fmt.Errorf("ab: incomplete or corrupt measurement pair")
-		}
-		names := map[string]bool{}
+func (a *abArtifact) pair(pkg, ref string, pair int, sideA, sideB abStream) error {
+	for side, stream := range []abStream{sideA, sideB} {
 		children := map[string]bool{}
-		for _, r := range rows {
+		for _, r := range stream.rows {
 			children[string(r.Name)] = true
-			if got := r.GetConfig("pkg"); got != "" && got != pkg {
-				return fmt.Errorf("ab: stream package %q differs from %q", got, pkg)
-			}
-			names[run.BenchName(string(r.Name))] = true
-		}
-		var selected []string
-		for name := range names {
-			selected = append(selected, name)
-		}
-		audit := run.AuditStream(rows, corrupt, 1, selected)
-		if audit.PackageCause != "" || len(audit.Refused) != 0 {
-			return fmt.Errorf("ab: invalid measurement pair: %s %v", audit.PackageCause, audit.Refused)
 		}
 		if a.samples == nil {
 			a.samples = map[string]map[string]bool{}
@@ -77,7 +57,7 @@ func (a *abArtifact) pair(pkg, ref string, pair int, rawA, rawB []byte) error {
 	if a.path == "" {
 		return nil
 	}
-	a.blocks = append(a.blocks, abBlock{pkg: pkg, ref: ref, side: "A", pair: pair, raw: bytes.Clone(rawA)}, abBlock{pkg: pkg, ref: ref, side: "B", pair: pair, raw: bytes.Clone(rawB)})
+	a.blocks = append(a.blocks, abBlock{pkg: sideA.pkg, ref: ref, side: "A", pair: pair, raw: bytes.Clone(sideA.raw)}, abBlock{pkg: sideB.pkg, ref: ref, side: "B", pair: pair, raw: bytes.Clone(sideB.raw)})
 	return a.write()
 }
 
