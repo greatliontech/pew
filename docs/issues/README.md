@@ -6,7 +6,6 @@ close-out convention.
 
 | slug | summary | Lands |
 |------|---------|-------|
-| [observation-premise-property-evidence](observation-premise-property-evidence.md) | existing premise examples do not establish the invariant's required property-evidence class | performance-evidence plan chunk 12, before its final verification gate |
 | [train-riders-for-the-performance-evidence-plan](train-riders-for-the-performance-evidence-plan.md) | remaining final-workflow riders and cross-tool coordination; residual dependency bump tracked by the train | performance-evidence plan chunk 12 |
 | [mutation-oracle-observation](mutation-oracle-observation.md) | incomplete campaigns and blocked chunk 11 campaign scope, legitimate unsupported cwd/evidence, and unsound negative subprocess coverage require shared-tool resolution and sound remeasurement | performance-evidence plan chunk 12 final mutation gate |
 | [guidance-purpose-column-second-enumeration](guidance-purpose-column-second-enumeration.md) | §12's opt-in purpose column restates the document's knob prose in its own words, pinned to nothing | performance-evidence plan chunk 12.2 (audit 335) |
