@@ -768,7 +768,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.measureBench"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "41e4612b25cfb96a1f546782ad4c5c7272ef8c7c89f2136bc12ff8833cb9da6d"
+  shape_hash: "376308f9200e7c9ef14cef89e1c967e8c6545a27ac79d54a5e109980f4e3213b"
 }
 
 bindings {
