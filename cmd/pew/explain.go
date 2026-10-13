@@ -11,6 +11,7 @@ import (
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/pew/internal/gotool"
 	runpkg "github.com/greatliontech/pew/internal/run"
 )
 
@@ -162,4 +163,14 @@ func movedInputsLine(ctx context.Context, manifest, moduleDir string, env []stri
 		return ""
 	}
 	return strings.Join(moved, ", ")
+}
+
+// explainPackageRecord re-observes runtime inputs under the same package
+// environment as the verdict, rather than the reporting process's directory.
+func explainPackageRecord(ctx context.Context, w io.Writer, moduleDir, pkgDir string, fp, current gofresh.Fingerprint, env gotool.Environment) error {
+	actual, err := env.For(pkgDir)
+	if err != nil {
+		return err
+	}
+	return explainCapturedRecord(ctx, w, moduleDir, fp, current, actual)
 }

@@ -19,6 +19,7 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	gofresh "github.com/greatliontech/gofresh"
+	"github.com/greatliontech/pew/internal/compare"
 	"github.com/greatliontech/pew/internal/gotool"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
@@ -222,7 +223,7 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
 		t.Fatal(err)
 	}
-	benchDir := filepath.Join(t.TempDir(), "benchmarks")
+	benchDir := filepath.Join(dir, "benchmarks")
 	withWorkingDir(t, dir)
 
 	var out, errOut bytes.Buffer
@@ -233,12 +234,12 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runRun: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
 	}
-	e, _, err := newEngineAt(context.Background(), dir, dir, false, testEnvironment(t, os.Environ()))
-	if err != nil {
-		t.Fatal(err)
-	}
 	st := store.New(benchDir)
 	for bench, pkgRel := range map[string]string{"BenchmarkNoIO": "pure", "BenchmarkReadError": "readerr", "BenchmarkGetwd": "getwd"} {
+		e, _, err := newEngineAt(context.Background(), dir, filepath.Join(dir, pkgRel), false, testEnvironment(t, os.Environ()))
+		if err != nil {
+			t.Fatal(err)
+		}
 		recs, err := st.Read(pkgRel, bench, "")
 		if err != nil {
 			t.Fatal(err)
@@ -278,10 +279,9 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 		case "BenchmarkGetwd":
 			// Spawn and ingestion share one environment with PWD pinned to
 			// the package directory the go driver gives the binary. The
-			// explicit observed policy lifts the closure; truthful pinned PWD is
-			// admitted recordless — the manifest must never carry the
-			// process-local-divergence seal an ingest under pew's own
-			// environment would record.
+			// explicit observed policy lifts the closure; truthful pinned PWD
+			// remains a recorded dependency, not a process-local-divergence
+			// refusal from ingesting under pew's own directory.
 			if v != verdictValid || !fp.ObservationProof.Observable || fp.ObservationAssertion == "" {
 				t.Fatalf("%s recording = {%s %q}, want supported observed validity", bench, v, reason)
 			}
@@ -304,6 +304,31 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 			}
 		}
 	}
+	var status strings.Builder
+	if err := runStatus(t.Context(), &status, benchDir, "", false, false, false, []string{"./getwd"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Fields(status.String()); len(got) < 2 || got[0] != "valid" || got[1] != "example.com/incompleterun/getwd.BenchmarkGetwd" {
+		t.Fatalf("package-scoped status: %s", &status)
+	}
+	commitAll(t, raw, "recorded baseline")
+	t.Run("unrelated-build-drift", func(t *testing.T) {
+		t.Setenv("PEW_BUILD_PROBE", "changed")
+		status.Reset()
+		if err := runStatus(t.Context(), &status, benchDir, "", false, true, false, []string{"./getwd"}); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(status.String(), "(buildconfig)") || strings.Contains(status.String(), "moved inputs: env PWD") {
+			t.Fatalf("explanation substituted the tool's PWD: %s", &status)
+		}
+		var comparison, explanation bytes.Buffer
+		if err := runStat(t.Context(), &comparison, &explanation, statConfig{benchDir: benchDir, explain: true, opts: compare.DefaultOptions()}, []string{"HEAD"}); err != nil {
+			t.Fatalf("stat: %v\n%s\n%s", err, &comparison, &explanation)
+		}
+		if !strings.Contains(explanation.String(), "getwd.BenchmarkGetwd is stale (buildconfig)") || strings.Contains(explanation.String(), "moved inputs: env PWD") {
+			t.Fatalf("stat explanation substituted the tool's PWD: %s", &explanation)
+		}
+	})
 }
 
 // TestRunPackageRecordsProvidedConditions pins that runPackage records the

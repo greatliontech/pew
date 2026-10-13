@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"time"
 
 	"golang.org/x/perf/benchfmt"
@@ -99,35 +100,69 @@ func (s *Store) ReadObject(digest string, size int64) ([]byte, error) {
 // objects are retained: collection must not race a publisher between these operations.
 func (s *Store) PutObject(ctx context.Context, b []byte) (string, error) {
 	digest := fmt.Sprintf("%x", sha256.Sum256(b))
+	p, _ := s.ObjectPath(digest)
+	return digest, s.putObject(ctx, p, b, 0o600)
+}
+
+// PutExecutable retains a diagnostic's binary under its content identity and
+// returns the absolute path to execute. Existing objects are never repaired.
+func (s *Store) PutExecutable(ctx context.Context, b []byte) (string, error) {
+	digest := fmt.Sprintf("%x", sha256.Sum256(b))
+	// A fixed suffix is executable by os/exec on Windows as well as Unix.
+	p := filepath.Join(s.Root, ".profiles", "executables", digest+".exe")
+	if err := s.putObject(ctx, p, b, 0o500); err != nil {
+		return "", err
+	}
+	return filepath.Abs(p)
+}
+
+func (s *Store) putObject(ctx context.Context, p string, b []byte, mode os.FileMode) error {
 	unlock, err := s.lock(ctx)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer unlock()
-	p, _ := s.ObjectPath(digest)
 	if err := s.ensureDir(filepath.Dir(p)); err != nil {
-		return "", err
+		return err
 	}
-	if _, err := os.Lstat(p); err == nil {
-		_, err = s.ReadObject(digest, int64(len(b)))
-		return digest, err
+	if info, err := os.Lstat(p); err == nil {
+		actual, err := s.readRegular(p)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(actual, b) {
+			return fmt.Errorf("store: %w: %s", ErrObjectIntegrity, p)
+		}
+		if mode&0o100 != 0 && !executableMode(info.Mode()) {
+			return fmt.Errorf("store: executable permissions changed: %s", p)
+		}
+		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
+		return err
 	}
 	f, err := os.CreateTemp(filepath.Dir(p), ".object-*")
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer os.Remove(f.Name())
 	_, writeErr := f.Write(b)
-	if err := errors.Join(writeErr, f.Close()); err != nil {
-		return "", err
+	modeErr := f.Chmod(mode)
+	if err := errors.Join(writeErr, modeErr, f.Close()); err != nil {
+		return err
 	}
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return err
 	}
 	if err := os.Rename(f.Name(), p); err != nil {
-		return "", err
+		return err
 	}
-	return digest, nil
+	return nil
+}
+
+func executableMode(mode os.FileMode) bool {
+	if runtime.GOOS == "windows" {
+		// Windows exposes the read-only bit through Chmod, not Unix execute bits.
+		return mode.Perm()&0o200 == 0
+	}
+	return mode&(os.ModePerm|os.ModeSetuid|os.ModeSetgid|os.ModeSticky) == 0o500
 }

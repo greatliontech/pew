@@ -78,7 +78,6 @@ func Output(ctx context.Context, dir string, env Environment, args ...string) ([
 // still omit packages, so there is no sound partial-output salvage.
 func List(ctx context.Context, dir string, env Environment, args ...string) ([]byte, error) {
 	runner := Runner(nil)
-	runner.Containment = &gofreshtool.Containment{}
 	return runner.List(ctx, CommandDir(dir), env.Values(), args...)
 }
 
@@ -104,9 +103,10 @@ func EnvValue(ctx context.Context, reader *gofreshtool.EnvReader, key string) (s
 // policy every go child pew makes through gofresh rides — Command's
 // derived environment over a resolved directory. prepare, when set, is
 // the hook a pin observes the command's directory and environment
-// through.
+// through. Query cancellation sweeps the process group and bounds pipe reaping;
+// callers with a distinct execution policy replace Containment explicitly.
 func Runner(prepare func(*exec.Cmd)) gofreshtool.Runner {
-	return gofreshtool.Runner{Prepare: prepare}
+	return gofreshtool.Runner{Containment: &gofreshtool.Containment{}, Prepare: prepare}
 }
 
 // Reader is a pass's go-env reader (gotool.EnvReader: the first key

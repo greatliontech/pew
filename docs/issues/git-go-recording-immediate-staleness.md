@@ -1,7 +1,27 @@
 # git-go recording is stale at the first status inspection
 
-Lands: Gofresh docs/plans/tooling-redesign.md 5.1u for fixed-identity diagnosis,
-with measurement attribution at 7.7 and the explanation account at 8.3.
+Lands: Gofresh docs/plans/tooling-redesign.md 7.7 for measurement attribution
+and 8.3 for the explanation account.
+
+## Remaining evidence gap
+
+The retained producer/checker identities rule out a known binary-version
+transition, but the observations below do not retain both complete compilation
+environments. Their buildconfig digests cannot identify the differing input.
+A reduced real capture under one executable and one environment stays current;
+changing an otherwise unobserved compiler-environment variable produces the
+same `stale (buildconfig)` class. Compiler wrappers can consume such variables,
+so dropping them from the native build description would be unsound.
+
+The diagnostic executable lifetime has a separate concrete cause: the profiler
+observes its producing executable and temporary-directory cleanup removes it.
+The retained-executable rule in spec §6.2 preserves that dependency without an
+exclusion or a grant of outcome support. Historical temporary-path evidence is
+not rewritten. The remaining work here is the build-input attribution account:
+record enough safe diagnostic provenance to distinguish a changed environment
+from a producer/checker discrepancy without disclosing environment values or
+asserting the cause from guard digests alone. Ordinary unsupported outcomes
+and diagnostic identity-only support remain independent, explicit judgments.
 
 ## Observation
 
@@ -71,11 +91,10 @@ compiler/build/runtime/PGO semantics; do not remove a guard simply to make this
 record valid. If an installed-version change explains the refusal, report the
 appropriate compatibility boundary and needed remeasurement explicitly.
 
-Separately determine whether the recorded temporary profile executable is an
-actual external input or a producer-owned artifact whose identity/retention
-belongs to the capture. A successful capture's normal scratch cleanup should
-not silently invalidate otherwise reusable evidence, but a benchmark that
-actually reads its executable must retain that dependency correctly.
+The retained-executable rule in §6.2 addresses producer-owned artifact lifetime.
+A benchmark or profiler that reads its executable retains that dependency;
+historical observations of a deleted temporary path remain stale and require
+fresh capture, never a rewritten manifest.
 
 Explain the ordinary measurement's unsupported outcome separately from profile
 identity-only support. Use reduced tool-owned regressions with equivalent

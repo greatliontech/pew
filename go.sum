@@ -41,8 +41,8 @@ github.com/google/pprof v0.0.0-20260906184651-6331bc6350fe h1:QAinXoAFJdGQYztXn3
 github.com/google/pprof v0.0.0-20260906184651-6331bc6350fe/go.mod h1:jl5iWTm0/hd5PjEYEOuwAJ57L/CibdZfrqZ5XA5GrCk=
 github.com/greatliontech/go-x-tools v0.50.1-0.20261009182129-f5608c7b7b28 h1:e+GwNT9khXpqVrFBMK8GdQnQ6j29f2Yx2NBpvtlCkS4=
 github.com/greatliontech/go-x-tools v0.50.1-0.20261009182129-f5608c7b7b28/go.mod h1:Vd8lReLcZTopDeGvhvDnzfCLHrLBYnA7f42bvAF87XQ=
-github.com/greatliontech/gofresh v0.116.3 h1:94445UadsvoY+gtH3g/Qfl0rOL1fWg8WDs8AZjVZYbM=
-github.com/greatliontech/gofresh v0.116.3/go.mod h1:do6BJSmtcE7o0470xr1vwOl8Q9mhDQm5tv8Jjc+jADw=
+github.com/greatliontech/gofresh v0.117.2 h1:jdMnb0on2v86b63+XHPoDgwa7VK/FXlqWn/vBb14bLY=
+github.com/greatliontech/gofresh v0.117.2/go.mod h1:do6BJSmtcE7o0470xr1vwOl8Q9mhDQm5tv8Jjc+jADw=
 github.com/greatliontech/gofresh/toolversion v0.0.0-20261012210745-f5a40c0055e1 h1:CaEY/dc4WAuAT2BYYcv5HcBja7VP3UI/iDl+gEsYgR4=
 github.com/greatliontech/gofresh/toolversion v0.0.0-20261012210745-f5a40c0055e1/go.mod h1:9UhoGkoiqOilKHvp4MAlX14GRKP5eyeBiIKnSLGJ+kg=
 github.com/greatliontech/stipulator/stipulate/structural v0.3.1 h1:FRe2S11CXSP2WnSXM7/RD5iqzn2wYI8kYskD2oGoKUE=

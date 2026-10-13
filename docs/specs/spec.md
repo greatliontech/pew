@@ -117,6 +117,13 @@ be canonical unpadded URL-safe encoding. Semantic proof integrity remains the sh
 freshness check's concern: structurally readable but inconsistent proof evidence
 does not become a new Pew format refusal or confer observation-based reuse.
 
+Runtime-input generation and its historical eligibility belong to Gofresh too.
+A native manifest whose generation the checker rejects is stale runtime evidence,
+not an unreadable outer recording. Inspection preserves its bytes; a subsequent
+measurement records new native evidence rather than rewriting the old generation
+or supplying an omitted input from current analysis. This includes generation-2
+manifests that could omit an observed PWD: generation 3 retains that dependency.
+
 Commit, dirty, conditions and the test-variant ledger are Pew-owned facts beside
 that payload. No parallel fingerprint config lines are persisted or admitted in
 format 6. Comparison and explanation values below are projections from the admitted
@@ -427,6 +434,17 @@ immutable; an existing object is read and verified before reuse. All reads and
 writes enforce regular files and symlink-free store paths. Objects install before
 the atomic index-bearing recording replacement. Unreferenced objects may remain
 after failure or interruption; automatic object collection is not performed.
+Retained diagnostics execute from immutable executable objects at
+`<bench-dir>/.profiles/executables/<binarySHA256>.exe` on every platform, with
+owner read/execute permissions (the read-only attribute on Windows). Existing
+bytes and permissions are verified before use; damaged
+objects refuse rather than being overwritten. The executable is retained even
+when capture or attachment fails, under the same no-collection rule. An observed
+read of that file remains a runtime dependency: retention is not an exclusion
+or an outcome-support grant. Historical temporary executable paths are not
+rewritten into the object store. A/B with `--out` uses its diagnostic object
+store for this retention; without `--out` its executables and diagnostics remain
+temporary and the existing nonretention report applies.
 
 Measurements publish before diagnostics. Attachment compares the exact expected
 recording bytes and replaces under the same cross-process lock used by every
@@ -966,6 +984,9 @@ a collision, including a recording required as another recording's directory,
 refuses the invocation and names both owners. Normalization preserves
 the benchmark harness's supported budget spellings. Diagnostic effort remains
 separate from ordinary effort even though both use the same value-domain rule.
+An A/B invocation validates its count and any explicit nonempty timing budget
+at command entry and before listing in the operation itself; omission retains
+the Go harness's default budget.
 
 **REQ-pew-requested-workload** (behavior): A recording served for a run request
 MUST cover that request's admitted per-benchmark selection, canonical calibration
@@ -1442,6 +1463,9 @@ declaration unrecorded on both sides. Missing measurements retain unavailable
 per-side diagnostics rather than removing the requested comparison; unknown
 child identities are not invented, and two-ref comparisons do not gain today's
 unrecorded declarations.
+For asymmetric A/B populations, a side with no completed measurement has an
+unavailable diagnostic without an operational error; independent existing sides
+are still captured and published.
 An explicit unfulfilled profile request, including two successfully captured but
 incompatible A/B diagnostics, exits 2; an eligible statistical
 regression with its gate enabled exits 1 ahead of it; interruption exits 130
@@ -1704,6 +1728,22 @@ Mann–Whitney α=0.05 + worse-direction + ≥3% (§10); CLI → above. Deferred
 `docs/issues/`.
 
 ## 13. Project invariants
+
+**REQ-pew-query-containment** (behavior): Every go-command query Pew owns MUST
+run under its shared runner's platform containment and bounded pipe reaping.
+Unix cancellation sweeps the query's descendant process group while its leader
+is running. On Linux the collected runner also holds the exited leader's
+waitable identity through pipe draining and cleanup, covering cancellation or
+closing expiry during that drain without signalling a recycled group. Other
+platforms retain the shared runner's stated cancellation and drain limits.
+This includes environment readers, direct queries and analysis-engine queries,
+not just measurement binaries. A completed arm's existing closing context also
+bounds its publishing queries, with the refusal named and earlier committed
+units retained. Whole environment documents retain Gofresh's structured salvage
+rule; an undrained package listing retains its separate refusal. The external
+package loader's children remain outside the shared runner's hook and this
+owned-query boundary. A measurement's explicitly different reap policy remains
+part of that measurement's executor description.
 
 **REQ-pew-observation-premises** (invariant): Pew MUST supply process completion
 and independently established operation-outcome support under the shared

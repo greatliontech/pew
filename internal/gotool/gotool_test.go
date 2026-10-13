@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -119,8 +120,10 @@ func TestListRefusesUndrainedOutput(t *testing.T) {
 	bin := t.TempDir()
 	release := filepath.Join(bin, "release")
 	done := filepath.Join(bin, "done")
+	pidFile := filepath.Join(bin, "pid")
 	t.Setenv("PEW_LIST_RELEASE", release)
 	t.Setenv("PEW_LIST_DONE", done)
+	t.Setenv("PEW_LIST_PID", pidFile)
 	t.Cleanup(func() {
 		if err := os.WriteFile(release, nil, 0600); err != nil {
 			t.Error(err)
@@ -133,6 +136,18 @@ func TestListRefusesUndrainedOutput(t *testing.T) {
 			if _, err := os.Stat(done); err == nil {
 				return
 			}
+			// The Linux collected runner kills the holder before returning;
+			// other platform boundaries let this fixture release it explicitly.
+			if runtime.GOOS == "linux" {
+				pidBytes, _ := os.ReadFile(pidFile)
+				if pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes))); err == nil && pid > 0 {
+					state, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+					_, status, _ := strings.Cut(string(state), ") ")
+					if os.IsNotExist(err) || err == nil && strings.HasPrefix(status, "Z ") {
+						return
+					}
+				}
+			}
 			select {
 			case <-deadline:
 				t.Error("pipe holder did not acknowledge cleanup")
@@ -143,7 +158,7 @@ func TestListRefusesUndrainedOutput(t *testing.T) {
 	})
 	// The apparent listing is valid JSON, but a descendant still owns its
 	// output pipe after the successful driver exit. Syntax is not completeness.
-	script := "#!/bin/sh\n[ \"$1\" = list ] || exit 2\nprintf '{\"ImportPath\":\"example.test/pkg\"}\\n'\n(while [ ! -e \"$PEW_LIST_RELEASE\" ]; do sleep 0.01; done; : > \"$PEW_LIST_DONE\") &\nexit 0\n"
+	script := "#!/bin/sh\n[ \"$1\" = list ] || exit 2\nprintf '{\"ImportPath\":\"example.test/pkg\"}\\n'\n(while [ ! -e \"$PEW_LIST_RELEASE\" ]; do sleep 0.01; done; : > \"$PEW_LIST_DONE\") &\nprintf '%s\\n' $! > \"$PEW_LIST_PID\"\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}

@@ -234,6 +234,22 @@ func BenchmarkFirst(b *testing.B) {
 				if err != nil {
 					return nil, err
 				}
+				if mode == "executable-changed" || mode == "executable-missing" {
+					original, err := os.ReadFile(bin)
+					if err != nil {
+						t.Fatal(err)
+					}
+					// The object now outlives this capture. Restore only the
+					// fixture's deliberate damage before the next independent arm.
+					t.Cleanup(func() {
+						if err := os.Remove(bin); err != nil && !os.IsNotExist(err) {
+							t.Error(err)
+						}
+						if err := os.WriteFile(bin, original, 0o500); err != nil {
+							t.Error(err)
+						}
+					})
+				}
 				switch mode {
 				case "source-drift", "cancel-source-drift":
 					writeFile(t, filepath.Join(root, "bench_test.go"), string(fixture)+"\nfunc AddedSource() {}\n")
@@ -241,6 +257,9 @@ func BenchmarkFirst(b *testing.B) {
 						cancel()
 					}
 				case "executable-changed":
+					if err := os.Chmod(bin, 0o700); err != nil {
+						t.Fatal(err)
+					}
 					if err := os.WriteFile(bin, []byte("different regular executable bytes"), 0600); err != nil {
 						t.Fatal(err)
 					}

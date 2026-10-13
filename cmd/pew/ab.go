@@ -115,6 +115,19 @@ func (ac abConfig) buildBinary(ctx context.Context, dir string, env gotool.Envir
 	return run.BuildContext(ctx, dir, env, args)
 }
 
+func (ac abConfig) validateEffort() error {
+	if ac.count < 1 {
+		return fmt.Errorf("ab: count must be at least 1")
+	}
+	// Omission keeps the Go harness's default; an explicit value must be usable.
+	if ac.benchtime != "" {
+		if err := run.ValidateBudget(ac.benchtime); err != nil {
+			return fmt.Errorf("ab: benchtime: %w", err)
+		}
+	}
+	return nil
+}
+
 func newABCmd() *cobra.Command {
 	ac := abConfig{}
 	var pin bool
@@ -126,8 +139,8 @@ func newABCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// The flag values the verb alone decides refuse here, before
 			// any listing (REQ-pew-preparation).
-			if ac.count < 1 {
-				return fmt.Errorf("ab: count must be at least 1")
+			if err := ac.validateEffort(); err != nil {
+				return err
 			}
 			if err := validateBenchmarkPattern(ac.bench); err != nil {
 				return err
@@ -169,6 +182,9 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 			}
 		}
 	}()
+	if err := ac.validateEffort(); err != nil {
+		return err
+	}
 	if _, err := profiles.Kinds(ac.profile); err != nil {
 		return err
 	}
@@ -184,9 +200,6 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 	analysis, err := gotool.NewEnvironment(nil)
 	if err != nil {
 		return err
-	}
-	if ac.count < 1 {
-		return fmt.Errorf("ab: count must be at least 1")
 	}
 	reportPhase(ctx, "listing")
 	pkgs, err := resolvePackages(ctx, analysis, patterns)

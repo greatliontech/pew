@@ -58,7 +58,7 @@ func TestRunRecordsPerArmOutcomeSupport(t *testing.T) {
 		if err := json.Unmarshal(data, &manifest); err != nil {
 			t.Fatal(err)
 		}
-		if manifest.Version != 2 || manifest.Outcome != "gofresh/immutable-environment@1" || len(manifest.Subjects) != 1 {
+		if manifest.Version != 3 || manifest.Outcome != "gofresh/immutable-environment@1" || len(manifest.Subjects) != 1 {
 			t.Fatalf("%s support=%s", name, data)
 		}
 		if manifest.Subjects[0] == previous {

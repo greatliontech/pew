@@ -6,8 +6,7 @@ close-out convention.
 
 | slug | summary | Lands |
 |------|---------|-------|
-| [git-go-recording-immediate-staleness](git-go-recording-immediate-staleness.md) | first status after value measurements/profiles reports buildconfig drift and a deleted profile testbin input; distinguish version transition, artifact ownership and outcome support | tooling-redesign 5.1u, 7.7 and 8.3 |
-| [remaining-producer-refusals-and-closing](remaining-producer-refusals-and-closing.md) | environment-query containment, unavailable asymmetric A/B diagnostics and early explicit timing-effort validation | tooling-redesign 5.1u, before the next consumer migration |
+| [git-go-recording-immediate-staleness](git-go-recording-immediate-staleness.md) | historical buildconfig drift lacks the two complete build environments; preserve safe provenance that can attribute the differing input without weakening guards | tooling-redesign 7.7 and 8.3 |
 | [train-riders-for-the-performance-evidence-plan](train-riders-for-the-performance-evidence-plan.md) | remaining final-workflow riders and cross-tool coordination; residual dependency bump tracked by the train | performance-evidence plan chunk 12 |
 | [mutation-oracle-observation](mutation-oracle-observation.md) | incomplete campaigns and blocked chunk 11 campaign scope, legitimate unsupported cwd/evidence, and unsound negative subprocess coverage require shared-tool resolution and sound remeasurement | performance-evidence plan chunk 12 final mutation gate |
 | [guidance-purpose-column-second-enumeration](guidance-purpose-column-second-enumeration.md) | §12's opt-in purpose column restates the document's knob prose in its own words, pinned to nothing | performance-evidence plan chunk 12.2 (audit 335) |

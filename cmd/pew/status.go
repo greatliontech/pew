@@ -12,7 +12,6 @@ import (
 	"sync"
 
 	gofresh "github.com/greatliontech/gofresh"
-	gofreshtool "github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/pew/internal/gotool"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
@@ -179,7 +178,6 @@ func buildEngine(ctx context.Context, moduleDir, pkgDir string, env gotool.Envir
 		return nil, err
 	}
 	runner := gotool.Runner(dependencies(ctx).prepare)
-	runner.Containment = &gofreshtool.Containment{}
 	return gofresh.NewSession(ctx,
 		gofresh.BuildDescription{Directory: moduleDir, Environment: env.Values(), Inputs: inputs},
 		gofresh.RuntimeDescription{Directory: pkgDir, Environment: runtimeEnv},
@@ -423,7 +421,7 @@ func statusPackage(ctx context.Context, w, errw io.Writer, getEngine func() (*go
 					continue
 				}
 			}
-			if err := explainCapturedRecord(ctx, w, p.Module.Dir, fp, current, env.Values()); err != nil {
+			if err := explainPackageRecord(ctx, w, p.Module.Dir, p.Dir, fp, current, env); err != nil {
 				failures = append(failures, fmt.Errorf("%s.%s explanation: %w", p.ImportPath, b, err))
 			}
 		}

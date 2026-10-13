@@ -539,7 +539,7 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 						}
 						fmt.Fprintf(errw, "pew: warning: working-tree recording %s.%s is %s; comparison may not reflect HEAD — re-run `pew run`\n", cur.importPath, key.bench, msg)
 						if sc.explain {
-							if err := explainCapturedRecord(ctx, errw, cur.moduleDir, fp, judged.current, env.Values()); err != nil {
+							if err := explainPackageRecord(ctx, errw, cur.moduleDir, cur.pkgDir, fp, judged.current, env); err != nil {
 								if cancelledBy(ctx, err) {
 									return stoppedAt()
 								}

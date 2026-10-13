@@ -228,7 +228,7 @@ func captureProfile(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gi
 			}
 		}
 	}
-	return captureDiagnostic(ctx, errw, rc, gc, prep, envs, conditions, parent, name, kind, budget, selection, rows, &adm, func(gate context.Context, c profiles.Capture, blob []byte) error {
+	return captureDiagnostic(ctx, errw, rc, gc, prep, envs, conditions, parent, name, kind, budget, selection, rows, &adm, st, func(gate context.Context, c profiles.Capture, blob []byte) error {
 		if err := profiles.CheckedRelation(gate, c, rows, adm.fp, parent); err != nil {
 			return fmt.Errorf("profile attachment refused: %w", err)
 		}
@@ -264,7 +264,7 @@ func captureProfile(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gi
 // captureDiagnostic owns one independent execution. The publication callback
 // receives only validated evidence, under the same bounded finalization context.
 // A/B has no persisted timed fingerprint; only recording attachment supplies adm.
-func captureDiagnostic(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStateCache, prep *packagePreparation, envs environments, conditions run.Conditions, parent *gofresh.Snapshot, name, kind, budget, selection string, rows []*benchfmt.Result, adm *admission, publish func(context.Context, profiles.Capture, []byte) error) error {
+func captureDiagnostic(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStateCache, prep *packagePreparation, envs environments, conditions run.Conditions, parent *gofresh.Snapshot, name, kind, budget, selection string, rows []*benchfmt.Result, adm *admission, objects *store.Store, publish func(context.Context, profiles.Capture, []byte) error) error {
 	p := prep.pkg
 	subject := gofresh.Subject{Package: p.ImportPath, Symbol: name}
 	unit, err := parent.BeginIdentity(subject)
@@ -296,7 +296,7 @@ func captureDiagnostic(ctx context.Context, errw io.Writer, rc runConfig, gc *gi
 		return err
 	}
 	defer os.RemoveAll(dir)
-	bin, output, testlog := filepath.Join(dir, "testbin"), filepath.Join(dir, "capture.pprof"), filepath.Join(dir, "testlog")
+	bin, output, testlog := filepath.Join(dir, "testbin.exe"), filepath.Join(dir, "capture.pprof"), filepath.Join(dir, "testlog")
 	description, err := parent.BuildDescription(p.ImportPath)
 	if err != nil {
 		return err
@@ -313,6 +313,12 @@ func captureDiagnostic(ctx context.Context, errw io.Writer, rc runConfig, gc *gi
 	binary, err := readProfileFile(bin)
 	if err != nil {
 		return err
+	}
+	if objects != nil {
+		bin, err = objects.PutExecutable(ctx, binary)
+		if err != nil {
+			return err
+		}
 	}
 	if err := validateProfileSnapshot(ctx, parent, subject); err != nil {
 		return err

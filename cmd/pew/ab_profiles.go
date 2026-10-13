@@ -55,12 +55,14 @@ func captureABProfiles(ctx context.Context, w, errw io.Writer, ac abConfig, prep
 	rc := runConfig{pin: ac.pin, strict: ac.strict, throttle: ac.throttle, diagnostic: ac.diagnostic}
 	rc.opts.Bench = ac.bench
 	gc := &gitStateCache{}
+	var objects *store.Store
 	if ac.out != "" {
 		out, err := filepath.Abs(ac.out)
 		if err != nil {
 			return err
 		}
 		gc.exclude = []string{out, out + ".profiles"}
+		objects = store.New(out + ".profiles")
 	} else {
 		fmt.Fprintln(errw, "pew: diagnostic objects are not retained without --out")
 	}
@@ -98,13 +100,14 @@ func captureABProfiles(ctx context.Context, w, errw io.Writer, ac abConfig, prep
 					}
 					selection, err := restrictBenchmarkPattern(ac.bench, []string{name})
 					if err == nil && len(rows) == 0 {
-						err = fmt.Errorf("ab: no completed measurement for %s on side %d", name, i)
+						status.Reason = "no completed measurement on this side"
+						unfulfilled = true
 					}
 					if err == nil && ctx.Err() != nil {
 						err = ctx.Err()
 					}
-					if err == nil {
-						err = captureDiagnostic(ctx, errw, rc, gc, side.prep, envs, conditions, side.view, name, kind, ac.profileBenchtime, selection, rows, nil, func(gate context.Context, c profiles.Capture, blob []byte) error {
+					if err == nil && len(rows) != 0 {
+						err = captureDiagnostic(ctx, errw, rc, gc, side.prep, envs, conditions, side.view, name, kind, ac.profileBenchtime, selection, rows, nil, objects, func(gate context.Context, c profiles.Capture, blob []byte) error {
 							// The ordinary comparison domain permits different source
 							// coordinates. Bind it to this producing side through the
 							// same native closing check; never rewrite native evidence.
@@ -152,7 +155,6 @@ func captureABProfiles(ctx context.Context, w, errw io.Writer, ac abConfig, prep
 									}
 								}
 								// The shared confined store owns object mapping and immutable install.
-								objects := store.New(ac.out + ".profiles")
 								if _, err := objects.PutObject(gate, blob); err != nil {
 									return err
 								}
