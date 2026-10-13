@@ -82,3 +82,45 @@ identity-only support. Use reduced tool-owned regressions with equivalent
 consumer workload shapes; another broad consumer measurement is not needed to
 file or begin diagnosis. Keep missing/unknown conditions and incomplete evidence
 visible rather than replacing them with assertions or a fabricated green verdict.
+
+## Repeated observation with matching inspected build identities
+
+The next required git-go evidence run used clean source `9029aa2` and Pew
+`v0.9.0`, clean revision `c45212102991752486a19265f5d9c12614cef23e`, built
+with `go1.27.2-dst.15` and Gofresh `v0.116.3`. That same executable build
+identity was inspected before measurement and after status inspection. This
+reduces the earlier installation ambiguity; it is not a claim that a binary
+handle was frozen throughout the interval.
+
+```sh
+mlock quiet "git-go hashing and affected value evidence" task bench:values bench:hash
+mlock run task bench:status -- --json
+```
+
+Both benchmark tasks measured required new/stale work rather than replaying a
+consumer solely to diagnose the tool: the value subject was stale on closure
+after hashing was added, and the hashing subject was unrecorded. The result
+contains fourteen value and twelve hashing children, ten samples each, with
+four nonempty profiles.
+
+The first status again reports both measurements stale on `buildconfig`; each
+allocation profile is stale on `buildconfig`, and each CPU profile is stale on
+its removed producer executable:
+
+- value CPU: `/tmp/pew-profile-1977399094/testbin`;
+- hashing CPU: `/tmp/pew-profile-1521022194/testbin`.
+
+All four profile objects report verified integrity, unverified relation and
+identity-only outcome. Ordinary measurements still report operation-outcome
+support unavailable. The new native objects have identities
+`5579b6084233ba23eab514a7dfa2511ac19873fad7cd0ffe94d5e90e1e56151e`,
+`599f06c8b802952b83c88095361af3242bc02c065bb571349166cec00452c3b1`,
+`df8a9b0230ec51f9552b4433c07ec1ba19ac32672a806e8716aa0534e3854573`, and
+`e950102dadac184f8d3b446fe84f3b436a84a919344b9d2b65832c091db70dc3`.
+
+With explicit complete/require/compatible comparison policies, `stat` produced
+42 numerical comparisons for existing value metrics but zero eligible metrics.
+Freshness and unknown throttled/battery observations prevent an enforcing pass;
+hashing has no predecessor and is correctly reported separately as missing-side
+comparison evidence. The consumer does not treat these observations as a passing
+regression judgment or change the guard policy to admit them.
