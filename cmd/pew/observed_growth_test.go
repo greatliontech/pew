@@ -64,7 +64,7 @@ func BenchmarkSecond(b *testing.B) { _,_=os.ReadFile("fixture.txt") }
 		t.Fatal("missing producing proof")
 	}
 	subject := gofresh.Subject{Package: "example.com/arms", Symbol: "BenchmarkFirst"}
-	engine := func() *gofresh.Session {
+	engine := func() *analysisSession {
 		t.Helper()
 		runtimeEnvironment := testEnvironment(t, os.Environ())
 		e, _, err := newEngineAtProducer(context.Background(), root, root, false, buildEnvironment, &runtimeEnvironment)
@@ -73,10 +73,10 @@ func BenchmarkSecond(b *testing.B) { _,_=os.ReadFile("fixture.txt") }
 		}
 		return e
 	}
-	judge := func(e *gofresh.Session) map[string]*benchVerdict {
+	judge := func(e *analysisSession) map[string]*benchVerdict {
 		t.Helper()
-		rows, err := checkPackage(context.Background(), st, func(subjects []gofresh.Subject) (*gofresh.Snapshot, error) {
-			return e.Snapshot(context.Background(), subjects, gofresh.Measurement)
+		rows, err := checkPackage(context.Background(), st, func(subjects []gofresh.Subject) (*gofresh.RuntimeBinding, error) {
+			return e.bind(context.Background(), subjects, gofresh.Measurement)
 		}, subject.Package, "", root, []string{"BenchmarkFirst", "BenchmarkSecond"}, "", nil)
 		if err != nil {
 			t.Fatal(err)
@@ -119,7 +119,7 @@ func BenchmarkSecond(b *testing.B) { _,_=os.ReadFile("fixture.txt") }
 	statCtx, deps := testDependencies(t)
 	loads := 0
 	load := deps.view
-	deps.view = func(e *gofresh.Session, ctx context.Context, subjects []gofresh.Subject, dir string, kind gofresh.Kind) (*gofresh.Snapshot, error) {
+	deps.view = func(e *analysisSession, ctx context.Context, subjects []gofresh.Subject, dir string, kind gofresh.Kind) (*gofresh.RuntimeBinding, error) {
 		loads++
 		return load(e, ctx, subjects, dir, kind)
 	}

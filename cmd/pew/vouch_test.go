@@ -112,7 +112,7 @@ func BenchmarkCount(b *testing.B) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		view, err := e.Snapshot(ctx, []gofresh.Subject{subject}, gofresh.CodeResult)
+		view, err := e.bind(ctx, []gofresh.Subject{subject}, gofresh.CodeResult)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -126,7 +126,7 @@ func BenchmarkCount(b *testing.B) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plainView, err := plainEngine.Snapshot(ctx, []gofresh.Subject{subject}, gofresh.CodeResult)
+	plainView, err := plainEngine.bind(ctx, []gofresh.Subject{subject}, gofresh.CodeResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func BenchmarkCount(b *testing.B) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	vouchedView, err := vouchedEngine.Snapshot(ctx, []gofresh.Subject{subject}, gofresh.CodeResult)
+	vouchedView, err := vouchedEngine.bind(ctx, []gofresh.Subject{subject}, gofresh.CodeResult)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -90,7 +90,7 @@ type pkgMeta struct {
 // merely when the flag string does (spec §5/§9); a profile the compile will
 // consume but pew cannot read fails closed here. The resolved input is
 // returned beside the engine so the producer can revalidate it before writing.
-func newEngineForPkg(ctx context.Context, p pkgMeta, env gotool.Environment) (*gofresh.Session, string, error) {
+func newEngineForPkg(ctx context.Context, p pkgMeta, env gotool.Environment) (*analysisSession, string, error) {
 	return newEngineAt(ctx, p.Module.Dir, p.Dir, p.Name == "main", env)
 }
 
@@ -98,15 +98,15 @@ func newEngineForPkg(ctx context.Context, p pkgMeta, env gotool.Environment) (*g
 // measured processes run under when it differs from the analysis one
 // (a pinned run's GOMAXPROCS): the runtime-configuration guard and
 // runtime-input revalidation take it, loads and builds keep env.
-func newEngineForPkgProducer(ctx context.Context, p pkgMeta, env gotool.Environment, producerEnv *gotool.Environment) (*gofresh.Session, string, error) {
+func newEngineForPkgProducer(ctx context.Context, p pkgMeta, env gotool.Environment, producerEnv *gotool.Environment) (*analysisSession, string, error) {
 	return newEngineAtProducer(ctx, p.Module.Dir, p.Dir, p.Name == "main", env, producerEnv)
 }
 
-func newEngineAt(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env gotool.Environment) (*gofresh.Session, string, error) {
+func newEngineAt(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env gotool.Environment) (*analysisSession, string, error) {
 	return newEngineAtProducer(ctx, moduleDir, pkgDir, mainPkg, env, nil)
 }
 
-func newEngineAtProducer(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env gotool.Environment, producerEnv *gotool.Environment) (*gofresh.Session, string, error) {
+func newEngineAtProducer(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env gotool.Environment, producerEnv *gotool.Environment) (*analysisSession, string, error) {
 	reader, err := preparationReader(ctx, moduleDir, env)
 	if err != nil {
 		return nil, "", err
@@ -149,7 +149,23 @@ func emitEngineDiagnostic(ctx context.Context, p gofresh.Progress) {
 	}
 }
 
-func buildEngine(ctx context.Context, moduleDir, pkgDir string, env gotool.Environment, producerEnv *gotool.Environment, pgo string) (*gofresh.Session, error) {
+// analysisSession retains the package's runtime selection beside its build-only
+// session. Binding observes runtime guards only after the source/build snapshot
+// exists; all downstream runtime operations use the native binding directly.
+type analysisSession struct {
+	build   *gofresh.Session
+	runtime gofresh.RuntimeDescription
+}
+
+func (s *analysisSession) bind(ctx context.Context, subjects []gofresh.Subject, kind gofresh.Kind) (*gofresh.RuntimeBinding, error) {
+	snapshot, err := s.build.Snapshot(ctx, subjects, kind)
+	if err != nil {
+		return nil, err
+	}
+	return snapshot.BindRuntime(ctx, s.runtime)
+}
+
+func buildEngine(ctx context.Context, moduleDir, pkgDir string, env gotool.Environment, producerEnv *gotool.Environment, pgo string) (*analysisSession, error) {
 	// Every pew engine attests single-subject execution: `pew run`
 	// measures each benchmark in a process of its own (spec §9), and
 	// status/stat must judge recordings under the same premise they
@@ -178,11 +194,14 @@ func buildEngine(ctx context.Context, moduleDir, pkgDir string, env gotool.Envir
 		return nil, err
 	}
 	runner := gotool.Runner(dependencies(ctx).prepare)
-	return gofresh.NewSession(ctx,
+	session, err := gofresh.NewSession(ctx,
 		gofresh.BuildDescription{Directory: moduleDir, Environment: env.Values(), Inputs: inputs},
-		gofresh.RuntimeDescription{Directory: pkgDir, Environment: runtimeEnv},
 		gofresh.SessionPolicy{Vouches: vouches, Execution: gofresh.SingleSubjectExecution,
 			Runner: runner, Progress: func(p gofresh.Progress) { emitEngineDiagnostic(ctx, p) }})
+	if err != nil {
+		return nil, err
+	}
+	return &analysisSession{build: session, runtime: gofresh.RuntimeDescription{Directory: pkgDir, Environment: runtimeEnv}}, nil
 }
 
 func prepareHarnessArgs(ctx context.Context, moduleDir string, env gotool.Environment) ([]string, error) {
@@ -278,7 +297,7 @@ func runStatus(ctx context.Context, w io.Writer, benchDir, label string, staleOn
 		judging := func() error {
 			return interrupted("status: interrupted while judging %s (package %d/%d)", p.ImportPath, i+1, len(pkgs))
 		}
-		getEngine := sync.OnceValues(func() (*gofresh.Session, error) {
+		getEngine := sync.OnceValues(func() (*analysisSession, error) {
 			e, _, err := newEngineForPkg(ctx, p, env)
 			return e, err
 		})
@@ -325,14 +344,14 @@ func declaredBenchmarks(p pkgMeta) ([]string, error) {
 	return selectedBenchmarks(p)
 }
 
-func statusPackage(ctx context.Context, w, errw io.Writer, getEngine func() (*gofresh.Session, error), benchDir, label string, staleOnly bool, explain, jsonOut bool, p pkgMeta, benches []string, env gotool.Environment) error {
+func statusPackage(ctx context.Context, w, errw io.Writer, getEngine func() (*analysisSession, error), benchDir, label string, staleOnly bool, explain, jsonOut bool, p pkgMeta, benches []string, env gotool.Environment) error {
 	dir, err := moduleBenchDir(benchDir, p.Module.Dir)
 	if err != nil {
 		return err
 	}
 	st := store.New(dir)
 	pkgRel := packageRel(p)
-	rows, err := checkPackage(ctx, st, func(subjects []gofresh.Subject) (*gofresh.Snapshot, error) {
+	rows, err := checkPackage(ctx, st, func(subjects []gofresh.Subject) (*gofresh.RuntimeBinding, error) {
 		e, err := getEngine()
 		if err != nil {
 			return nil, err
@@ -410,7 +429,7 @@ func statusPackage(ctx context.Context, w, errw io.Writer, getEngine func() (*go
 			subject := gofresh.Subject{Package: p.ImportPath, Symbol: b}
 			current := bv.current
 			if current.MaximalClosure == "" {
-				view, err := e.Snapshot(ctx, []gofresh.Subject{subject}, gofresh.Measurement)
+				view, err := newViewFor(e, ctx, []gofresh.Subject{subject}, p.Module.Dir, gofresh.Measurement)
 				if err != nil {
 					failures = append(failures, err)
 					continue
@@ -433,8 +452,9 @@ func statusPackage(ctx context.Context, w, errw io.Writer, getEngine func() (*go
 }
 
 // newViewFor builds through this operation's analysis dependency. The run's
-// one view serves both freshness judgment and the siblings' captured facts.
-func newViewFor(e *gofresh.Session, ctx context.Context, subjects []gofresh.Subject, moduleDir string, kind gofresh.Kind) (*gofresh.Snapshot, error) {
+// one runtime binding serves freshness judgment and independent producing units
+// over the same source/build snapshot.
+func newViewFor(e *analysisSession, ctx context.Context, subjects []gofresh.Subject, moduleDir string, kind gofresh.Kind) (*gofresh.RuntimeBinding, error) {
 	return dependencies(ctx).view(e, ctx, subjects, moduleDir, kind)
 }
 
@@ -451,7 +471,7 @@ type benchVerdict struct {
 	grownLedger string
 	foreign     []string
 	admitted    admission
-	view        *gofresh.Snapshot
+	view        *gofresh.RuntimeBinding
 	current     gofresh.Fingerprint
 }
 
@@ -464,7 +484,7 @@ type benchVerdict struct {
 // come from the module, environment, and kind alone, so the verdicts
 // are identical under any subject grouping. Every per-recording gate
 // is unchanged.
-func checkPackage(ctx context.Context, st *store.Store, buildView func([]gofresh.Subject) (*gofresh.Snapshot, error), pkgPath, pkgRel, moduleDir string, benches []string, label string, view *gofresh.Snapshot) (map[string]*benchVerdict, error) {
+func checkPackage(ctx context.Context, st *store.Store, buildView func([]gofresh.Subject) (*gofresh.RuntimeBinding, error), pkgPath, pkgRel, moduleDir string, benches []string, label string, view *gofresh.RuntimeBinding) (map[string]*benchVerdict, error) {
 	out := map[string]*benchVerdict{}
 	for _, b := range benches {
 		raw, err := st.ReadBytes(store.Key{PkgRel: pkgRel, Bench: b, Label: label})
@@ -500,7 +520,7 @@ func checkPackage(ctx context.Context, st *store.Store, buildView func([]gofresh
 
 // judgeRecordings is the current-tree verdict path for store and ref-paired
 // callers alike. Admission and historical comparison never select this policy.
-func judgeRecordings(ctx context.Context, buildView func([]gofresh.Subject) (*gofresh.Snapshot, error), pkgPath string, benches []string, out map[string]*benchVerdict, view *gofresh.Snapshot) (map[string]*benchVerdict, error) {
+func judgeRecordings(ctx context.Context, buildView func([]gofresh.Subject) (*gofresh.RuntimeBinding, error), pkgPath string, benches []string, out map[string]*benchVerdict, view *gofresh.RuntimeBinding) (map[string]*benchVerdict, error) {
 	type pending struct {
 		bench  string
 		fp     gofresh.Fingerprint
@@ -574,7 +594,7 @@ func judgeRecordings(ctx context.Context, buildView func([]gofresh.Subject) (*go
 
 // inertGrownRecheckOn asks the shared engine to license applicability from
 // the paired historical ledger. No producing field is rewritten by Pew.
-func inertGrownRecheckOn(ctx context.Context, view *gofresh.Snapshot, subject gofresh.Subject, recordedLedger string, fp gofresh.Fingerprint) (gofresh.Fingerprint, string, gofresh.Verdict, bool) {
+func inertGrownRecheckOn(ctx context.Context, view *gofresh.RuntimeBinding, subject gofresh.Subject, recordedLedger string, fp gofresh.Fingerprint) (gofresh.Fingerprint, string, gofresh.Verdict, bool) {
 	if recordedLedger == "" {
 		return fp, "", gofresh.Verdict{}, false
 	}

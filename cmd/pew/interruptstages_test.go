@@ -154,7 +154,7 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 		t.Fatal(err)
 	}
 	subjects := []gofresh.Subject{{Package: "example.com/stattwo/pkg", Symbol: "BenchmarkA"}, {Package: "example.com/stattwo/pkg", Symbol: "BenchmarkB"}}
-	view, err := engine.Snapshot(owned, subjects, gofresh.Measurement)
+	view, err := engine.bind(owned, subjects, gofresh.Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ledger, err := view.TestVariantLedger(subject)
+		ledger, err := view.Snapshot().TestVariantLedger(subject)
 		if err != nil {
 			t.Fatal(err)
 		}

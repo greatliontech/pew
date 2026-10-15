@@ -17,7 +17,7 @@ import (
 
 type abProfileSide struct {
 	prep *packagePreparation
-	view *gofresh.Snapshot
+	view *gofresh.RuntimeBinding
 }
 
 func prepareABProfiles(ctx context.Context, packages [2]pkgMeta, selected [2][]string, envs environments) ([2]*abProfileSide, error) {

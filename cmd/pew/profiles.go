@@ -39,7 +39,7 @@ type profileObjectReader interface {
 	ReadObject(string, int64) ([]byte, error)
 }
 
-func inspectProfile(ctx context.Context, st profileObjectReader, c profiles.Capture, rows []*benchfmt.Result, view *gofresh.Snapshot) (profileStatus, error) {
+func inspectProfile(ctx context.Context, st profileObjectReader, c profiles.Capture, rows []*benchfmt.Result, view *gofresh.RuntimeBinding) (profileStatus, error) {
 	r := profileStatus{Package: c.Package, Benchmark: c.Benchmark, Kind: c.Kind, Integrity: "unavailable", Freshness: "unavailable", Relation: "unverified", Outcome: "identity-only", Reason: profiles.UnsupportedReason}
 	fault := func(err error) (profileStatus, error) { r.Error = err.Error(); return r, err }
 	b, err := st.ReadObject(c.SHA256, c.Size)
@@ -86,7 +86,7 @@ func inspectProfile(ctx context.Context, st profileObjectReader, c profiles.Capt
 	return r, nil
 }
 
-func profileStatuses(ctx context.Context, st *store.Store, adm admission, view *gofresh.Snapshot, pkg, bench string) ([]profileStatus, error) {
+func profileStatuses(ctx context.Context, st *store.Store, adm admission, view *gofresh.RuntimeBinding, pkg, bench string) ([]profileStatus, error) {
 	if len(adm.rows) == 0 {
 		return nil, nil
 	}
@@ -154,7 +154,7 @@ func renderProfiles(w io.Writer, rows []profileStatus, explain bool) error {
 	return nil
 }
 
-func runProfiles(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitStateCache, prep *packagePreparation, envs environments, conditions run.Conditions, parent *gofresh.Snapshot, names []string) error {
+func runProfiles(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitStateCache, prep *packagePreparation, envs environments, conditions run.Conditions, parent *gofresh.RuntimeBinding, names []string) error {
 	kinds, err := profiles.Kinds(rc.profile)
 	if err != nil || len(kinds) == 0 {
 		return err
@@ -190,7 +190,7 @@ func runProfiles(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitSt
 	return nil
 }
 
-func captureProfile(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitStateCache, prep *packagePreparation, envs environments, conditions run.Conditions, parent *gofresh.Snapshot, name, kind, budget string) error {
+func captureProfile(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitStateCache, prep *packagePreparation, envs environments, conditions run.Conditions, parent *gofresh.RuntimeBinding, name, kind, budget string) error {
 	p, st := prep.pkg, prep.st
 	key := store.Key{PkgRel: prep.pkgRel, Bench: name, Label: rc.label}
 	expected, err := st.ReadBytes(key)
@@ -264,7 +264,7 @@ func captureProfile(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gi
 // captureDiagnostic owns one independent execution. The publication callback
 // receives only validated evidence, under the same bounded finalization context.
 // A/B has no persisted timed fingerprint; only recording attachment supplies adm.
-func captureDiagnostic(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStateCache, prep *packagePreparation, envs environments, conditions run.Conditions, parent *gofresh.Snapshot, name, kind, budget, selection string, rows []*benchfmt.Result, adm *admission, objects *store.Store, publish func(context.Context, profiles.Capture, []byte) error) error {
+func captureDiagnostic(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStateCache, prep *packagePreparation, envs environments, conditions run.Conditions, parent *gofresh.RuntimeBinding, name, kind, budget, selection string, rows []*benchfmt.Result, adm *admission, objects *store.Store, publish func(context.Context, profiles.Capture, []byte) error) error {
 	p := prep.pkg
 	subject := gofresh.Subject{Package: p.ImportPath, Symbol: name}
 	unit, err := parent.BeginIdentity(subject)
@@ -287,7 +287,7 @@ func captureDiagnostic(ctx context.Context, errw io.Writer, rc runConfig, gc *gi
 			return err
 		}
 	}
-	sources, err := profileSources(parent.SourceFiles(), p)
+	sources, err := profileSources(parent.Snapshot().SourceFiles(), p)
 	if err != nil {
 		return err
 	}
@@ -297,7 +297,7 @@ func captureDiagnostic(ctx context.Context, errw io.Writer, rc runConfig, gc *gi
 	}
 	defer os.RemoveAll(dir)
 	bin, output, testlog := filepath.Join(dir, "testbin.exe"), filepath.Join(dir, "capture.pprof"), filepath.Join(dir, "testlog")
-	description, err := parent.BuildDescription(p.ImportPath)
+	description, err := parent.Snapshot().BuildDescription(p.ImportPath)
 	if err != nil {
 		return err
 	}
@@ -323,11 +323,11 @@ func captureDiagnostic(ctx context.Context, errw io.Writer, rc runConfig, gc *gi
 	if err := validateProfileSnapshot(ctx, parent, subject); err != nil {
 		return err
 	}
-	built, err := parent.BindBuilt(p.ImportPath, profiles.Digest(binary))
+	built, err := parent.Snapshot().BindBuilt(p.ImportPath, profiles.Digest(binary))
 	if err != nil {
 		return err
 	}
-	ledger, err := parent.TestVariantLedger(subject)
+	ledger, err := parent.Snapshot().TestVariantLedger(subject)
 	if err != nil {
 		return err
 	}
@@ -438,7 +438,7 @@ func captureDiagnostic(ctx context.Context, errw io.Writer, rc runConfig, gc *gi
 	if pgo != prep.pgoInput {
 		return fmt.Errorf("profile: PGO build input changed")
 	}
-	dirty, err := sourceInputsDirty(p.Module.Dir, start.Commit, parent.SourceFiles())
+	dirty, err := sourceInputsDirty(p.Module.Dir, start.Commit, parent.Snapshot().SourceFiles())
 	if err != nil {
 		return err
 	}
@@ -461,7 +461,7 @@ func profileInputRelation(ctx context.Context, fp gofresh.Fingerprint, module, d
 	return nil
 }
 
-func validateProfileSnapshot(ctx context.Context, parent *gofresh.Snapshot, subject gofresh.Subject) error {
+func validateProfileSnapshot(ctx context.Context, parent *gofresh.RuntimeBinding, subject gofresh.Subject) error {
 	facts, err := parent.CurrentFacts(ctx, subject)
 	if err != nil {
 		return err

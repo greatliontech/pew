@@ -367,7 +367,7 @@ func TestRunServesValidRecordingsByDefault(t *testing.T) {
 	loads := 0
 	ctx, deps := testDependencies(t)
 	prior := deps.view
-	deps.view = func(e *gofresh.Session, ctx context.Context, subjects []gofresh.Subject, moduleDir string, kind gofresh.Kind) (*gofresh.Snapshot, error) {
+	deps.view = func(e *analysisSession, ctx context.Context, subjects []gofresh.Subject, moduleDir string, kind gofresh.Kind) (*gofresh.RuntimeBinding, error) {
 		loads++
 		return prior(e, ctx, subjects, moduleDir, kind)
 	}

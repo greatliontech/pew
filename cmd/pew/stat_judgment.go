@@ -34,7 +34,7 @@ func (m *statModule) judgePackage(ctx context.Context, analysis *statAnalysis, c
 		benches = append(benches, key.bench)
 	}
 	sort.Strings(benches)
-	return judgeRecordings(ctx, func(subjects []gofresh.Subject) (*gofresh.Snapshot, error) {
+	return judgeRecordings(ctx, func(subjects []gofresh.Subject) (*gofresh.RuntimeBinding, error) {
 		parent, err := analysis.view(ctx, m, current, label)
 		if err != nil {
 			return nil, err

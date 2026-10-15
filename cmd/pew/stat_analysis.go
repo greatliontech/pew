@@ -10,7 +10,7 @@ import (
 )
 
 type statPreparation struct {
-	engine *gofresh.Session
+	engine *analysisSession
 	err    error
 	reason string
 	fatal  bool
@@ -23,16 +23,16 @@ type statViewKey struct {
 }
 
 type statView struct {
-	view *gofresh.Snapshot
+	view *gofresh.RuntimeBinding
 	err  error
 }
 
-// statAnalysis owns immutable preparation and source views for one invocation.
+// statAnalysis owns immutable preparation and runtime-bound snapshots for one invocation.
 // Measurement and diagnostic checks always acquire separate sibling transactions.
 type statAnalysis struct {
 	env      gotool.Environment
 	prepared map[currentBench]statPreparation
-	engines  map[[3]string]*gofresh.Session
+	engines  map[[3]string]*analysisSession
 	flags    map[string]struct {
 		value string
 		err   error
@@ -41,7 +41,7 @@ type statAnalysis struct {
 }
 
 func newStatAnalysis(env gotool.Environment) *statAnalysis {
-	return &statAnalysis{env: env, prepared: map[currentBench]statPreparation{}, engines: map[[3]string]*gofresh.Session{}, flags: map[string]struct {
+	return &statAnalysis{env: env, prepared: map[currentBench]statPreparation{}, engines: map[[3]string]*analysisSession{}, flags: map[string]struct {
 		value string
 		err   error
 	}{}, views: map[statViewKey]statView{}}
@@ -80,7 +80,7 @@ func (a *statAnalysis) prepare(ctx context.Context, cur currentBench) (p statPre
 	return statPreparation{engine: engine}
 }
 
-func (a *statAnalysis) view(ctx context.Context, m *statModule, cur currentBench, label string) (*gofresh.Snapshot, error) {
+func (a *statAnalysis) view(ctx context.Context, m *statModule, cur currentBench, label string) (*gofresh.RuntimeBinding, error) {
 	key := statViewKey{m, cur, label}
 	if result, ok := a.views[key]; ok {
 		return result.view, result.err

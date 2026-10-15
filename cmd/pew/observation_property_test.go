@@ -47,11 +47,11 @@ func BenchmarkOther(b *testing.B) { _ = os.Getenv("PEW_PROPERTY_A") }
 	}
 	subject := gofresh.Subject{Package: "example.com/observationproperty", Symbol: "BenchmarkEnv"}
 	other := gofresh.Subject{Package: subject.Package, Symbol: "BenchmarkOther"}
-	parent, err := session.Snapshot(ctx, []gofresh.Subject{subject, other}, gofresh.Measurement)
+	parent, err := session.bind(ctx, []gofresh.Subject{subject, other}, gofresh.Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
-	binary, built := fixtureArtifact(t, ctx, parent, subject.Package)
+	binary, built := fixtureArtifact(t, ctx, parent.Snapshot(), subject.Package)
 	// Establish the admitted positive control from the actual retained binary.
 	positive, err := parent.Begin(subject)
 	if err != nil {

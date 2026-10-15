@@ -423,7 +423,7 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 		}
 		if ac.artifact != nil && ac.artifact.ownership != nil {
 			for _, side := range prep.diagnostics {
-				ac.artifact.ownership.sources = append(ac.artifact.ownership.sources, side.view.SourceFiles()...)
+				ac.artifact.ownership.sources = append(ac.artifact.ownership.sources, side.view.Snapshot().SourceFiles()...)
 			}
 			if err := ac.artifact.ownership.validate(); err != nil {
 				return prep, err
@@ -445,7 +445,7 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 		if side == nil {
 			continue
 		}
-		description, err := side.view.BuildDescription(side.prep.pkg.ImportPath)
+		description, err := side.view.Snapshot().BuildDescription(side.prep.pkg.ImportPath)
 		if err != nil {
 			return prep, err
 		}

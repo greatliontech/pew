@@ -249,7 +249,7 @@ func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []str
 		}
 		reportPhase(ctx, fmt.Sprintf("preparing build configuration %s (%d/%d)", prep.pkg.ImportPath, i+1, len(prepared)))
 		harnessArgs, err := prepareHarnessArgs(ctx, prep.pkg.Module.Dir, envs.analysis)
-		var engine *gofresh.Session
+		var engine *analysisSession
 		var pgo string
 		if err == nil {
 			engine, pgo, err = newEngineForPkgProducer(ctx, prep.pkg, envs.analysis, envs.runtime)
@@ -447,7 +447,7 @@ type packagePreparation struct {
 	benchDir, pkgRel    string
 	st                  *store.Store
 	destinations        []store.Destination
-	engine              *gofresh.Session
+	engine              *analysisSession
 	pgoInput            string
 	artifact            *builtBinary
 	harnessArgs         []string
@@ -565,14 +565,14 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 	// recording), the warm-up build, and the first arm (spec
 	// REQ-pew-preparation): a measured source under the recording
 	// store, or a recording destination overlapping a source input.
-	if err := rejectStoreCoveredSources(view.SourceFiles(), gc.exclude...); err != nil {
+	if err := rejectStoreCoveredSources(view.Snapshot().SourceFiles(), gc.exclude...); err != nil {
 		return err
 	}
 	recordingPaths := make([]string, 0, len(prep.destinations))
 	for _, d := range prep.destinations {
 		recordingPaths = append(recordingPaths, d.Path)
 	}
-	if err := rejectRecordingDestinations(view.SourceFiles(), recordingPaths); err != nil {
+	if err := rejectRecordingDestinations(view.Snapshot().SourceFiles(), recordingPaths); err != nil {
 		return err
 	}
 	if !rc.all {
@@ -615,7 +615,7 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 	// One compartment ledger covers the whole package: it derives from the
 	// same view snapshot every fingerprint's compartment hash pinned, and
 	// the inert-growth rule diffs it at verdict time (spec §7.9).
-	packageLedger, err := view.TestVariantLedger(subjects[0])
+	packageLedger, err := view.Snapshot().TestVariantLedger(subjects[0])
 	if err != nil {
 		return err
 	}
@@ -637,7 +637,7 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 	_ = warmup.Close()
 	defer os.Remove(warmupPath)
 	reportPhase(ctx, "building "+p.ImportPath)
-	build, err := view.BuildDescription(p.ImportPath)
+	build, err := view.Snapshot().BuildDescription(p.ImportPath)
 	if err != nil {
 		return err
 	}
@@ -650,7 +650,7 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 	if _, err := rc.executeGo(ctx, build.Directory, "", buildEnv, buildArgs); err != nil {
 		return err
 	}
-	prep.artifact, err = bindBinary(ctx, view, p.ImportPath, warmupPath)
+	prep.artifact, err = bindBinary(ctx, view.Snapshot(), p.ImportPath, warmupPath)
 	if err != nil {
 		return err
 	}
@@ -717,7 +717,7 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 		// later arm's failure or an interruption never costs it.
 		if err := func() error {
 			defer m.cancel()
-			return persistArm(m.closing, w, errw, rc, gc, p, prep, view, commit, initialDirty, encodedLedger, name, m, env)
+			return persistArm(m.closing, w, errw, rc, gc, p, prep, view.Snapshot(), commit, initialDirty, encodedLedger, name, m, env)
 		}(); err != nil {
 			return fmt.Errorf("%s: %w (%d recorded)", name, err, len(written))
 		}
@@ -785,7 +785,7 @@ const armWriteGateBound = 2 * time.Minute
 // commit. Each recording describes exactly its own invocation: the run
 // conditions carry this arm's throttle-bracket delta and the runtime
 // evidence is this arm's own digest and manifest.
-func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, prep *packagePreparation, view *gofresh.Snapshot, commit string, initialDirty bool, encodedLedger, name string, m armMeasurement, env gotool.Environment) error {
+func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, prep *packagePreparation, snapshot *gofresh.Snapshot, commit string, initialDirty bool, encodedLedger, name string, m armMeasurement, env gotool.Environment) error {
 	st, pkgRel, pgoInput := prep.st, prep.pkgRel, prep.pgoInput
 	// The gate runs detached from the verb's context under its own
 	// bound: the arm is measured, and a measured unit is kept (spec
@@ -813,7 +813,7 @@ func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitSta
 	dirty := initialDirty
 	if !dirty {
 		var err error
-		dirty, err = sourceInputsDirty(p.Module.Dir, commit, view.SourceFiles())
+		dirty, err = sourceInputsDirty(p.Module.Dir, commit, snapshot.SourceFiles())
 		if err != nil {
 			return err
 		}
@@ -905,7 +905,7 @@ type armMeasurement struct {
 // surfaces as a crash and as a moved bracket, neither masking the other. In
 // every case only this arm's recording is discarded, its prior recording
 // untouched.
-func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, env gotool.Environment, opts run.Options, pkgRel, name string, truth run.ToolchainTruth, scratch []string, base run.Conditions, parent *gofresh.Snapshot, artifact *builtBinary, harnessArgs []string, index, total int) (armMeasurement, []string, error) {
+func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, env gotool.Environment, opts run.Options, pkgRel, name string, truth run.ToolchainTruth, scratch []string, base run.Conditions, parent *gofresh.RuntimeBinding, artifact *builtBinary, harnessArgs []string, index, total int) (armMeasurement, []string, error) {
 	pattern, err := restrictBenchmarkPattern(opts.Bench, []string{name})
 	if err != nil {
 		return armMeasurement{}, nil, err
@@ -1290,13 +1290,13 @@ func withConfig(recs []*benchfmt.Result, c benchfmt.Config) []*benchfmt.Result {
 	return recs
 }
 
-func nonValid(ctx context.Context, errw io.Writer, st *store.Store, e *gofresh.Session, pkgPath, pkgRel, moduleDir, label string, benches []string, view *gofresh.Snapshot) ([]string, error) {
+func nonValid(ctx context.Context, errw io.Writer, st *store.Store, e *analysisSession, pkgPath, pkgRel, moduleDir, label string, benches []string, view *gofresh.RuntimeBinding) ([]string, error) {
 	return nonValidForWorkload(ctx, errw, st, e, pkgPath, pkgRel, moduleDir, label, benches, view, nil)
 }
 
-func nonValidForWorkload(ctx context.Context, errw io.Writer, st *store.Store, e *gofresh.Session, pkgPath, pkgRel, moduleDir, label string, benches []string, view *gofresh.Snapshot, options *run.Options) ([]string, error) {
+func nonValidForWorkload(ctx context.Context, errw io.Writer, st *store.Store, e *analysisSession, pkgPath, pkgRel, moduleDir, label string, benches []string, view *gofresh.RuntimeBinding, options *run.Options) ([]string, error) {
 	var need []string
-	rows, err := checkPackage(ctx, st, func(subjects []gofresh.Subject) (*gofresh.Snapshot, error) {
+	rows, err := checkPackage(ctx, st, func(subjects []gofresh.Subject) (*gofresh.RuntimeBinding, error) {
 		return newViewFor(e, ctx, subjects, moduleDir, gofresh.Measurement)
 	}, pkgPath, pkgRel, moduleDir, benches, label, view)
 	if err != nil {

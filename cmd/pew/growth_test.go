@@ -48,7 +48,7 @@ func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
 	const pkg = "example.com/grow"
 	const bench = "BenchmarkValue"
 	subject := gofresh.Subject{Package: pkg, Symbol: bench}
-	view, err := e.Snapshot(context.Background(), []gofresh.Subject{subject}, gofresh.Measurement)
+	view, err := e.bind(context.Background(), []gofresh.Subject{subject}, gofresh.Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ledger, err := view.TestVariantLedger(subject)
+	ledger, err := view.Snapshot().TestVariantLedger(subject)
 	if err != nil {
 		t.Fatal(err)
 	}

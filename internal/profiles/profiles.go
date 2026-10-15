@@ -255,9 +255,10 @@ func Relation(c Capture, rows []*benchfmt.Result, fp gofresh.Fingerprint) error 
 }
 
 // CheckedRelation uses an applicability endpoint only after the shared engine
-// proves the exact recorded measurement valid and closes its checking view.
+// proves the exact recorded measurement valid under the selected runtime binding
+// and closes its checking transaction.
 // Neither the measurement's producing evidence nor the diagnostic is rewritten.
-func CheckedRelation(ctx context.Context, c Capture, rows []*benchfmt.Result, fp gofresh.Fingerprint, parent *gofresh.Snapshot) error {
+func CheckedRelation(ctx context.Context, c Capture, rows []*benchfmt.Result, fp gofresh.Fingerprint, parent *gofresh.RuntimeBinding) error {
 	if err := pairRelation(c, rows, fp); err != nil {
 		return err
 	}

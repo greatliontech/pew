@@ -82,11 +82,11 @@ func TestArmWriteGateRequiresOutcomeValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := gofresh.Subject{Package: p.ImportPath, Symbol: "BenchmarkFirst"}
-	parent, err := engine.Snapshot(context.Background(), []gofresh.Subject{subject}, gofresh.Measurement)
+	parent, err := engine.bind(context.Background(), []gofresh.Subject{subject}, gofresh.Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, binding := fixtureArtifact(t, t.Context(), parent, p.ImportPath)
+	_, binding := fixtureArtifact(t, t.Context(), parent.Snapshot(), p.ImportPath)
 	unit, err := parent.Begin(subject)
 	if err != nil {
 		t.Fatal(err)

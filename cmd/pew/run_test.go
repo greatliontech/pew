@@ -1212,11 +1212,11 @@ func TestSourceInputsDirtyIncludesIgnoredAndMetadataStableSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.Snapshot(t.Context(), []gofresh.Subject{{Package: "example.com/buildinputs", Symbol: "BenchmarkValue"}}, gofresh.CodeResult)
+	view, err := engine.bind(t.Context(), []gofresh.Subject{{Package: "example.com/buildinputs", Symbol: "BenchmarkValue"}}, gofresh.CodeResult)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dirty, err := sourceInputsDirty(dir, commit.String(), view.SourceFiles()); err != nil || dirty {
+	if dirty, err := sourceInputsDirty(dir, commit.String(), view.Snapshot().SourceFiles()); err != nil || dirty {
 		t.Fatalf("committed build inputs: dirty=%v err=%v", dirty, err)
 	}
 
@@ -1231,7 +1231,7 @@ func TestSourceInputsDirtyIncludesIgnoredAndMetadataStableSource(t *testing.T) {
 	if err := os.Chtimes(source, info.ModTime(), info.ModTime()); err != nil {
 		t.Fatal(err)
 	}
-	if dirty, err := sourceInputsDirty(dir, commit.String(), view.SourceFiles()); err != nil || !dirty {
+	if dirty, err := sourceInputsDirty(dir, commit.String(), view.Snapshot().SourceFiles()); err != nil || !dirty {
 		t.Fatalf("metadata-stable source change: dirty=%v err=%v", dirty, err)
 	}
 	if err := os.WriteFile(source, []byte(files["source.go"]), 0o644); err != nil {
@@ -1240,11 +1240,11 @@ func TestSourceInputsDirtyIncludesIgnoredAndMetadataStableSource(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "generated.go"), []byte("package buildinputs\n\nfunc init() { Value = 2 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	view, err = engine.Snapshot(t.Context(), []gofresh.Subject{{Package: "example.com/buildinputs", Symbol: "BenchmarkValue"}}, gofresh.CodeResult)
+	view, err = engine.bind(t.Context(), []gofresh.Subject{{Package: "example.com/buildinputs", Symbol: "BenchmarkValue"}}, gofresh.CodeResult)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dirty, err := sourceInputsDirty(dir, commit.String(), view.SourceFiles()); err != nil || !dirty {
+	if dirty, err := sourceInputsDirty(dir, commit.String(), view.Snapshot().SourceFiles()); err != nil || !dirty {
 		t.Fatalf("ignored selected source: dirty=%v err=%v", dirty, err)
 	}
 }
@@ -2096,7 +2096,7 @@ func TestRunPerArmScratchSweepIsolation(t *testing.T) {
 // the shape the per-package tests drive, preparation included, so every
 // preparation-time refusal they exercise fires where the command fires
 // it.
-func runPackage(w, errw io.Writer, e *gofresh.Session, gc *gitStateCache, rc runConfig, p pkgMeta, env []string, conditions runpkg.Conditions, pgoInput string) error {
+func runPackage(w, errw io.Writer, e *analysisSession, gc *gitStateCache, rc runConfig, p pkgMeta, env []string, conditions runpkg.Conditions, pgoInput string) error {
 	prep, err := preparePackageInputs(rc, p)
 	if err != nil {
 		return err

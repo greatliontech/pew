@@ -424,7 +424,7 @@ func TestStatusRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 
 // statusPackageOf runs statusPackage over a package's own declarations,
 // the shape runStatus drives it in.
-func statusPackageOf(w, errw io.Writer, e *gofresh.Session, benchDir, label string, staleOnly, explain, jsonOut bool, p pkgMeta) error {
+func statusPackageOf(w, errw io.Writer, e *analysisSession, benchDir, label string, staleOnly, explain, jsonOut bool, p pkgMeta) error {
 	benches, err := declaredBenchmarks(p)
 	if err != nil || len(benches) == 0 {
 		return err
@@ -433,7 +433,7 @@ func statusPackageOf(w, errw io.Writer, e *gofresh.Session, benchDir, label stri
 	if err != nil {
 		return err
 	}
-	return statusPackage(context.Background(), w, errw, func() (*gofresh.Session, error) { return e, nil }, benchDir, label, staleOnly, explain, jsonOut, p, benches, env)
+	return statusPackage(context.Background(), w, errw, func() (*analysisSession, error) { return e, nil }, benchDir, label, staleOnly, explain, jsonOut, p, benches, env)
 }
 
 // An explanation names a closure-derivation move as such: a recording
@@ -486,7 +486,7 @@ func TestExplainNamesAClosureDerivationMove(t *testing.T) {
 
 // explainFixture is the explanation tests' engine over the repo's own
 // bench fixture with the benchmark's current fingerprint.
-func explainFixture(t *testing.T) (*gofresh.Session, string, string, gofresh.Fingerprint) {
+func explainFixture(t *testing.T) (*analysisSession, string, string, gofresh.Fingerprint) {
 	t.Helper()
 	e, _, err := newEngineAt(context.Background(), ".", ".", false, testEnvironment(t, os.Environ()))
 	if err != nil {

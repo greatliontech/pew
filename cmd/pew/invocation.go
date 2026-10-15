@@ -23,7 +23,7 @@ type invocationKey struct{}
 type executionDependencies struct {
 	sample  func(context.Context, string, gotool.Environment) (string, error)
 	prepare func(*exec.Cmd)
-	view    func(*gofresh.Session, context.Context, []gofresh.Subject, string, gofresh.Kind) (*gofresh.Snapshot, error)
+	view    func(*analysisSession, context.Context, []gofresh.Subject, string, gofresh.Kind) (*gofresh.RuntimeBinding, error)
 }
 type dependenciesKey struct{}
 
@@ -31,8 +31,8 @@ func dependencies(ctx context.Context) *executionDependencies {
 	if d, ok := ctx.Value(dependenciesKey{}).(*executionDependencies); ok {
 		return d
 	}
-	return &executionDependencies{sample: sampleGoVersion, view: func(e *gofresh.Session, ctx context.Context, subjects []gofresh.Subject, dir string, kind gofresh.Kind) (*gofresh.Snapshot, error) {
-		return e.Snapshot(ctx, subjects, kind)
+	return &executionDependencies{sample: sampleGoVersion, view: func(e *analysisSession, ctx context.Context, subjects []gofresh.Subject, dir string, kind gofresh.Kind) (*gofresh.RuntimeBinding, error) {
+		return e.bind(ctx, subjects, kind)
 	}}
 }
 

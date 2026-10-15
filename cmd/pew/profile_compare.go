@@ -118,7 +118,7 @@ func compareStatProfiles(ctx context.Context, m *statModule, key statKey, bl bas
 						if ref != "" {
 							reader = historicalProfileObjects{m, ref}
 						}
-						var checking *gofresh.Snapshot
+						var checking *gofresh.RuntimeBinding
 						var viewErr error
 						if ref == "" {
 							if cur, ok := m.current[key]; ok {

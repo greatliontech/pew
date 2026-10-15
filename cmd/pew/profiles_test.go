@@ -466,7 +466,7 @@ func BenchmarkFirst(b *testing.B) { for i:=0;i<b.N;i++ { sink=make([]byte, Alloc
 		if err != nil {
 			t.Fatal(err)
 		}
-		v, err := e.Snapshot(t.Context(), []gofresh.Subject{{Package: c.Package, Symbol: c.Benchmark}}, gofresh.Measurement)
+		v, err := e.bind(t.Context(), []gofresh.Subject{{Package: c.Package, Symbol: c.Benchmark}}, gofresh.Measurement)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -485,7 +485,7 @@ func BenchmarkFirst(b *testing.B) { for i:=0;i<b.N;i++ { sink=make([]byte, Alloc
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, err := e.Snapshot(t.Context(), []gofresh.Subject{{Package: capture.Package, Symbol: capture.Benchmark}}, gofresh.Measurement)
+	v, err := e.bind(t.Context(), []gofresh.Subject{{Package: capture.Package, Symbol: capture.Benchmark}}, gofresh.Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}

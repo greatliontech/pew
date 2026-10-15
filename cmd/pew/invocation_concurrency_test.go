@@ -77,7 +77,7 @@ func TestConcurrentInvocationsKeepEvidenceIsolated(t *testing.T) {
 			}
 			return sampleGoVersion(ctx, dir, env)
 		}
-		deps.view = func(_ *gofresh.Session, _ context.Context, subjects []gofresh.Subject, dir string, kind gofresh.Kind) (*gofresh.Snapshot, error) {
+		deps.view = func(_ *analysisSession, _ context.Context, subjects []gofresh.Subject, dir string, kind gofresh.Kind) (*gofresh.RuntimeBinding, error) {
 			l.views++
 			if dir != module || kind != gofresh.Measurement || len(subjects) != 1 || subjects[0].Symbol != l.marker {
 				return nil, errors.New("foreign analysis dependency")

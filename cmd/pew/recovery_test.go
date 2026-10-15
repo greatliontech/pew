@@ -140,7 +140,7 @@ func TestStatusReportsIndependentRowsAndFailsIncompleteReports(t *testing.T) {
 				}
 			} else {
 				writeStatRecording(t, st, "", "BenchmarkFirst", 100)
-				deps.view = func(*gofresh.Session, context.Context, []gofresh.Subject, string, gofresh.Kind) (*gofresh.Snapshot, error) {
+				deps.view = func(*analysisSession, context.Context, []gofresh.Subject, string, gofresh.Kind) (*gofresh.RuntimeBinding, error) {
 					return nil, errors.New("analysis unavailable")
 				}
 			}

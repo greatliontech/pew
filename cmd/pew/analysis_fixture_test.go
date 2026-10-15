@@ -14,7 +14,7 @@ import (
 
 // fixtureSession constructs the explicit native guard domain for analysis-only
 // fixtures. Producing-observation tests must execute and close a real unit.
-func fixtureSession(t testing.TB, directory string) *gofresh.Session {
+func fixtureSession(t testing.TB, directory string) *analysisSession {
 	t.Helper()
 	s, err := staticFixtureSession(directory)
 	if err != nil {
@@ -60,22 +60,26 @@ func executeFixtureContribution(t testing.TB, ctx context.Context, contribution 
 	return out
 }
 
-func staticFixtureSession(directory string) (*gofresh.Session, error) {
-	return gofresh.NewSession(context.Background(), gofresh.BuildDescription{Directory: directory, Environment: os.Environ(), Inputs: []string{}}, gofresh.RuntimeDescription{Directory: directory}, gofresh.SessionPolicy{Execution: gofresh.SingleSubjectExecution})
+func staticFixtureSession(directory string) (*analysisSession, error) {
+	session, err := gofresh.NewSession(context.Background(), gofresh.BuildDescription{Directory: directory, Environment: os.Environ(), Inputs: []string{}}, gofresh.SessionPolicy{Execution: gofresh.SingleSubjectExecution})
+	if err != nil {
+		return nil, err
+	}
+	return &analysisSession{build: session, runtime: gofresh.RuntimeDescription{Directory: directory}}, nil
 }
 
-func fixtureFacts(ctx context.Context, session *gofresh.Session, subject gofresh.Subject) (gofresh.Fingerprint, error) {
-	snapshot, err := session.Snapshot(ctx, []gofresh.Subject{subject}, gofresh.Measurement)
+func fixtureFacts(ctx context.Context, session *analysisSession, subject gofresh.Subject) (gofresh.Fingerprint, error) {
+	binding, err := session.bind(ctx, []gofresh.Subject{subject}, gofresh.Measurement)
 	if err != nil {
 		return gofresh.Fingerprint{}, err
 	}
-	return snapshot.CurrentFacts(ctx, subject)
+	return binding.CurrentFacts(ctx, subject)
 }
 
-func fixtureCheck(ctx context.Context, session *gofresh.Session, fp gofresh.Fingerprint, subject gofresh.Subject) (gofresh.Verdict, error) {
-	snapshot, err := session.Snapshot(ctx, []gofresh.Subject{subject}, fp.ResultKind)
+func fixtureCheck(ctx context.Context, session *analysisSession, fp gofresh.Fingerprint, subject gofresh.Subject) (gofresh.Verdict, error) {
+	binding, err := session.bind(ctx, []gofresh.Subject{subject}, fp.ResultKind)
 	if err != nil {
 		return gofresh.Verdict{}, err
 	}
-	return snapshot.Check(ctx, subject, fp)
+	return binding.Check(ctx, subject, fp)
 }

@@ -214,7 +214,7 @@ func TestProfileReadAndCheckingFailuresBothRemainVisible(t *testing.T) {
 	}
 	withWorkingDir(t, root)
 	deps := dependencies(t.Context())
-	deps.view = func(*gofresh.Session, context.Context, []gofresh.Subject, string, gofresh.Kind) (*gofresh.Snapshot, error) {
+	deps.view = func(*analysisSession, context.Context, []gofresh.Subject, string, gofresh.Kind) (*gofresh.RuntimeBinding, error) {
 		return nil, errors.New("checking unavailable")
 	}
 	ctx := context.WithValue(t.Context(), dependenciesKey{}, deps)
@@ -246,12 +246,12 @@ func TestStatProfilesSharePackageFactsWithIndependentChecks(t *testing.T) {
 	withWorkingDir(t, root)
 	deps := dependencies(t.Context())
 	loads := 0
-	deps.view = func(e *gofresh.Session, ctx context.Context, subjects []gofresh.Subject, dir string, kind gofresh.Kind) (*gofresh.Snapshot, error) {
+	deps.view = func(e *analysisSession, ctx context.Context, subjects []gofresh.Subject, dir string, kind gofresh.Kind) (*gofresh.RuntimeBinding, error) {
 		loads++
 		if len(subjects) != 2 {
 			t.Fatalf("package preparation narrowed to one diagnostic: %v", subjects)
 		}
-		return e.Snapshot(ctx, subjects, kind)
+		return e.bind(ctx, subjects, kind)
 	}
 	ctx := context.WithValue(t.Context(), dependenciesKey{}, deps)
 	var out bytes.Buffer

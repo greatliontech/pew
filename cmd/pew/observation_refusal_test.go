@@ -31,11 +31,11 @@ func BenchmarkEnv(b *testing.B) { _ = os.Getenv("PEW_PREMISE") }
 		t.Fatal(err)
 	}
 	subject := gofresh.Subject{Package: "example.com/premises", Symbol: "BenchmarkEnv"}
-	parent, err := session.Snapshot(ctx, []gofresh.Subject{subject}, gofresh.Measurement)
+	parent, err := session.bind(ctx, []gofresh.Subject{subject}, gofresh.Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
-	binary, built := fixtureArtifact(t, ctx, parent, subject.Package)
+	binary, built := fixtureArtifact(t, ctx, parent.Snapshot(), subject.Package)
 	for _, name := range []string{"complete", "identity-only", "missing log", "missing header", "contradictory operation", "foreign frame", "foreign environment", "foreign process"} {
 		t.Run(name, func(t *testing.T) {
 			arm, err := parent.Begin(subject)
@@ -52,7 +52,7 @@ func BenchmarkEnv(b *testing.B) { _ = os.Getenv("PEW_PREMISE") }
 				if err != nil {
 					t.Fatal(err)
 				}
-				otherSnapshot, err := otherSession.Snapshot(ctx, []gofresh.Subject{subject}, gofresh.Measurement)
+				otherSnapshot, err := otherSession.bind(ctx, []gofresh.Subject{subject}, gofresh.Measurement)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -62,7 +62,7 @@ func BenchmarkEnv(b *testing.B) { _ = os.Getenv("PEW_PREMISE") }
 				}
 				defer other.Abort()
 				if _, err := other.Register(ctx, built, gofresh.ProcessDescription{Identity: "other-environment"}); err == nil {
-					t.Fatal("artifact binding crossed session/environment")
+					t.Fatal("artifact binding crossed source/build generations")
 				}
 				return
 			}
@@ -104,7 +104,7 @@ func BenchmarkEnv(b *testing.B) { _ = os.Getenv("PEW_PREMISE") }
 			if err != nil {
 				t.Fatal(err)
 			}
-			view, err := session.Snapshot(context.Background(), []gofresh.Subject{subject}, gofresh.Measurement)
+			view, err := session.bind(context.Background(), []gofresh.Subject{subject}, gofresh.Measurement)
 			if err != nil {
 				t.Fatal(err)
 			}
