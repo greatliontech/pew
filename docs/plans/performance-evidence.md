@@ -49,14 +49,29 @@
   - [x] 10.1 Triage profile-companion requirements and specify CPU/allocation capture, integrity, ownership, persistence, attribution and failure behavior under the evidence contract, using the approved github.com/google/pprof/profile dependency.
   - [x] 10.2 Capture diagnostic profiles separately from statistical timing samples, bound to their actual executions and matched source/build/runtime identities; report empty, incomplete or unattributable captures without fabricated certainty.
   - [x] 10.3 Integrate profile freshness/integrity and cleanup with recording admission and status; verify drift/interruption/corruption, run gates and mutations, converge review, commit and push.
-- [ ] 11. Complete A/B execution and historical profile comparison.
+- [ ] 11. Complete retained A/B and historical-profile assurance through
+  Gofresh's tooling-redesign 9.1 and 9.3; preserve the completed producer work.
   - [x] 11.1 Triage A/B issues and specify both-side profile comparison over compatible sample kinds and provenance, lossless multi-package output, cancellable Git control processes and bounded truthful worktree cleanup.
   - [x] 11.2 Implement both-side capture/comparison through shared transaction and admission mechanisms; preserve completed units, explicit derivation artifacts and missing/incompatible profile outcomes.
-  - [ ] 11.3 Complete gates and mutation evidence, converge review, retire resolved profile/A-B issues and cross-tool references, commit and push.
+  - [ ] 11.3 Recover every original campaign population, tree and oracle identity
+    at tooling-redesign 9.1, retaining excluded deltas and interrupted prefixes.
+    Complete explicitly authorized full-oracle assurance at 9.3 after 6.6 and
+    6.7 supply selection-coexisting records and recovery; then retire resolved
+    profile/A-B references without treating installation or hand probes as
+    completion of the campaign.
 - [ ] 12. Close the complete performance-evidence workflow.
-  - [ ] 12.1 Triage remaining clean-baseline, per-arm noise-floor, machine-readable/progress and cross-tool items against implemented capabilities; retain only justified, checkably triggered deferrals.
+  - [ ] 12.1 Resolve remaining comparison policy, safe build-input attribution,
+    historical variation and machine-reader workflows at tooling-redesign 7.6,
+    7.7, 8.2 and 8.3. Empirical variation never raises an explicit tolerance
+    automatically; retain conditional capabilities under observable triggers.
     - [x] Install the shared complete-oracle cutoff for unsupported negative coverage, including self-reexecuting children and historical evidence admission.
-    - [ ] Remeasure affected survivor records under the repaired oracle before the final mutation gate.
+    - [ ] Reconcile and recover affected populations at tooling-redesign 9.1;
+      remeasure the named authorized scopes at 9.3 after 6.6 and 6.7. The repaired
+      tool does not make historical counts or unfinished prefixes authoritative.
     - [x] Enforce observation-premise isolation with generated producer-boundary evidence and close its invariant-coverage gap before final verification.
-  - [ ] 12.2 Reconcile canonical guidance with the complete measurement/profile/comparison workflow and settle final format numbering after the schema is stable, preserving provenance and supported evidence classes.
-  - [ ] 12.3 Run the applicable final gates and mutation campaign, converge review, close issues and the plan, commit and push, then install only the clean committed tool.
+  - [ ] 12.2 Reconcile guidance and workflow contracts at tooling-redesign 8.3,
+    then final native/envelope compatibility at 9.2. Derive any format change
+    from the live format, preserving provenance and supported evidence classes.
+  - [ ] 12.3 Complete tooling-redesign 9.3's named authorized final scopes and
+    independent review, then 9.4's obligation/citation census before deleting
+    this plan; install only the clean committed tool.

@@ -1,42 +1,110 @@
-# Handoff: the train's pew riders for the performance-evidence plan
+# Retained Pew obligations and cross-tool handoff
 
-Lands: performance-evidence plan chunk 12.
+Lands: Gofresh docs/plans/tooling-redesign.md 9.4.
 
-The cross-tool train (gofresh docs/plans/cross-tool-train.md) held pew
-chunks whose derivations live in that plan's entries and ticks — a
-place this plan's machine never reads. The fifth re-audit band (train
-chunk 319, 2026-10-06) dissolved the train's pew tail into this plan
-and moves every rider here. Each item is a derived fact, not a wish;
-its source tick is named so the derivation can be read.
+The [active tooling-redesign plan](../../../gofresh/docs/plans/tooling-redesign.md)
+governs order. The old performance-evidence plan and cross-tool charters are
+residual inventories, not parallel roadmaps. Item 9.4 reconciles this document
+as a whole; the live constituents below have earlier destinations and do not
+wait for that close-out. Historical coordination reports are retained below
+with their original dates and claims, not as statements about the current tree.
 
 The authoritative profile and A/B contracts are
 [spec §6.2](../specs/spec.md#62-diagnostic-profile-companions),
 [§10.2](../specs/spec.md#102-historical-diagnostic-comparison-and-ab-artifacts)
 and [§11](../specs/spec.md#11-architecture--dependencies).
 
-## At chunk 12
+## Live constituents by active-plan item
 
-- Per-arm noise floors over same-closure recordings are sound on the
-  package closure today (gofresh 102 only refines them).
-- Remaining machine-readable/progress triage (the train's 177) at
-  12.1; `mcp-surface` retains the new-verb JSON and MCP scope questions.
+- **5.6 — remaining duplication after adoption (charters 252/320).** Pew now
+  pins Gofresh `v0.117.2`. Its current Session/native-binary producer adoption,
+  ordinary/profile/A-B paths, retained-artifact and closing ownership, and
+  query containment are completed under active item 5.1. Do not reopen the
+  old adapter migration or the diagnostic executable retention fixed by
+  `7683672`. Re-census remaining path/module resolution, GC/store copies,
+  progress composition and wrappers against the live callers before folding
+  them. A/B already reads each side's selected declarations; GC deliberately
+  inventories inactive-tag declarations too, so changing the active selection
+  does not delete their recordings. Both inventory paths use
+  `benchmarksInFiles`; that wider GC inventory is not a declaration-parser bug.
+  Git control processes are contained, and the metric registry and native
+  envelope work are complete. Historical counts of wrappers or bare-engine
+  fixtures are not a current inventory.
+- **7.4 — resource and control ownership.** Reconcile remaining resident and
+  resource controls under their shared owner and actual invocation lifetime.
+  Retain distinct command/oracle/analysis budgets and explicit operator policy;
+  a collection target is not a physical admission reservation. A dependency
+  version alone does not prove adoption of a reader's remaining obligation.
+- **7.6 — enforcing defaults and confidence.** `stat.go` and
+  `compare.Policies.Effective` still use omitted `partial/report/report`
+  policies. `REQ-pew-comparison-policies` and the verb table require omitted
+  enforcing policies to resolve to `complete/require/compatible`; the existing
+  contradicted gap records declare this difference. Typed reports and explicit
+  enforcing options do not make the default workflow sound today. Preserve
+  informational comparison, explicit exceptions, scope and exit precedence
+  when implementing the enforcing defaults. `--confidence` remains independent
+  of significance; derive it from alpha unless a real independent workflow
+  justifies the control.
+- **7.8 — complete derived-state identities and controls.** The
+  [recompute issue](derived-state-recompute-invariance-witness.md) owns the
+  missing discard/recompute consumer witness and the existing gap. The old
+  three-input memo-key premise and the claim that the gap cannot be expressed
+  are false. The five inline obligations in the issue index retain their
+  individual guards and slots; no second Pew persistent closure store follows
+  from the shared-cache witness.
+- **8.2 — admitted historical variation.** The earlier claim that per-arm
+  floors over the package closure are "sound today" is withdrawn. Unchanged
+  closure evidence does not prove an empirical spread harmless. The
+  [variation issue](per-arm-noise-floors.md) preserves the historical numbers;
+  8.2 rejects automatic `max(threshold, floor)` inflation and uses 8.1's
+  historical-support boundary instead.
+- **8.3 — reader contracts and spec reconciliation (charters 232/320).** The
+  [purpose-column issue](guidance-purpose-column-second-enumeration.md) and
+  [requirement-home census](spec-wide-requirement-forming.md) remain. IDs already
+  exist outside §13; form missing obligations and reconcile genuine duplicates,
+  not every narrative paragraph. Root `README.md` describes format 6 and the
+  retained-binary producer; those are preservation controls, not remaining
+  charter 232 work. The remaining specification/guidance reconciliation,
+  `--explain` stream and contextual defaults belong at 8.3.
+  `ab`, `status` and `stat` JSON, profile reporting and thirty-second operator
+  progress are already present. The [MCP issue](mcp-surface.md) keeps run/gc
+  structured output reader-scoped and any transport conditional on an unmet
+  concrete driving workflow.
+- **8.3 — remaining shared guidance adoption.** Pew already calls shared
+  `Document.Coverage`, including the zero-default lint supplied by its current
+  Gofresh dependency. The remaining local `zeroDefault`, `cliUsage` and
+  `firstClause` test predicates and `guidanceHelp`'s Help-only projection still
+  need reconciliation with `PrintsDefault`, the served-bytes judgment and the
+  long-help pointer. The authority is Gofresh's
+  [shared guidance contract](../../../gofresh/docs/specs/guidance.md), especially
+  `REQ-guidance-render`, `REQ-guidance-coverage` and
+  `REQ-guidance-single-source`; the zero-default lint is not an unimplemented
+  shared-tool feature. Preserve the local-predicate and served-projection
+  obligations when retiring its old filing.
+- **9.1 — exact assurance scope (charter 276).** Preserve the campaign ledger
+  in [mutation-oracle-observation](mutation-oracle-observation.md), including
+  `a41d8ee`, every named run, missing IDs, excluded deltas and unproven freshness.
+  The zero-fuzz premise is false: native envelope, corruption, comparison,
+  profile and A/B fuzz targets exist. The generated native producer-premise
+  obligation closed at `a22c333`; do not recreate it. The residual is generated
+  corruption/conditions/topology/policy-oracle coverage against the current
+  grammar and explicit gaps, extending the established evidence. Re-census
+  bindings and independent oracles rather than reusing the old counts of
+  uncited IDs or bare engines.
+- **9.3 — authorized final execution.** Reconcile old performance-evidence
+  11.3/12 scopes at 9.1, then run only named authorized scopes after 6.6/6.7.
+  Existing hand probes, historical partial campaigns and source inspection
+  supply no new campaign-completion or freshness claim. This handoff does not
+  authorize a measurement.
 
-## What the train keeps (after this plan closes)
+## Historical coordination reports
 
-pew 320 (the residual bump: the releases this plan does not take,
-300's lint pew half, a resident ceiling), 252r (seven containment
-spellings, two module resolvers, the vestige set — `ExecuteBinary`,
-`run.Execute`, `gitblob.State` — the stretch literals, the
-declared-benchmarks rule, stat's partial pkgMeta;
-`isPewRecording` is live), 232r (`--explain`'s
-stream, REQ-pew-derived-state's payload list, the REQ home rule with
-its two new pairs), 276r (§9's
-corruption grammar, the conditions grammar,
-the pin ladder, the eleven uncited ids, the self-oracle pins in
-guidance_test.go and knobs_test.go, the six bare `gofresh.New()`
-engines in tests).
+The reports below preserve what was communicated about earlier revisions.
+Their old plan destinations and prospective mechanisms are historical, not
+additional primary triggers. The live inventory above supersedes completed
+producer/adoption and reader-surface halves without rewriting the reports.
 
-## Band R6 inputs (2026-10-07) — for the performance-evidence plan's owner
+### Band R6 inputs (2026-10-07) — for the performance-evidence plan's owner
 
 Findings the sixth re-audit band routes here rather than to a train chunk:
 
@@ -198,4 +266,3 @@ instruction names the premise. The clause cites
 REQ-inputs-identity-facade beside REQ-inputs-producer-premises. The
 open question above stands: whether runtime-inputs' own text should
 name write propagation as a premise of any completion receipt.
-

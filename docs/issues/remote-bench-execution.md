@@ -1,7 +1,6 @@
 # Remote benchmark execution against a dedicated bench machine
 
-Lands: when a dedicated benchmark machine is provisioned and pew measurements (dev or CI gate)
-first need to run on it instead of the invoking host
+Lands: Gofresh docs/plans/tooling-redesign.md 9.4; implementation requires both a provisioned benchmark host and a real workflow needing measurements there.
 
 ## Motivation
 
@@ -10,7 +9,23 @@ quiet homelab machine that both dev measurement and the CI gate run against. Exp
 a goal: cross-machine comparison — one machine is the measurement substrate; the machine
 fingerprint (§8) continues to bind recordings to it.
 
-## Design conclusions (settled in discussion, to be spec'd on landing)
+## Evidence boundary before transport
+
+The deployment must first be derived under the current evidence model:
+retained executable and input artifacts, actual build/runtime descriptions,
+process-bound receipts, completion and outcome support, closing ownership,
+publication and subsequent checking. A shipped binary digest alone does not
+license composition of two hosts' evidence. Preserve the target machine's
+identity and explicit unknown conditions; a calibration spread is not proof
+of harmless noise or authority to loosen regression tolerances.
+
+The following is the retained historical design sketch, not a settled
+implementation mandate. Re-derive its premises against that boundary and the
+concrete remote workflow before choosing gRPC, SSH, off-box builds or an agent.
+Neither a provisioned host without a workflow nor a workflow without a host
+opens implementation.
+
+## Historical design sketch
 
 - **Transport & process model.** gRPC from day 1, carried over SSH: the client dials SSH
   (`golang.org/x/crypto/ssh`), starts a per-session `pew agent` on the box (git-upload-pack

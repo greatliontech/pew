@@ -4,26 +4,35 @@ Tracked deferrals carrying a `Lands:` trigger. On resolution, the load-bearing r
 inline to the spec / a test, and the doc is deleted (git holds history) — per the Issue triage
 close-out convention.
 
+The active order is [Gofresh's tooling-redesign plan](../../../gofresh/docs/plans/tooling-redesign.md).
+Numbers below name its open items. The old performance-evidence plan and train
+charters supply the residual inventory and historical scope, not a competing order.
+
 | slug | summary | Lands |
 |------|---------|-------|
-| [git-go-recording-immediate-staleness](git-go-recording-immediate-staleness.md) | historical buildconfig drift lacks the two complete build environments; preserve safe provenance that can attribute the differing input without weakening guards | tooling-redesign 7.7 and 8.3 |
-| [train-riders-for-the-performance-evidence-plan](train-riders-for-the-performance-evidence-plan.md) | remaining final-workflow riders and cross-tool coordination; residual dependency bump tracked by the train | performance-evidence plan chunk 12 |
-| [mutation-oracle-observation](mutation-oracle-observation.md) | incomplete campaigns and blocked chunk 11 campaign scope, legitimate unsupported cwd/evidence, and unsound negative subprocess coverage require shared-tool resolution and sound remeasurement | performance-evidence plan chunk 12 final mutation gate |
-| [guidance-purpose-column-second-enumeration](guidance-purpose-column-second-enumeration.md) | §12's opt-in purpose column restates the document's knob prose in its own words, pinned to nothing | performance-evidence plan chunk 12.2 (audit 335) |
-| [remote-bench-execution](remote-bench-execution.md) | run measurements on a dedicated homelab bench machine: gRPC-over-SSH `pew agent`, machine lease, off-box builds, calibration drift-vet | capability charter (gofresh docs/plans/capability-charters.md) — activates when a dedicated bench machine is provisioned |
-| [per-arm-noise-floors](per-arm-noise-floors.md) | one global `--threshold` vs ±10% layout-only cross-commit drift on ns-class arms (run-to-run CV measured 0.2–1.4%); false regressions get hand-inspected — derive per-arm floors from lineage history | performance-evidence plan chunk 12 |
-| [derived-state-recompute-invariance-witness](derived-state-recompute-invariance-witness.md) | `REQ-pew-derived-state`'s recompute/discard-invariance clause has no pew-side witness (engine-owned path; the bound tests pin only the strategy-break authority arm; a gap cannot express a per-clause shortfall) | cross-tool train chunk 232 |
-| [spec-wide-requirement-forming](spec-wide-requirement-forming.md) | only §13 is REQ-formed; a test witnessing a §§1–12 contract has no id to bind against — convert sections on demand, same structure-only discipline | the home rule at train 232r; the per-section conversions on demand in each performance-evidence chunk (audit 335) |
-| [mcp-surface](mcp-surface.md) | pew serves the CLI only; whether an LLM reader is owed an MCP surface (or `run`/`ab`/`gc` a `--json`) is a product-scope call | performance-evidence chunk 12 for remaining machine-readable/progress triage; MCP when a driving agent appears |
+| [git-go-recording-immediate-staleness](git-go-recording-immediate-staleness.md) | diagnostic executable retention fixed; original build-environment cause unproved; safe input attribution remains | 7.7; explanation account at 8.3 |
+| [train-riders-for-the-performance-evidence-plan](train-riders-for-the-performance-evidence-plan.md) | residual inventory with live constituents at 5.6/7.4/7.6/7.8/8.2/8.3/9.1/9.3; historical coordination retained | 9.4 |
+| [mutation-oracle-observation](mutation-oracle-observation.md) | recover exact incomplete campaign scopes and excluded deltas; historical kills, freshness and completion remain distinct | 9.1; authorized execution at 9.3 only after 6.6/6.7 |
+| [guidance-purpose-column-second-enumeration](guidance-purpose-column-second-enumeration.md) | reconcile §12's duplicate opt-in purpose prose without weakening its contract | 8.3 |
+| [remote-bench-execution](remote-bench-execution.md) | re-derive remote evidence ownership before choosing transport | 9.4; implementation requires a provisioned host and a real remote-measurement workflow |
+| [per-arm-noise-floors](per-arm-noise-floors.md) | report admitted historical variation; empirical spread cannot automatically raise regression tolerances | 8.2; support at 8.1, enforcing policy at 7.6 |
+| [derived-state-recompute-invariance-witness](derived-state-recompute-invariance-witness.md) | complete-dependency contract and declared gap exist; consumer cold/warm/discard controls remain | 7.8 |
+| [spec-wide-requirement-forming](spec-wide-requirement-forming.md) | re-census unformed obligations and duplicate homes; requirement IDs already exist outside §13 | 8.3 |
+| [mcp-surface](mcp-surface.md) | existing JSON/profile/progress workflows stand; run/gc structured output needs a reader, a new transport an unmet driving workflow | 8.3; MCP conditional on that concrete workflow |
 
 ## In-spec upgrade paths (tracked inline, not here)
 
-Several design alternatives are documented at their spec sites as "upgrade paths on measured need."
-They are kept current with the spec, so they need no separate tracking doc — listed here only as an
-index:
+These five alternatives remain conditional obligations, not automatic mechanism
+choices. Their primary slots are in the active tooling-redesign plan:
 
-- VTA call graph, if RTA ever over-includes (§7.4)
-- escape-rule to skip loading stdlib bodies (§7.4)
-- per-declaration hashing *into* cache deps (§7.7)
-- gitignored persistent closure memo (§6)
-- same-identity sample merge (§6)
+- VTA call graph (§7.4). **Lands:** 7.8, only after a demonstrated RTA precision
+  shortfall and a witness separating relevant from spurious reachability.
+- Skipping standard-library body loads (§7.4). **Lands:** 7.7 for measured cost
+  and the escape/soundness proof; a justified implementation follows at 7.8.
+- Per-declaration hashing into cache dependencies (§7.7). **Lands:** 7.8,
+  conditioned on relevant-edit invalidation and irrelevant-edit reuse evidence.
+- Persistent closure memo (§6). **Lands:** 7.8, owned by the shared derivation
+  layer under complete generation identities, never a second Pew store.
+- Same-identity sample merge (§6). **Lands:** 9.4, only for a real augmentation
+  workflow after lineage, conditions and sample-independence obligations are
+  established; equal identity alone licenses no merge.

@@ -39,12 +39,20 @@ modified state, compiler and Gofresh dependency facts without running benchmarks
    pew stat main HEAD
    ```
 
-   In CI, gate on regressions with `pew stat --fail-on-regression`. The gate fails
-   closed: a regression on a gated metric exits `1`, and a comparison that measured
-   nothing on a gated unit — no recordings yet, or every candidate skipped — exits `2`
-   with a diagnostic naming why, instead of passing vacuously. When some benchmarks
-   compare and others are skipped, the compared subset alone decides the exit. Without
-   the flag, `pew stat` is informational and exits `0`.
+   For a complete enforcing comparison in CI, specify its evidence policies:
+
+   ```sh
+   pew stat --fail-on-regression --coverage complete --freshness require --conditions compatible
+   ```
+
+   An eligible regression on a gated metric exits `1`. An empty eligible set
+   or unsatisfied complete coverage exits `2` when no higher-precedence
+   interruption, operational failure or eligible regression applies. Interruption
+   exits `130`; operational failures retain their error exits. The currently implemented omitted policies
+   are partial coverage with freshness and conditions reported, so the bare
+   `--fail-on-regression` flag does not by itself require complete fresh compatible
+   evidence. Without enforcement, statistical comparisons are informational;
+   operational failures still return errors.
 
 5. Remove recordings for benchmarks that no longer exist:
 
@@ -59,12 +67,14 @@ modified state, compiler and Gofresh dependency facts without running benchmarks
 - `unverifiable`: pew cannot prove the recording is reusable, so rerun it.
 - `unrecorded`: no stored result exists yet.
 
-Go's testlog omits operation outcomes, so testlog identities alone cannot prove runtime-input
-observation completeness. pew completes each benchmark invocation's observation with a pre-spawn
-bracket and a completed-process ingest, so a benchmark whose closure reaches no unverifiable
-runtime input verifies, while a file-reading benchmark is refused on its own closure reason; an
-observation that cannot complete records explicit incomplete evidence with its reason. An
-explicit `//gofresh:pure` directive on the declaration is the documented full-trust override. Current recordings carry `pew-format: 3`; unversioned or unknown formats are
+Go's testlog identifies inputs but does not establish operation outcomes. Pew
+prepares producing obligations before execution and binds the actual artifact,
+process, environment and terminal receipt through independent closing checks.
+Where the execution model lacks supported observation evidence, it retains
+identity-only evidence and its cause; source/runtime guards and explicit
+assertions retain their own authority. An explicit `//gofresh:pure` directive
+is the documented full-trust override under the freshness contract. Current
+recordings carry `pew-format: 6`; unversioned or unknown formats are
 rejected and must be regenerated. Recognizable Pew recordings with malformed or
 oversized legacy metadata report `stale (format)` and can be replaced by `pew run`
 without manual deletion. Failed or interrupted measurements leave their old files
@@ -75,16 +85,17 @@ commands when a different storage directory is needed.
 
 ## Benchmark Defaults
 
-`pew run` measures each selected benchmark in its own `go test` process (single-subject
-execution): sibling benchmarks never share process state, each recording carries the runtime
-evidence of exactly its own invocation, and a failing benchmark discards only its own recording
-while its siblings record. Per benchmark it records output from:
+`pew run` builds the package's test binary first and measures each selected
+benchmark in a separate process of that retained artifact. Sibling benchmarks
+do not share process state, each recording carries its own invocation's evidence,
+and a failed benchmark does not discard independently completed siblings. The
+ordinary runtime arguments have this form:
 
 ```sh
-go test -run '^$' -bench '^BenchmarkName$' -benchmem -count 10 -benchtime 1s <pkg>
+<retained-binary> -test.run '^$' -test.bench '^BenchmarkName$' -test.benchmem -test.count 10 -test.benchtime 1s
 ```
 
-- `-run '^$'` skips tests; pew records benchmarks only.
+- `-test.run '^$'` skips tests; pew records benchmarks only.
 - All benchmarks are selected by default; use `--bench` to narrow the selection (each selected
   benchmark still measures in its own process).
 - `-benchmem` is always enabled so memory metrics are stored with timing metrics.

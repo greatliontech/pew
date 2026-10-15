@@ -1,7 +1,11 @@
 # Incomplete mutation campaigns and subprocess coverage
 
-Lands: performance-evidence plan chunk 12 final mutation gate, after the shared
-gomutant subprocess-coverage design fix and remeasurement with sound oracle selection.
+Lands: Gofresh docs/plans/tooling-redesign.md 9.1.
+
+Item 9.1 reconciles the exact residual scopes from performance-evidence 11.3
+and 12. Authorized final execution belongs to 9.3, only after 6.6's
+selection-coexisting records and 6.7's recovery/progress boundary. This ledger
+authorizes no new campaign or benchmark. The old plan supplies scope, not order.
 
 ## Unresolved evidence boundary
 
@@ -17,22 +21,24 @@ Gomutant's parent `-coverprofile` does not collect a self-reexecuted child's
 counters. A mixed parent-coverage partition therefore cannot justify omitting
 a mandatory subprocess testcase. The governing boundaries are gomutant's
 `docs/specs/execution.md` (`REQ-exec-oracle-run`) and `docs/specs/results.md`
-(`REQ-result-stale`): complete-oracle measurements carry
-`oracleExecutionPolicy: gomutant/full-oracle@1`, and legacy body records without
-supported policy require whole remeasurement rather than retaining scores
-through a serve or partial extension. The final gate needs an installed tool
-enforcing those contracts. Historical campaign results below remain incomplete
-or affected until sound remeasurement; a shared-tool fix is not itself that
-measurement. Any future optimized narrowing needs independent execution authority.
+(`REQ-result-stale`). The earlier cutoff recorded
+`oracleExecutionPolicy: gomutant/full-oracle@1`; that historical policy marker
+is not a claim of current eligibility. Judge body and shaped records under the
+live supported-policy and freshness contracts, preserving history without
+promoting missing authority. The active plan records the initial complete-oracle
+cutoff and subsequent admission repairs as completed prerequisites; those
+repairs do not complete any campaign below. An installed tool enforcing the
+current contracts and sound remeasurement are still required for final evidence.
+Any future optimized narrowing needs independent execution authority.
 
 ## Outstanding campaign evidence
 
-- Chunk 11's A/B execution and historical profile-comparison delta also
-  requires campaign measurement after the confirmed negative-child-coverage
-  fault above is fixed. This is blocked campaign scope, not a recorded
+- Performance-evidence chunk 11's A/B execution and historical
+  profile-comparison delta at `a41d8ee` requires campaign measurement under
+  repaired oracle admission. This is retained campaign scope, not a recorded
   invocation or a campaign pass. Its passed named mutation probes do not
   discharge that obligation; include the entire delta in sound remeasurement
-  before the chunk 12 final mutation gate.
+  at the authorized 9.3 execution, after scope reconciliation at 9.1.
 - Full campaign `1e11674dc9cefba4`, budget 4: 44 targets, 171 selected
   candidates. It stopped without a summary at 75m30s, with 6 targets banked,
   24 generated candidates, 11 kills, 1 discard and 12 open survivors.
@@ -47,21 +53,23 @@ measurement. Any future optimized narrowing needs independent execution authorit
 - A full-oracle audit made the deletion mutant at `gc.go:41` kill through
   a subprocess testcase. The force-false mutant remained a survivor under
   unsound negative child coverage. It is not established equivalent; its
-  disposition requires the shared coverage fix and sound remeasurement.
+  disposition requires sound remeasurement under the repaired oracle.
 
 Earlier incomplete selections also require reconciliation at the final gate:
 
-- The newStatCmd/validateOptions/Compare campaign measured 24 candidates
-  and banked 3 machine-local records (22 killed, no open survivors), but
+- The three-target newStatCmd/validateOptions/Compare campaign (run ID not
+  retained here) measured 24 candidates and banked 3 machine-local records
+  (22 killed, no open survivors), but
   reached its deadline during final evidence work. Cwd-sensitive observation
   refusals and bounded freshness-proof passes left subjects unproven.
 - Native-fingerprint campaign `82f26be60d13cf04` selected 22 targets and
   1,064 candidates. Its 30-second freshness-proof budgets left subjects
   unproven; the 30-minute command deadline arrived after 3 attempts and
   before any target committed. It banked no kills or survivor judgments.
-- A JSON-rendering campaign banked its sole target with both mutants killed,
-  then stopped reporting at roughly 8 minutes despite a 10-minute command
-  deadline; the enclosing 30-minute shell deadline terminated it. Shared
+- A JSON-rendering campaign (run ID and exact symbol not retained here) banked
+  its sole target with both mutants killed, then stopped reporting at roughly
+  8 minutes despite a 10-minute command deadline; the enclosing 30-minute
+  shell deadline terminated it without a finished summary. Shared
   deadline/close-out work is tracked in gomutant
   `docs/issues/campaign-silent-past-its-deadline.md`.
 - Metric-registry campaign `a6d4f75aaf58cae4` used
@@ -71,10 +79,9 @@ Earlier incomplete selections also require reconciliation at the final gate:
   arrived while still in baseline work, with no committed measurement.
   The non-registry delta was not selected. This bounded attempt establishes
   neither exhaustive coverage nor a passing campaign; the unmeasured
-  remainder stays at chunk 12 with the existing shared-coverage repair
-  and sound remeasurement requirement.
+  remainder stays in the 9.1 inventory for sound remeasurement at 9.3.
 
-## Required resolution
+## Profile-boundary scope
 
 The profile-boundary selection `9eeabef27df54358` requested four candidates each
 for `internal/profiles.Analyze` and `Decode`, retaining both derived oracle
@@ -84,10 +91,30 @@ command deadline, but no target committed. There are no banked kills or survivor
 judgments from that selection; the remaining profile delta was not selected.
 Its named invariant-breaking probes remain separate evidence.
 
-Fix shared oracle-coverage faults in gomutant, preserving the mandatory
-integration testcase. Reconcile and remeasure all incomplete selections and
-the blocked chunk 11 scope with sound full-oracle attribution;
-disposition every remaining survivor and report
-the campaign's actual completion and freshness-proof state. Unsupported
-observations remain explicitly unsupported. Focused kills cannot stand in for
-unmeasured targets or a missing final summary.
+## Scope recovery and resolution
+
+Recover the missing run IDs and exact symbol inventories from retained findings,
+logs and repository history before defining final invocations. In particular:
+
+- Recover the newStatCmd/validateOptions/Compare and JSON-rendering run IDs,
+  the JSON symbol, and any unavailable invocation/selection details; their
+  absence is a recovery obligation, not permission to invent a completed run.
+- For `1e11674dc9cefba4`, retain all 44 targets, the 171 selected candidates,
+  the measured prefix and the 38 unmeasured targets. The four targets of
+  `e8423761e551fb96` and the twelve hand probes are separate scopes.
+- Resolve the historical `HEAD` used by `a6d4f75aaf58cae4`, recover its five
+  exact metric symbols, and inventory the non-registry delta it excluded.
+  The command above is a historical invocation, not a command to run against
+  today's `HEAD`.
+- Recover the exact 22-target inventory of `82f26be60d13cf04` and the
+  `a41d8ee` delta's complete scope. Preserve the profile delta excluded by
+  `9eeabef27df54358` in addition to its two named functions and two oracle
+  packages.
+
+Map renamed or removed historical subjects explicitly to the retained obligation
+and its current witness. A fresh `--changed HEAD` cannot substitute for any
+missing historical scope. At 9.3, measure only the named authorized scopes with
+sound full-oracle attribution, disposition survivors, and report actual
+completion and freshness-proof states separately. Unsupported observations
+remain explicitly unsupported. Focused kills cannot stand in for unmeasured
+targets, unproven freshness or a missing final summary.

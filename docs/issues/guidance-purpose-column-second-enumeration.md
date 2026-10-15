@@ -1,5 +1,7 @@
 # §12's purpose column restates the knob prose
 
+Lands: Gofresh docs/plans/tooling-redesign.md 8.3.
+
 Spec §12's verb defaults table carries an `opt-ins (purpose)` column
 restating every opt-in knob's purpose in its own words, beside the
 guidance document's knob blocks — `--worktree-dir`: "a same-filesystem
@@ -21,4 +23,7 @@ to remove or weaken the spec's purpose requirement.
 Invariants preserved: the table stays the spec's behaviour and defaults
 contract; the served guidance stays the document's.
 
-Lands: performance-evidence plan chunk 12.2 (the guidance reconcile; audit 335 — the train's 232 had delegated it there while this doc still named 232).
+The old performance-evidence 12.2 and charter 232 entries are the residual
+inventory for this work. The active slot is 8.3; a dependency bump or the
+already-adopted shared Coverage lint does not reconcile this separate purpose
+enumeration.

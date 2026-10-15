@@ -1,29 +1,36 @@
 # git-go recording is stale at the first status inspection
 
-Lands: Gofresh docs/plans/tooling-redesign.md 7.7 for measurement attribution
-and 8.3 for the explanation account.
+Lands: Gofresh docs/plans/tooling-redesign.md 7.7.
+
+The reader-facing explanation account is a related obligation at 8.3.
 
 ## Remaining evidence gap
 
-The retained producer/checker identities rule out a known binary-version
-transition, but the observations below do not retain both complete compilation
-environments. Their buildconfig digests cannot identify the differing input.
-A reduced real capture under one executable and one environment stays current;
-changing an otherwise unobserved compiler-environment variable produces the
-same `stale (buildconfig)` class. Compiler wrappers can consume such variables,
-so dropping them from the native build description would be unsound.
+The matching inspected producer/checker identities in the repeated report show
+no known binary-version transition, but the observations below do not retain
+both complete compilation environments. Their buildconfig digests cannot
+identify the differing input. The retained reduced-case account reports that
+a real capture under one executable and one environment stayed current;
+changing an otherwise unobserved compiler-environment variable produced the
+same `stale (buildconfig)` class. This is not a new verification of the original
+run's cause. Compiler wrappers can consume such variables, so dropping them
+from the native build description would be unsound.
 
-The diagnostic executable lifetime has a separate concrete cause: the profiler
-observes its producing executable and temporary-directory cleanup removes it.
-The retained-executable rule in spec §6.2 preserves that dependency without an
-exclusion or a grant of outcome support. Historical temporary-path evidence is
-not rewritten. The remaining work here is the build-input attribution account:
-record enough safe diagnostic provenance to distinguish a changed environment
+The diagnostic executable lifetime had a separate concrete cause: the profiler
+observed its producing executable and temporary-directory cleanup removed it.
+Commit `7683672` implements the retained-executable rule in spec §6.2, with
+source pins in `cmd/pew/profile_executable_test.go` and
+`internal/store/executable_test.go`. This completed half preserves the dependency
+without an exclusion or a grant of outcome support; it is not another pending
+producer migration. Historical temporary-path evidence is not rewritten.
+The original build-environment cause remains unproved. The remaining work is
+the build-input attribution account: record enough safe diagnostic provenance
+to distinguish a changed environment
 from a producer/checker discrepancy without disclosing environment values or
 asserting the cause from guard digests alone. Ordinary unsupported outcomes
 and diagnostic identity-only support remain independent, explicit judgments.
 
-## Observation
+## Historical observation
 
 On the clean git-go commit `aa61bc6f7aab38f0904da9cd7acbadb979cab01f`, one
 native Pew run recorded all fourteen `BenchmarkIDValues` children, ten samples
@@ -102,7 +109,7 @@ consumer workload shapes; another broad consumer measurement is not needed to
 file or begin diagnosis. Keep missing/unknown conditions and incomplete evidence
 visible rather than replacing them with assertions or a fabricated green verdict.
 
-## Repeated observation with matching inspected build identities
+## Historical repeated observation with matching inspected build identities
 
 The next required git-go evidence run used clean source `9029aa2` and Pew
 `v0.9.0`, clean revision `c45212102991752486a19265f5d9c12614cef23e`, built

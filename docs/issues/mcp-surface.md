@@ -1,28 +1,25 @@
 # Whether pew owes an MCP surface
 
-pew serves one surface, the CLI, with `--json` on `status` and `stat`
-as its machine-facing output (spec §12). The other train tools
-(gomutant, stipulator) serve an LLM through an MCP surface designed
-for that reader: token-conscious envelopes, a self-starting
-instruction naming the entry call and the loop, progress
-notifications on long calls.
+Lands: Gofresh docs/plans/tooling-redesign.md 8.3; a new MCP transport requires a concrete unmet driving-agent workflow.
 
-An LLM driving measurements today goes through the CLI: `run`, `ab`,
-and `gc` print only the human rendering (no `--json`), long
-measurements exceed a harness's call timeouts with
-no progress channel, and the verb-defaults table (§12) derives every
-default for a human at a terminal. Whether that reader is owed its
-own surface — and if so, which verbs (a measurement verb that runs for
-minutes is a poor MCP call; `status`/`stat`/`gc` fit), which envelope
-caps, and whether `run`/`ab`/`gc` gain `--json` on the CLI as the
-lesser step — is a product-scope judgment: it commits pew to a second
-reader with its own contract and maintenance.
+Pew serves its CLI with JSON on `status`, `stat` and `ab`, including the
+implemented profile reports. Long operations already have a thirty-second
+progress channel on the operator's log, separate from machine-readable
+stdout (`REQ-pew-progress`). Comparison text/JSON parity and this progress
+channel are not missing MCP prerequisites to rebuild.
+
+Structured output for `run` and `gc` remains a reader-workflow question.
+Name the consumer, the facts it cannot reliably obtain today, and the required
+completion/interruption account before adding a form. Long-call recovery,
+bounded output and progress delivery must follow the actual workflow rather
+than a presumption that every measurement belongs in one synchronous call.
+
+A new MCP transport requires a concrete driving workflow unmet by the existing
+CLI/JSON/progress surfaces. The existence of an LLM reader or sibling tools'
+MCP servers alone does not satisfy that condition. If the condition holds,
+derive the verb set, project context, envelopes, defaults and recovery from
+that reader's needs under the canonical contracts.
 
 Invariants preserved either way: the CLI's verb-defaults table stays
 the CLI's contract; a second surface derives its own defaults and is
 never the CLI rendered through a wrapper.
-
-Comparison text/JSON parity is complete in performance-evidence chunk 9.
-That does not settle a whole MCP surface or JSON output for new verbs.
-
-Lands: performance-evidence plan chunk 12 for remaining machine-readable/progress triage, including the `run`/`ab`/`gc` JSON scope question; the MCP surface lands when a driving agent appears.
