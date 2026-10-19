@@ -19,6 +19,8 @@ charters supply the residual inventory and historical scope, not a competing ord
 | [derived-state-recompute-invariance-witness](derived-state-recompute-invariance-witness.md) | complete-dependency contract and declared gap exist; consumer cold/warm/discard controls remain | 7.8 |
 | [spec-wide-requirement-forming](spec-wide-requirement-forming.md) | re-census unformed obligations and duplicate homes; requirement IDs already exist outside §13 | 8.3 |
 | [mcp-surface](mcp-surface.md) | existing JSON/profile/progress workflows stand; run/gc structured output needs a reader, a new transport an unmet driving workflow | 8.3; MCP conditional on that concrete workflow |
+| [installed-binary-skew](installed-binary-skew.md) | installed pew at 7683672d6e03 trails last build input 8af53d13881a (fleet sweep 2026-10-19); `go install` from committed HEAD, closing on the provenance line reading match | 5.1w.7 (the consumer install); an earlier clean install closes it sooner |
+| [gofresh-corpus-pin-lag](gofresh-corpus-pin-lag.md) | go.mod pins gofresh v0.117.6, latest release v0.118.0 (fleet sweep 2026-10-19); the bump carries the release's migration obligations and a clean install, closing on the shape-corpus line reading current | 5.1w.7 (the consumer adoption); an earlier bump closes it sooner |
 
 ## In-spec upgrade paths (tracked inline, not here)
 
