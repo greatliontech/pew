@@ -55,7 +55,9 @@ func visitLeafVerbs(root *cobra.Command, visit func(name string, c *cobra.Comman
 
 // renderKnobUsage sets every visible leaf verb's local flag usage to
 // the document's usage projection for the cli surface (gofresh's
-// Knob.Usage: the knob's first clause in pflag's grammar), so no flag
+// Knob.Usage: the knob's first clause in pflag's grammar) and renders
+// a knobbed verb's long help as the registration's long help (the
+// knobless help, a blank line, its prose pointer), so no flag or verb
 // carries a second spelling of its prose (REQ-pew-guidance). Local
 // flags only: pew's root registers no persistent flag, and the
 // document names a verb's own knobs. It runs at construction, before
@@ -63,9 +65,14 @@ func visitLeafVerbs(root *cobra.Command, visit func(name string, c *cobra.Comman
 // the document does not name is a build defect and panics here.
 func renderKnobUsage(root *cobra.Command) {
 	visitLeafVerbs(root, func(name string, c *cobra.Command) {
+		knobbed := false
 		c.LocalFlags().VisitAll(func(f *pflag.Flag) {
+			knobbed = true
 			f.Usage = pew.GuidanceKnob("cli", name, f.Name).Usage()
 		})
+		if knobbed {
+			c.Long = pew.GuidanceRegistration("cli", name).LongHelp
+		}
 	})
 }
 

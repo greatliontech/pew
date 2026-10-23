@@ -46,31 +46,42 @@ func TestGuidanceCoversTheCLISurface(t *testing.T) {
 			t.Errorf("%q: %v", name, err)
 			continue
 		}
+		served := map[string]string{}
 		c.LocalFlags().VisitAll(func(f *pflag.Flag) {
-			// The usage string is the document's usage projection —
-			// the first clause in pflag's grammar, derived here
-			// independently — identity, never a name match.
-			k, err := doc.Knob("cli", name, f.Name)
-			if err != nil {
-				t.Errorf("%s --%s: %v", name, f.Name, err)
-				return
-			}
-			if want := cliUsage(firstClause(k.Text)); f.Usage != want || f.Usage == "" {
-				t.Errorf("%s --%s usage %q diverged from the document's %q", name, f.Name, f.Usage, want)
+			served[f.Name] = f.Usage
+			if f.Usage == "" {
+				t.Errorf("%s --%s serves an empty usage", name, f.Name)
 			}
 		})
+		if defects, err := doc.Served("cli", name, served); err != nil || len(defects) != 0 {
+			t.Errorf("%s: served usages: err=%v defects:\n%s", name, err, strings.Join(defects, "\n"))
+		}
 		if c.Short != short {
 			t.Errorf("%q Short diverged:\ncli %q\ndoc %q", name, c.Short, short)
 		}
 		if c.Long != "" {
-			help, err := doc.Help("cli", name)
-			if err != nil || c.Long != help {
-				t.Errorf("%q Long diverged from Help (err=%v):\ncli %q\ndoc %q", name, err, c.Long, help)
+			reg := pew.GuidanceRegistration("cli", name)
+			want := reg.Help
+			if c.HasLocalFlags() {
+				want = reg.LongHelp
+			}
+			if c.Long != want {
+				t.Errorf("%q Long diverged from registration:\ncli  %q\nwant %q", name, c.Long, want)
 			}
 			if strings.Contains(c.Long, "\nknobs:") {
 				t.Errorf("%q Long carries the knobs block beside cobra's Flags", name)
 			}
 		}
+	}
+	if run, _, err := root.Find([]string{"run"}); err != nil {
+		t.Fatal(err)
+	} else if !strings.HasSuffix(run.Long, "\n\nThe knobs' whole prose: pew guidance run.") {
+		t.Errorf("run Long lacks the guidance prose pointer: %q", run.Long)
+	}
+	if version, _, err := root.Find([]string{"version"}); err != nil {
+		t.Fatal(err)
+	} else if strings.Contains(version.Long, "whole prose") {
+		t.Errorf("version Long points at knob prose it has none of: %q", version.Long)
 	}
 }
 
@@ -112,37 +123,11 @@ func TestGuidanceCommandServesTheDocument(t *testing.T) {
 	}
 }
 
-// zeroDefault reports whether pflag prints no default for the flag —
-// its printing rule: the default is the zero value of the flag's own
-// type, so a string "0" is a printed default while an int 0 is not,
-// and the fallback for other types is pflag's own set of zero spellings.
-func zeroDefault(f *pflag.Flag) bool {
-	switch f.Value.Type() {
-	case "string":
-		return f.DefValue == ""
-	case "bool":
-		return f.DefValue == "false"
-	case "int", "int64":
-		return f.DefValue == "0"
-	case "duration":
-		return f.DefValue == "0" || f.DefValue == "0s"
-	case "stringArray", "stringSlice":
-		return f.DefValue == "[]"
-	case "float64":
-		return f.DefValue == "0"
-	}
-	switch f.DefValue {
-	case "", "0", "false", "<nil>":
-		return true
-	}
-	return false
-}
-
 // TestZeroDefaultFollowsPflagsPrintingRule pins the registration fact's
-// predicate against pflag's own rendering: for every flag, pflag prints
-// a "(default X)" exactly when the predicate says the default is
-// non-zero — the library is the oracle, the named rows at each type's
-// cliff the belt (a string "0" prints, an int 0 does not).
+// shared predicate against pflag's own rendering: for every flag, pflag
+// prints a "(default X)" exactly when guidance.PrintsDefault says the
+// default is non-zero — the library is the oracle, the named rows at
+// each type's cliff the belt (a string "0" prints, an int 0 does not).
 func TestZeroDefaultFollowsPflagsPrintingRule(t *testing.T) {
 	fs := pflag.NewFlagSet("t", pflag.ContinueOnError)
 	fs.String("s0", "", "")
@@ -161,16 +146,16 @@ func TestZeroDefaultFollowsPflagsPrintingRule(t *testing.T) {
 	want := map[string]bool{"s0": true, "s1": false, "b0": true, "b1": false, "i0": true, "i1": false, "f0": true, "f1": false, "d0": true, "d1": false, "a0": true, "a1": false, "l0": true}
 	for name, zero := range want {
 		f := fs.Lookup(name)
-		if got := zeroDefault(f); got != zero {
-			t.Errorf("zeroDefault(%s: %s %q) = %v, want %v", name, f.Value.Type(), f.DefValue, got, zero)
+		if got := !guidance.PrintsDefault(f.Value.Type(), f.DefValue); got != zero {
+			t.Errorf("!PrintsDefault(%s: %s %q) = %v, want %v", name, f.Value.Type(), f.DefValue, got, zero)
 		}
 	}
 	fs.VisitAll(func(f *pflag.Flag) {
 		one := pflag.NewFlagSet("one", pflag.ContinueOnError)
 		one.AddFlag(f)
 		prints := strings.Contains(one.FlagUsages(), "(default ")
-		if zeroDefault(f) == prints {
-			t.Errorf("zeroDefault(%s: %s %q) = %v while pflag prints a default: %v", f.Name, f.Value.Type(), f.DefValue, zeroDefault(f), prints)
+		if guidance.PrintsDefault(f.Value.Type(), f.DefValue) != prints {
+			t.Errorf("PrintsDefault(%s: %s %q) = %v while pflag prints a default: %v", f.Name, f.Value.Type(), f.DefValue, guidance.PrintsDefault(f.Value.Type(), f.DefValue), prints)
 		}
 	})
 }
@@ -208,7 +193,7 @@ func registeredCLI(root *cobra.Command) map[string]guidance.Registered {
 	visitLeafVerbs(root, func(name string, c *cobra.Command) {
 		flags := guidance.Registered{}
 		c.LocalFlags().VisitAll(func(f *pflag.Flag) {
-			flags[f.Name] = !zeroDefault(f)
+			flags[f.Name] = guidance.PrintsDefault(f.Value.Type(), f.DefValue)
 		})
 		registered[name] = flags
 	})
@@ -229,39 +214,6 @@ func TestRegisteredCLICarriesEachFlagsDefaultFact(t *testing.T) {
 			t.Errorf("registered[%s][%s] = %v (registered: %v), want %v", row.verb, row.flag, got, ok, row.prints)
 		}
 	}
-}
-
-// cliUsage is the test's own reading of pflag's usage grammar over a
-// clause: code spans unquoted and a trailing default parenthetical —
-// the one cobra prints itself — dropped; the served string is judged
-// against this derivation, never against the package's projection.
-func cliUsage(clause string) string {
-	clause = strings.ReplaceAll(clause, "`", "")
-	if i := strings.LastIndex(clause, " (default "); i >= 0 && strings.HasSuffix(clause, ")") {
-		clause = clause[:i]
-	}
-	return clause
-}
-
-// firstClause is the test's own reading of the knob clause rule: the
-// text up to the first ';' at parenthesis depth zero, else the whole
-// text, trailing whitespace and a closing period dropped.
-func firstClause(text string) string {
-	depth := 0
-	for i, r := range text {
-		switch r {
-		case '(':
-			depth++
-		case ')':
-			depth--
-		case ';':
-			if depth == 0 {
-				text = text[:i]
-				return strings.TrimSuffix(strings.TrimSpace(text), ".")
-			}
-		}
-	}
-	return strings.TrimSuffix(strings.TrimSpace(text), ".")
 }
 
 // TestFlagUsageIsTheDocumentsProjection anchors four served usage

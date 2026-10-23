@@ -1771,7 +1771,8 @@ verdicts remain successful reporting, and interruption takes precedence.
 embedded guidance document's projections (`docs/guidance.md`, in the
 fleet format gofresh's guidance spec defines): every command Short
 and Long is the document's rendering for the cli surface (the Long
-the knobless help rendering — cobra renders its own flag list), and
+the knobless help rendering — cobra renders its own flag list — and,
+for a knobbed verb, the registration's prose pointer to `pew guidance <verb>`), and
 a `guidance` command (its verb positional) serves a verb's full
 section or, verbless, the decision map — refusing an unknown verb
 with the decision map named as the way to enumerate. The cli binds
@@ -1785,10 +1786,8 @@ grammar, rendered over the built command tree) — no flag carries a
 second spelling of its usage; a default the flag's own registration
 does not print (a derived one, registered zero) is spelled in the
 clause's prose, never in the `(default X)` form the projection drops.
-*Anchor tests:* every visible leaf verb's local flag usage equals the
-document's projection derived independently (the first clause at
-parenthesis depth zero, code spans unquoted, a trailing default form
-dropped), beside literal anchors for a default-form knob, a code-span
+*Anchor tests:* every visible leaf verb's local flag usage is judged
+against the document's projection (`Document.Served`), beside literal anchors for a default-form knob, a code-span
 knob, and a derived-default knob.
 
 
