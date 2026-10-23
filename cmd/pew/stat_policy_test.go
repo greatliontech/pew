@@ -96,11 +96,13 @@ func TestStatCLIPoliciesAndSemanticParity(t *testing.T) {
 		flags     []string
 		exit      int
 	}{
-		{"partial default", partial, nil, 0},
+		{"enforcing default", partial, nil, 2},
+		{"explicit partial exception", partial, []string{"--coverage=partial"}, 0},
 		{"complete", partial, []string{"--coverage=complete"}, 2},
 		{"absent both unit", partial, []string{"--gate=sec/op,allocs/op", "--coverage=complete"}, 2},
 		{"regression precedence", regressed, []string{"--coverage=complete"}, 1},
-		{"historical freshness", partial, []string{"--freshness=require"}, 0},
+		{"regression precedence default enforcing", regressed, nil, 1},
+		{"historical freshness", partial, []string{"--coverage=partial", "--freshness=require"}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var outputs [2]string
@@ -148,12 +150,12 @@ func TestStatDeclaredUnrecordedAndFreshnessEligibility(t *testing.T) {
 	writeStatRecording(t, st, "pkg", "BenchmarkStored", 100)
 	base := commitAll(t, repo, "base").String()
 	withWorkingDir(t, dir)
-	for _, p := range []compare.Policies{{}, {Coverage: "complete"}, {Freshness: "require"}} {
+	for _, p := range []compare.Policies{{}, {Coverage: "partial", Freshness: "report"}, {Coverage: "complete", Freshness: "report"}, {Coverage: "partial", Freshness: "require"}} {
 		o := compare.DefaultOptions()
 		o.Policies = p
 		var out, errOut bytes.Buffer
 		err := runStat(context.Background(), &out, &errOut, statConfig{opts: o, jsonOut: true, failOnRegression: true}, nil)
-		if p == (compare.Policies{}) {
+		if p == (compare.Policies{Coverage: "partial", Freshness: "report"}) {
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -247,9 +249,13 @@ func TestStatConditionsAndNumericRefusalsThroughCLI(t *testing.T) {
 	for _, tc := range []struct {
 		ref, condition string
 		rows, exit     int
-	}{{unknown, "report", 1, 0}, {unknown, "compatible", 1, 2}, {invalid, "report", 0, 2}} {
+	}{{unknown, "", 1, 2}, {unknown, "report", 1, 0}, {unknown, "compatible", 1, 2}, {invalid, "report", 0, 2}} {
 		cmd := newRootCmd()
-		cmd.SetArgs([]string{"stat", base, tc.ref, "--conditions=" + tc.condition, "--fail-on-regression", "--json"})
+		args := []string{"stat", base, tc.ref, "--fail-on-regression", "--json"}
+		if tc.condition != "" {
+			args = append(args, "--conditions="+tc.condition)
+		}
+		cmd.SetArgs(args)
 		var out bytes.Buffer
 		cmd.SetOut(&out)
 		cmd.SetErr(io.Discard)
@@ -310,6 +316,7 @@ func TestStatUnknownCurrentInventoryCannotClaimComplete(t *testing.T) {
 	for _, mode := range []string{"partial", "complete"} {
 		o := compare.DefaultOptions()
 		o.Policies.Coverage = mode
+		o.Policies.Freshness = "report"
 		var out bytes.Buffer
 		err := runStat(context.Background(), &out, io.Discard, statConfig{opts: o, jsonOut: true, failOnRegression: true}, nil)
 		if mode == "partial" && err != nil {
@@ -427,15 +434,19 @@ func TestStatFreshnessPolicyUsesSharedValidAndStaleJudgments(t *testing.T) {
 		if state == "stale" {
 			writeFile(t, filepath.Join(dir, "bench_test.go"), strings.Replace(source, "BenchmarkFirst(b *testing.B) {}", "BenchmarkFirst(b *testing.B) { b.SetBytes(2) }", 1))
 		}
-		for _, policy := range []string{"report", "require"} {
+		for _, policy := range []string{"", "report", "require"} {
 			cmd := newRootCmd()
-			cmd.SetArgs([]string{"stat", "--freshness=" + policy, "--fail-on-regression", "--json"})
+			args := []string{"stat", "--conditions=report", "--fail-on-regression", "--json"}
+			if policy != "" {
+				args = append(args, "--freshness="+policy)
+			}
+			cmd.SetArgs(args)
 			var out, errOut bytes.Buffer
 			cmd.SetOut(&out)
 			cmd.SetErr(&errOut)
 			err := cmd.Execute()
 			want := 0
-			if state == "stale" && policy == "require" {
+			if state == "stale" && (policy == "" || policy == "require") {
 				want = 2
 			}
 			got := 0

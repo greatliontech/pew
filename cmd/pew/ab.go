@@ -158,10 +158,10 @@ func newABCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&ac.profile, "profile", "", "capture independent diagnostics on both sides")
+	f.StringVar(&ac.profile, "profile", "", "")
 	f.Lookup("profile").NoOptDefVal = "cpu,alloc"
-	f.StringVar(&ac.profileBenchtime, "profile-benchtime", "1s", "diagnostic execution budget")
-	f.BoolVar(&ac.jsonOut, "json", false, "emit typed comparison reports")
+	f.StringVar(&ac.profileBenchtime, "profile-benchtime", "1s", "")
+	f.BoolVar(&ac.jsonOut, "json", false, "")
 	f.StringVar(&ac.bench, "bench", ".", "")
 	f.IntVar(&ac.count, "count", 6, "")
 	f.StringVar(&ac.benchtime, "benchtime", "", "")

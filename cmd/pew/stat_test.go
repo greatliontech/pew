@@ -1107,6 +1107,20 @@ func TestStatABNotesDifferingRunConditions(t *testing.T) {
 	if !strings.Contains(out.String(), "run conditions differ") {
 		t.Fatalf("stat output missing the differing-conditions note:\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
 	}
+
+	// Under --fail-on-regression, omitted --conditions resolves to compatible:
+	// differing conditions refuse gate eligibility (exit 2) while retaining the
+	// numerical comparison and note; explicit --conditions=report overrides it.
+	out.Reset()
+	errOut.Reset()
+	err = runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), failOnRegression: true}, []string{base.String(), newer.String()})
+	var empty *nothingComparedError
+	if !errors.As(err, &empty) || exitCode(err) != 2 {
+		t.Fatalf("enforcing default conditions did not refuse differing conditions: %v", err)
+	}
+	if !strings.Contains(out.String(), "BenchmarkConds") || !strings.Contains(out.String(), "run conditions differ") {
+		t.Fatalf("enforcing conditions refusal hid numerical comparison or note:\n%s", out.String())
+	}
 }
 
 // TestCheckOneAppliesMeasurementGuards pins that a benchmark verdict is checked
@@ -1224,9 +1238,11 @@ func TestStatFailOnRegressionAllSkippedFailsClosed(t *testing.T) {
 }
 
 // TestStatFailOnRegressionPartialSkipGovernedByComparedSubset: when some
-// benchmarks compare and others are skipped, the compared subset alone governs
-// the exit (spec §10.1) — clean compared rows pass the gate despite skips, and
-// a regressing compared row fails it as a regression, not as empty.
+// benchmarks compare and others are skipped, the default enforcing policy
+// requires complete coverage (exit 2), explicit --coverage=partial lets the
+// clean compared subset govern the exit (exit 0 with its scope named), and a
+// regressing compared row fails as a regression (exit 1) ahead of incomplete
+// coverage (spec §10.1, REQ-pew-regression-gate).
 func TestStatFailOnRegressionPartialSkipGovernedByComparedSubset(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statpartial\n\ngo 1.26.4\n")
@@ -1254,11 +1270,24 @@ func TestStatFailOnRegressionPartialSkipGovernedByComparedSubset(t *testing.T) {
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), failOnRegression: true}
 
 	var out, errOut bytes.Buffer
-	if err := runStat(context.Background(), &out, &errOut, sc, []string{base.String(), clean.String()}); err != nil {
-		t.Fatalf("clean compared subset did not govern the exit: %v\nstderr:\n%s", err, errOut.String())
+	err = runStat(context.Background(), &out, &errOut, sc, []string{base.String(), clean.String()})
+	var empty *nothingComparedError
+	if !errors.As(err, &empty) || !empty.incomplete || exitCode(err) != 2 {
+		t.Fatalf("partial skip under default enforcing policy: err = %v, want incomplete exit 2\nstderr:\n%s", err, errOut.String())
 	}
 	if !strings.Contains(errOut.String(), "stale (format)") {
 		t.Fatalf("skipped benchmark not surfaced:\n%s", errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	partialSC := sc
+	partialSC.opts.Policies.Coverage = "partial"
+	if err := runStat(context.Background(), &out, &errOut, partialSC, []string{base.String(), clean.String()}); err != nil {
+		t.Fatalf("clean compared subset under explicit partial coverage did not govern the exit: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if !strings.Contains(out.String(), "coverage=partial") {
+		t.Fatalf("partial coverage scope not named:\n%s", out.String())
 	}
 
 	out.Reset()
@@ -1267,9 +1296,55 @@ func TestStatFailOnRegressionPartialSkipGovernedByComparedSubset(t *testing.T) {
 	if err == nil || err.Error() != "regression detected" {
 		t.Fatalf("regressing compared subset: err = %v, want regression detected", err)
 	}
-	var empty *nothingComparedError
 	if errors.As(err, &empty) {
 		t.Fatalf("regression misclassified as empty comparison: %v", err)
+	}
+}
+
+func TestStatConfidenceDerivedFromAlphaAndIndependentDiagnosticInterval(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statconf\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(filepath.Join(dir, "benchmarks"))
+	writeStatRecording(t, st, "pkg", "BenchmarkConf", 100)
+	base := commitAll(t, repo, "base").String()
+	writeStatRecording(t, st, "pkg", "BenchmarkConf", 102) // +2% (significant, below 3% floor)
+	slight := commitAll(t, repo, "slight").String()
+	withWorkingDir(t, dir)
+
+	runCLI := func(extra ...string) (string, int) {
+		t.Helper()
+		cmd := newRootCmd()
+		cmd.SetArgs(append([]string{"stat", base, slight, "--json"}, extra...))
+		var out, errOut bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&errOut)
+		err := cmd.Execute()
+		code := 0
+		if err != nil {
+			code = exitCode(err)
+		}
+		return out.String(), code
+	}
+
+	// Omitted --confidence derives from 1 - alpha (0.99 when alpha=0.01).
+	out, code := runCLI("--alpha=0.01")
+	if code != 0 || !strings.Contains(out, `"confidence":0.99`) {
+		t.Fatalf("derived confidence from alpha=0.01: exit=%d\n%s", code, out)
+	}
+	// Explicit diagnostic --confidence changes the displayed interval without
+	// changing significance, magnitude tolerance, or the regression gate.
+	out90, code90 := runCLI("--alpha=0.05", "--confidence=0.9", "--fail-on-regression")
+	out99, code99 := runCLI("--alpha=0.05", "--confidence=0.99", "--fail-on-regression")
+	if code90 != 0 || code99 != 0 {
+		t.Fatalf("explicit confidence altered gate outcome: code90=%d code99=%d", code90, code99)
+	}
+	if !strings.Contains(out90, `"confidence":0.9`) || !strings.Contains(out99, `"confidence":0.99`) {
+		t.Fatalf("explicit confidence not reflected in rendered summary:\n%s\n%s", out90, out99)
 	}
 }
 

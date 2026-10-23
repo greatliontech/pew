@@ -236,6 +236,9 @@ func Compare(base, newer []*benchfmt.Result, opts Options) *Result {
 // CompareProjected compares rows using the caller's admitted configuration
 // projections. The accessor belongs to this comparison and never mutates rows.
 func CompareProjected(base, newer []*benchfmt.Result, opts Options, values func(*benchfmt.Result) func(string) string) *Result {
+	if opts.Confidence == 0 && !math.IsNaN(opts.Alpha) && opts.Alpha > 0 && opts.Alpha < 1 {
+		opts.Confidence = 1 - opts.Alpha
+	}
 	th := &benchmath.Thresholds{CompareAlpha: opts.Alpha}
 	filter := mustFilter("*")
 	var parser benchproc.ProjectionParser

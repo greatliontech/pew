@@ -39,20 +39,22 @@ modified state, compiler and Gofresh dependency facts without running benchmarks
    pew stat main HEAD
    ```
 
-   For a complete enforcing comparison in CI, specify its evidence policies:
+   For an enforcing comparison in CI, `--fail-on-regression` resolves omitted
+   evidence policies to `complete`, `require`, and `compatible`:
 
    ```sh
-   pew stat --fail-on-regression --coverage complete --freshness require --conditions compatible
+   pew stat --fail-on-regression
    ```
 
    An eligible regression on a gated metric exits `1`. An empty eligible set
    or unsatisfied complete coverage exits `2` when no higher-precedence
    interruption, operational failure or eligible regression applies. Interruption
-   exits `130`; operational failures retain their error exits. The currently implemented omitted policies
-   are partial coverage with freshness and conditions reported, so the bare
-   `--fail-on-regression` flag does not by itself require complete fresh compatible
-   evidence. Without enforcement, statistical comparisons are informational;
-   operational failures still return errors.
+   exits `130`; operational failures retain their error exits. Exploratory `pew stat`
+   (without `--fail-on-regression`) defaults omitted policies to `partial` coverage
+   with `freshness` and `conditions` set to `report`; an enforcing gate may relax
+   any individual policy only when explicitly passed (for example `--coverage=partial`,
+   `--freshness=report`, or `--conditions=report`). Without enforcement, statistical
+   comparisons are informational; operational failures still return errors.
 
 5. Remove recordings for benchmarks that no longer exist:
 

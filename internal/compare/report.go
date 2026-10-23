@@ -14,16 +14,35 @@ type Policies struct {
 	Conditions string `json:"conditions"`
 }
 
-// Effective supplies the documented defaults.
+// Effective supplies the documented informational defaults.
 func (p Policies) Effective() Policies {
+	return p.EffectiveFor(false)
+}
+
+// EffectiveFor resolves omitted policies to the informational defaults
+// (partial, report, report) or, when enforcing is true, the enforcing defaults
+// (complete, require, compatible). Explicit policy choices are preserved.
+func (p Policies) EffectiveFor(enforcing bool) Policies {
 	if p.Coverage == "" {
-		p.Coverage = "partial"
+		if enforcing {
+			p.Coverage = "complete"
+		} else {
+			p.Coverage = "partial"
+		}
 	}
 	if p.Freshness == "" {
-		p.Freshness = "report"
+		if enforcing {
+			p.Freshness = "require"
+		} else {
+			p.Freshness = "report"
+		}
 	}
 	if p.Conditions == "" {
-		p.Conditions = "report"
+		if enforcing {
+			p.Conditions = "compatible"
+		} else {
+			p.Conditions = "report"
+		}
 	}
 	return p
 }

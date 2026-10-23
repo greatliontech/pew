@@ -37,8 +37,8 @@ func TestRunRegeneratesHistoricalRuntimeEvidence(t *testing.T) {
 	}
 	current := a.fp.RuntimeInputs
 	raw, err := base64.RawURLEncoding.DecodeString(current)
-	if err != nil || !bytes.HasPrefix(raw, []byte(`{"v":3`)) {
-		t.Fatalf("producer did not use generation3: %s, %v", raw, err)
+	if err != nil || !bytes.HasPrefix(raw, []byte(`{"v":4`)) {
+		t.Fatalf("producer did not use generation4: %s, %v", raw, err)
 	}
 	executions := 0
 	rc.binary = func(ctx context.Context, dir, pin string, env testEnvironmentValue, bin string, args []string) ([]byte, error) {

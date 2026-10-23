@@ -206,7 +206,7 @@ func TestStatusExplainNamesMovedInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	stale := strings.Repeat("0", 32)
-	manifest := fmt.Sprintf(`{"v":3,"env":[{"n":"PEW_EXPLAIN_PROBE","d":%q}],"paths":[{"k":"abs","p":%q,"d":%q}]}`,
+	manifest := fmt.Sprintf(`{"v":4,"env":[{"n":"PEW_EXPLAIN_PROBE","d":%q}],"paths":[{"k":"abs","p":%q,"d":%q}]}`,
 		stale, watched, stale)
 	fp.RuntimeInputs = base64.RawURLEncoding.EncodeToString([]byte(manifest))
 	fp.RuntimeDigest = "recorded-elsewhere"

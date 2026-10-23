@@ -79,6 +79,17 @@ func TestProfileExecutableSurvivesCaptureAndRemainsGuarded(t *testing.T) {
 		if row.Verdict != "stale" || row.Reason != "buildconfig" || len(row.Profiles) != 1 || row.Profiles[0].Freshness != "stale" || !strings.Contains(row.Profiles[0].Reason, "buildconfig") {
 			t.Fatalf("different build environment unguarded: %+v", row)
 		}
+		var explained bytes.Buffer
+		if err := runStatus(t.Context(), &explained, benchDir, "", false, true, false, []string{"."}); err != nil {
+			t.Fatalf("status --explain: %v", err)
+		}
+		text := explained.String()
+		if !strings.Contains(text, "buildconfig: build description differed between capture and check (compilation environment and build inputs; values are not disclosed)") || !strings.Contains(text, "recorded observation:") || !strings.Contains(text, "outcome=identity-only") {
+			t.Fatalf("status --explain missing buildconfig/observation/profile attribution:\n%s", text)
+		}
+		if strings.Contains(text, "different compiler input") {
+			t.Fatalf("status --explain disclosed environment value:\n%s", text)
+		}
 	})
 	// CPU profiling reads the retained executable. Its continued existence is
 	// not an exemption: a later content edit must move the recorded dependency.

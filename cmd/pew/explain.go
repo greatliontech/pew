@@ -101,6 +101,11 @@ func explainCapturedRecord(ctx context.Context, w io.Writer, moduleDir string, f
 	if _, err := fmt.Fprintf(w, "    recorded observation: assertion=%q strategy=%q observable=%t reason=%q; proof and outcome support are checked independently of purity\n", fp.ObservationAssertion, fp.ObservationProof.Strategy, fp.ObservationProof.Observable, fp.ObservationProof.Reason); err != nil {
 		return explanationWriteError(err)
 	}
+	if fp.Guards.BuildConfig != curFP.Guards.BuildConfig {
+		if _, err := fmt.Fprintln(w, "    buildconfig: build description differed between capture and check (compilation environment and build inputs; values are not disclosed)"); err != nil {
+			return explanationWriteError(err)
+		}
+	}
 	currentRuntime := ""
 	var analysisErr error
 	if fp.RuntimeInputs != "" {

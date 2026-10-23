@@ -36,6 +36,23 @@ type statConfig struct {
 	jsonOut          bool
 }
 
+func resolveStatFlags(sc *statConfig, cmd *cobra.Command) {
+	f := cmd.Flags()
+	if !f.Changed("confidence") && !math.IsNaN(sc.opts.Alpha) && sc.opts.Alpha > 0 && sc.opts.Alpha < 1 {
+		sc.opts.Confidence = 1 - sc.opts.Alpha
+	}
+	if !f.Changed("coverage") {
+		sc.opts.Policies.Coverage = ""
+	}
+	if !f.Changed("freshness") {
+		sc.opts.Policies.Freshness = ""
+	}
+	if !f.Changed("conditions") {
+		sc.opts.Policies.Conditions = ""
+	}
+	sc.opts.Policies = sc.opts.Policies.EffectiveFor(sc.failOnRegression)
+}
+
 func newStatCmd() *cobra.Command {
 	var sc statConfig
 	sc.opts = compare.DefaultOptions()
@@ -51,6 +68,7 @@ func newStatCmd() *cobra.Command {
 				return err
 			}
 			sc.opts.GateUnits = gu
+			resolveStatFlags(&sc, cmd)
 			if err := validateOptions(sc.opts); err != nil {
 				return err
 			}
@@ -69,7 +87,7 @@ func newStatCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&sc.profile, "profile", "", "compare requested diagnostic profiles")
+	f.StringVar(&sc.profile, "profile", "", "")
 	f.Lookup("profile").NoOptDefVal = "cpu,alloc"
 	f.StringVar(&sc.benchDir, "bench-dir", "", "")
 	f.StringVar(&sc.label, "label", "", "")
@@ -210,6 +228,10 @@ func (b baseline) historicalRefs() []string {
 }
 
 func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []string) error {
+	if sc.opts.Confidence == 0 && !math.IsNaN(sc.opts.Alpha) && sc.opts.Alpha > 0 && sc.opts.Alpha < 1 {
+		sc.opts.Confidence = 1 - sc.opts.Alpha
+	}
+	sc.opts.Policies = sc.opts.Policies.EffectiveFor(sc.failOnRegression)
 	kinds, err := profiles.Kinds(sc.profile)
 	if err != nil {
 		return err

@@ -13,6 +13,7 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	pew "github.com/greatliontech/pew"
+	"github.com/greatliontech/pew/internal/compare"
 	"github.com/greatliontech/pew/internal/run"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -20,13 +21,12 @@ import (
 
 // tableRow is one verb's row of §12's verb defaults table: the
 // backticked `--flag=value` defaults, and the `--flag` opt-ins with
-// whether the row states a purpose for each — a parenthetical phrase
-// right after the name; a one-word cross-reference ("(above)") is not
-// a purpose.
+// the parenthetical purpose stated right after the name; a one-word
+// cross-reference ("(above)") is not a purpose.
 type tableRow struct {
 	defaults map[string]string
 	optIns   []string
-	purpose  map[string]bool
+	purpose  map[string]string
 }
 
 // verbDefaultsTable parses §12's verb defaults table out of the spec,
@@ -54,13 +54,15 @@ func verbDefaultsTable(t *testing.T) (map[string]tableRow, []string) {
 			t.Fatalf("table row with %d cells: %q", len(cells), line)
 		}
 		verb := strings.Trim(strings.TrimPrefix(cells[0], "| "), "`")
-		row := tableRow{defaults: map[string]string{}, purpose: map[string]bool{}}
+		row := tableRow{defaults: map[string]string{}, purpose: map[string]string{}}
 		for _, m := range flag.FindAllStringSubmatch(cells[2], -1) {
 			row.defaults[m[1]] = m[2]
 		}
 		for _, m := range flag.FindAllStringSubmatch(cells[3], -1) {
 			row.optIns = append(row.optIns, m[1])
-			row.purpose[m[1]] = len(strings.Fields(m[3])) >= 2
+			if len(strings.Fields(m[3])) >= 2 {
+				row.purpose[m[1]] = strings.TrimSuffix(m[3], " |")
+			}
 		}
 		rows[verb] = row
 		order = append(order, verb)
@@ -72,7 +74,8 @@ func verbDefaultsTable(t *testing.T) (map[string]tableRow, []string) {
 // its verbs are the command set, each row's flags are the command's
 // flag set, a default names the value the command holds when unset, an
 // opt-in states its purpose on the first row naming it and is never
-// also a default, and the guidance document's stated defaults agree.
+// also a default, and the guidance document's stated defaults and
+// opt-in purposes agree.
 func TestSurfaceTableTracksTheCommands(t *testing.T) {
 	table, order := verbDefaultsTable(t)
 	stated := map[string]bool{}
@@ -82,7 +85,7 @@ func TestSurfaceTableTracksTheCommands(t *testing.T) {
 			if _, isDefault := row.defaults[name]; isDefault {
 				t.Errorf("%s: --%s is both a default and an opt-in", verb, name)
 			}
-			if !stated[name] && !row.purpose[name] {
+			if !stated[name] && row.purpose[name] == "" {
 				t.Errorf("%s: opt-in --%s states no purpose on the first row naming it", verb, name)
 			}
 			stated[name] = true
@@ -128,10 +131,12 @@ func TestSurfaceTableTracksTheCommands(t *testing.T) {
 			}
 		})
 	}
-	// The guidance document narrates the same defaults: a knob text
-	// stating "(default X)" states the flag's own literal; a flag whose
-	// default is derived at run time (an empty DefValue, bench-dir)
-	// narrates the derivation in prose the flag cannot vouch for.
+	// The guidance document narrates the same defaults and opt-in
+	// purposes: a knob text stating "(default X)" states the flag's own
+	// literal; a flag whose default is derived at run time (an empty
+	// DefValue, bench-dir) narrates the derivation in prose the flag
+	// cannot vouch for; and every opt-in purpose stated in §12 appears
+	// in that verb's guidance knob prose.
 	doc, err := pew.GuidanceDocument()
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +147,10 @@ func TestSurfaceTableTracksTheCommands(t *testing.T) {
 		if cmd == nil {
 			continue
 		}
+		row := table[v.Name]
+		knobs := map[string]string{}
 		for _, k := range v.Knobs {
+			knobs[k.Name] = strings.ReplaceAll(k.Text, "`", "")
 			m := statedDefault.FindStringSubmatch(k.Text)
 			if m == nil {
 				continue
@@ -154,6 +162,48 @@ func TestSurfaceTableTracksTheCommands(t *testing.T) {
 			if want := strings.Trim(f.DefValue, `"`); m[1] != want {
 				t.Errorf("guidance %s.%s states default %q; the flag holds %q", v.Name, k.Name, m[1], want)
 			}
+		}
+		for name, purpose := range row.purpose {
+			if !strings.Contains(strings.ToLower(knobs[name]), strings.ToLower(purpose)) {
+				t.Errorf("guidance %s.%s does not carry §12 stated purpose %q: got %q", v.Name, name, purpose, knobs[name])
+			}
+		}
+	}
+	// Contextual policy defaults and derived confidence on stat (§10.1, §12):
+	// informational defaults are partial/report/report; with --fail-on-regression,
+	// omitted policies resolve to complete/require/compatible while explicit
+	// overrides are preserved; omitted --confidence derives from 1 - alpha.
+	for _, tc := range []struct {
+		args       []string
+		wantPolicy compare.Policies
+		wantConf   float64
+	}{
+		{nil, compare.Policies{Coverage: "partial", Freshness: "report", Conditions: "report"}, 0.95},
+		{[]string{"--fail-on-regression"}, compare.Policies{Coverage: "complete", Freshness: "require", Conditions: "compatible"}, 0.95},
+		{[]string{"--fail-on-regression", "--coverage=partial"}, compare.Policies{Coverage: "partial", Freshness: "require", Conditions: "compatible"}, 0.95},
+		{[]string{"--fail-on-regression", "--freshness=report", "--conditions=report"}, compare.Policies{Coverage: "complete", Freshness: "report", Conditions: "report"}, 0.95},
+		{[]string{"--alpha=0.01"}, compare.Policies{Coverage: "partial", Freshness: "report", Conditions: "report"}, 0.99},
+		{[]string{"--alpha=0.01", "--confidence=0.90"}, compare.Policies{Coverage: "partial", Freshness: "report", Conditions: "report"}, 0.90},
+	} {
+		var sc statConfig
+		sc.opts = compare.DefaultOptions()
+		cmd := &cobra.Command{Use: "stat"}
+		f := cmd.Flags()
+		f.Float64Var(&sc.opts.Alpha, "alpha", sc.opts.Alpha, "")
+		f.Float64Var(&sc.opts.Confidence, "confidence", sc.opts.Confidence, "")
+		f.BoolVar(&sc.failOnRegression, "fail-on-regression", false, "")
+		f.StringVar(&sc.opts.Policies.Coverage, "coverage", "partial", "")
+		f.StringVar(&sc.opts.Policies.Freshness, "freshness", "report", "")
+		f.StringVar(&sc.opts.Policies.Conditions, "conditions", "report", "")
+		if err := cmd.ParseFlags(tc.args); err != nil {
+			t.Fatalf("ParseFlags(%v): %v", tc.args, err)
+		}
+		resolveStatFlags(&sc, cmd)
+		if sc.opts.Policies != tc.wantPolicy {
+			t.Errorf("resolveStatFlags(%v) policies = %+v, want %+v", tc.args, sc.opts.Policies, tc.wantPolicy)
+		}
+		if sc.opts.Confidence != tc.wantConf {
+			t.Errorf("resolveStatFlags(%v) confidence = %v, want %v", tc.args, sc.opts.Confidence, tc.wantConf)
 		}
 	}
 }
