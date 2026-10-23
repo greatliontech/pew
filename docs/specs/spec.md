@@ -1546,6 +1546,28 @@ guesses about unrelated locations.
 
 ## 11. Architecture & dependencies
 
+- **Imported (Go-team / stdlib-tier):** `golang.org/x/perf/{benchfmt,benchproc,benchmath,benchunit}`;
+  `golang.org/x/tools/go/{packages,ssa,callgraph,callgraph/rta}` (RTA — CHA rejected as too imprecise,
+  §7.4; VTA a documented upgrade path, §7.4); `go/types`, `go/ast` via `go/packages`.
+  (`golang.org/x/perf/benchseries` is a candidate later for across-commit trends.)
+- **Imported (third-party, deliberate):** `github.com/go-git/go-git/v5` as the **git access layer**,
+  `github.com/spf13/cobra` as the CLI command/flag layer, and
+  `github.com/google/pprof/profile` for native profile parsing and validation.
+  pew is a pure git *reader* (HEAD, commit metadata, ref resolution, blob reads for
+  baselines, file-scoped log for trends — §6.1, §9). Every `git show <ref>:<path>` /
+  `git log -- <path>` in this spec is performed via go-git's object API, **never** by shelling to a
+  `git` binary. *Tradeoff accepted:* go-git's `Worktree.Status()` (used for the informational
+  `dirty` flag, §5, and to pin repository state across producer validation, §9) is slower than the binary on large repos and, on its weak cases
+  (`.gitattributes` filters), errs toward **false-dirty** — the safe direction (a falsely-dirty
+  result is only barred from being a pinned baseline, never silently trusted). The
+  correctness-bearing "is this result faithful to commit C?" does **not** rely on Status(): it is
+  derived from the closure comparison (working-tree closure hash vs C's, §7), so this weakness
+  cannot produce a false-`valid`.
+- **Subprocesses:** the narrowly permitted A/B Git lifecycle below; `go test -bench` (run), `go list -json` (Tier-1 file
+  sets / build-config resolution); `go/packages` drives the same toolchain for Tier-2 loads.
+- Per project policy, go-git, cobra and pprof are deliberately-added third-party deps (user-approved);
+  any *further* third-party dependency is flagged and asked before adding.
+
 **REQ-pew-ab-control-lifecycle** (behavior): A/B control operations MUST be
 context-bound, with cleanup failures remaining visible.
 **Analysis and historical reads use imported libraries.** No fork of x/perf
@@ -1569,28 +1591,6 @@ the directory. Owner markers are removed only after successful cleanup.
 Deletion requires ownership and registration validation; a name prefix or an
 empty directory alone never proves ownership. Live and foreign worktrees are
 not swept. Historical recording, profile and source reads remain go-git reads.
-
-- **Imported (Go-team / stdlib-tier):** `golang.org/x/perf/{benchfmt,benchproc,benchmath,benchunit}`;
-  `golang.org/x/tools/go/{packages,ssa,callgraph,callgraph/rta}` (RTA — CHA rejected as too imprecise,
-  §7.4; VTA a documented upgrade path, §7.4); `go/types`, `go/ast` via `go/packages`.
-  (`golang.org/x/perf/benchseries` is a candidate later for across-commit trends.)
-- **Imported (third-party, deliberate):** `github.com/go-git/go-git/v5` as the **git access layer**,
-  `github.com/spf13/cobra` as the CLI command/flag layer, and
-  `github.com/google/pprof/profile` for native profile parsing and validation.
-  pew is a pure git *reader* (HEAD, commit metadata, ref resolution, blob reads for
-  baselines, file-scoped log for trends — §6.1, §9). Every `git show <ref>:<path>` /
-  `git log -- <path>` in this spec is performed via go-git's object API, **never** by shelling to a
-  `git` binary. *Tradeoff accepted:* go-git's `Worktree.Status()` (used for the informational
-  `dirty` flag, §5, and to pin repository state across producer validation, §9) is slower than the binary on large repos and, on its weak cases
-  (`.gitattributes` filters), errs toward **false-dirty** — the safe direction (a falsely-dirty
-  result is only barred from being a pinned baseline, never silently trusted). The
-  correctness-bearing "is this result faithful to commit C?" does **not** rely on Status(): it is
-  derived from the closure comparison (working-tree closure hash vs C's, §7), so this weakness
-  cannot produce a false-`valid`.
-- **Subprocesses:** the narrowly permitted A/B Git lifecycle above; `go test -bench` (run), `go list -json` (Tier-1 file
-  sets / build-config resolution); `go/packages` drives the same toolchain for Tier-2 loads.
-- Per project policy, go-git, cobra and pprof are deliberately-added third-party deps (user-approved);
-  any *further* third-party dependency is flagged and asked before adding.
 
 ## 12. CLI surface
 

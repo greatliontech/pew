@@ -3303,8 +3303,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-ab-cleanup-ownership"
-  content_hash: "7c0d8cbb855f8d028e8199a8d39579b0bfb8681c3638bf438f6472e0d5eb6371"
-  source_hash: "361b2bbbcddb127feb515fcee9ddd636d3fe263ee353ae7f92fea0eebe148e39"
+  content_hash: "7f3f2fe6ccff236b38a997ffe0571c10b104e4f8f4e5612f7ea64100a8279055"
+  source_hash: "5d74fd4ff3874449fdffe4554363bcc358dad9aecd2e21ff46a6d01cc1e78528"
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.abGitControl.add"
   role: BINDING_ROLE_IMPLEMENTS
@@ -3313,8 +3313,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-ab-cleanup-ownership"
-  content_hash: "7c0d8cbb855f8d028e8199a8d39579b0bfb8681c3638bf438f6472e0d5eb6371"
-  source_hash: "361b2bbbcddb127feb515fcee9ddd636d3fe263ee353ae7f92fea0eebe148e39"
+  content_hash: "7f3f2fe6ccff236b38a997ffe0571c10b104e4f8f4e5612f7ea64100a8279055"
+  source_hash: "5d74fd4ff3874449fdffe4554363bcc358dad9aecd2e21ff46a6d01cc1e78528"
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.abGitControl.sweep"
   role: BINDING_ROLE_IMPLEMENTS
@@ -3323,8 +3323,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-ab-cleanup-ownership"
-  content_hash: "7c0d8cbb855f8d028e8199a8d39579b0bfb8681c3638bf438f6472e0d5eb6371"
-  source_hash: "361b2bbbcddb127feb515fcee9ddd636d3fe263ee353ae7f92fea0eebe148e39"
+  content_hash: "7f3f2fe6ccff236b38a997ffe0571c10b104e4f8f4e5612f7ea64100a8279055"
+  source_hash: "5d74fd4ff3874449fdffe4554363bcc358dad9aecd2e21ff46a6d01cc1e78528"
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.abGitControl.registry"
   role: BINDING_ROLE_IMPLEMENTS
@@ -3333,8 +3333,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-ab-cleanup-ownership"
-  content_hash: "7c0d8cbb855f8d028e8199a8d39579b0bfb8681c3638bf438f6472e0d5eb6371"
-  source_hash: "361b2bbbcddb127feb515fcee9ddd636d3fe263ee353ae7f92fea0eebe148e39"
+  content_hash: "7f3f2fe6ccff236b38a997ffe0571c10b104e4f8f4e5612f7ea64100a8279055"
+  source_hash: "5d74fd4ff3874449fdffe4554363bcc358dad9aecd2e21ff46a6d01cc1e78528"
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.readABOwner"
   role: BINDING_ROLE_IMPLEMENTS
@@ -3343,8 +3343,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-ab-cleanup-ownership"
-  content_hash: "7c0d8cbb855f8d028e8199a8d39579b0bfb8681c3638bf438f6472e0d5eb6371"
-  source_hash: "361b2bbbcddb127feb515fcee9ddd636d3fe263ee353ae7f92fea0eebe148e39"
+  content_hash: "7f3f2fe6ccff236b38a997ffe0571c10b104e4f8f4e5612f7ea64100a8279055"
+  source_hash: "5d74fd4ff3874449fdffe4554363bcc358dad9aecd2e21ff46a6d01cc1e78528"
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.worktreeOwnedBy"
   role: BINDING_ROLE_IMPLEMENTS
@@ -3353,8 +3353,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-ab-cleanup-ownership"
-  content_hash: "7c0d8cbb855f8d028e8199a8d39579b0bfb8681c3638bf438f6472e0d5eb6371"
-  source_hash: "361b2bbbcddb127feb515fcee9ddd636d3fe263ee353ae7f92fea0eebe148e39"
+  content_hash: "7f3f2fe6ccff236b38a997ffe0571c10b104e4f8f4e5612f7ea64100a8279055"
+  source_hash: "5d74fd4ff3874449fdffe4554363bcc358dad9aecd2e21ff46a6d01cc1e78528"
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.TestABCleanupRefusesForeignOwnershipAndReportsFailure"
   role: BINDING_ROLE_TESTS
@@ -3363,8 +3363,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-ab-cleanup-ownership"
-  content_hash: "7c0d8cbb855f8d028e8199a8d39579b0bfb8681c3638bf438f6472e0d5eb6371"
-  source_hash: "361b2bbbcddb127feb515fcee9ddd636d3fe263ee353ae7f92fea0eebe148e39"
+  content_hash: "7f3f2fe6ccff236b38a997ffe0571c10b104e4f8f4e5612f7ea64100a8279055"
+  source_hash: "5d74fd4ff3874449fdffe4554363bcc358dad9aecd2e21ff46a6d01cc1e78528"
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.TestABInterruptedAddRetainsCleanupOwnership"
   role: BINDING_ROLE_TESTS
@@ -3373,8 +3373,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-ab-cleanup-ownership"
-  content_hash: "7c0d8cbb855f8d028e8199a8d39579b0bfb8681c3638bf438f6472e0d5eb6371"
-  source_hash: "361b2bbbcddb127feb515fcee9ddd636d3fe263ee353ae7f92fea0eebe148e39"
+  content_hash: "7f3f2fe6ccff236b38a997ffe0571c10b104e4f8f4e5612f7ea64100a8279055"
+  source_hash: "5d74fd4ff3874449fdffe4554363bcc358dad9aecd2e21ff46a6d01cc1e78528"
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.TestABSweepsStaleSideBWorktrees"
   role: BINDING_ROLE_TESTS
