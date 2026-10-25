@@ -5,7 +5,7 @@ go 1.27.0
 require (
 	github.com/go-git/go-git/v5 v5.19.1
 	github.com/google/pprof v0.0.0-20260906184651-6331bc6350fe
-	github.com/greatliontech/gofresh v0.119.0
+	github.com/greatliontech/gofresh v0.118.1
 	github.com/greatliontech/gofresh/toolversion v0.0.0-20261012210745-f5a40c0055e1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9
