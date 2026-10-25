@@ -26,7 +26,10 @@ func TestRunRecordsPerArmOutcomeSupport(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("shared immutable-environment outcome method is Linux-audited")
 	}
-	dir := twoArmFixture(t)
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/arms\n\ngo 1.26.4\n")
+	writeFile(t, filepath.Join(dir, "bench_test.go"), "package arms\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc BenchmarkFirst(b *testing.B) { _ = os.Getenv(\"PEW_OUTCOME_SUPPORT\") }\nfunc BenchmarkSecond(b *testing.B) { _ = os.Getenv(\"PEW_OUTCOME_SUPPORT\") }\n")
+	commitFixture(t, dir)
 	withWorkingDir(t, dir)
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
 	var out, errout bytes.Buffer
@@ -58,7 +61,7 @@ func TestRunRecordsPerArmOutcomeSupport(t *testing.T) {
 		if err := json.Unmarshal(data, &manifest); err != nil {
 			t.Fatal(err)
 		}
-		if manifest.Version != 3 || manifest.Outcome != "gofresh/immutable-environment@1" || len(manifest.Subjects) != 1 {
+		if manifest.Version != 4 || manifest.Outcome != "gofresh/immutable-environment@1" || len(manifest.Subjects) != 1 {
 			t.Fatalf("%s support=%s", name, data)
 		}
 		if manifest.Subjects[0] == previous {

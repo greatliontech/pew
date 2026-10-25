@@ -958,7 +958,7 @@ func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStat
 	testlogPath := testlog.Name()
 	_ = testlog.Close()
 	defer os.Remove(testlogPath)
-	contribution, err := unit.Register(ctx, artifact.binding, gofresh.ProcessDescription{Identity: identity, Capture: testlogPath, ScratchNamespaces: observationNamespaces(pkgRel, scratch)})
+	contribution, err := unit.Register(ctx, artifact.binding, gofresh.ProcessDescription{Identity: identity, Capture: testlogPath, ExcludedPaths: bracketExclusions(p.Module.Dir, gc.exclude...), ScratchNamespaces: observationNamespaces(pkgRel, scratch)})
 	if err != nil {
 		return armMeasurement{}, nil, err
 	}
@@ -1137,6 +1137,33 @@ func observationNamespaces(pkgRel string, patterns []string) []runtimeinput.Scra
 		namespaces = append(namespaces, runtimeinput.ScratchNamespace{Dir: pkgRel, Pattern: pattern})
 	}
 	return namespaces
+}
+
+func bracketExclusions(moduleDir string, dirs ...string) []string {
+	var out []string
+	modAbs, err := filepath.Abs(moduleDir)
+	if err == nil {
+		if resolved, err := filepath.EvalSymlinks(modAbs); err == nil {
+			modAbs = resolved
+		}
+	}
+	for _, d := range dirs {
+		if d == "" {
+			continue
+		}
+		abs, err := filepath.Abs(d)
+		if err != nil {
+			continue
+		}
+		abs = resolveExistingPrefix(abs)
+		out = append(out, abs)
+		if modAbs != "" {
+			if rel, err := filepath.Rel(modAbs, abs); err == nil && filepath.IsLocal(rel) && rel != "." {
+				out = append(out, filepath.ToSlash(rel))
+			}
+		}
+	}
+	return out
 }
 
 func requireBenchmarkGroups(names []string, groups map[string][]*benchfmt.Result) error {

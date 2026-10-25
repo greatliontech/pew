@@ -337,8 +337,12 @@ func captureDiagnostic(ctx context.Context, errw io.Writer, rc runConfig, gc *gi
 	}
 	// Deliberately no PrepareOutcomeSupport: ordinary harness support cannot
 	// cover the profiler's pre-testlog startup and post-testlog flush.
+	excludeDirs := append([]string(nil), gc.exclude...)
+	if objects != nil && objects.Root != "" {
+		excludeDirs = append(excludeDirs, objects.Root)
+	}
 	identity := "profile:" + kind + ":" + p.ImportPath + ":" + name
-	contribution, err := unit.Register(ctx, built, gofresh.ProcessDescription{Identity: identity, Capture: testlog, ScratchNamespaces: observationNamespaces(prep.pkgRel, prep.scratch)})
+	contribution, err := unit.Register(ctx, built, gofresh.ProcessDescription{Identity: identity, Capture: testlog, ExcludedPaths: bracketExclusions(p.Module.Dir, excludeDirs...), ScratchNamespaces: observationNamespaces(prep.pkgRel, prep.scratch)})
 	if err != nil {
 		return err
 	}

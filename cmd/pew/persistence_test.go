@@ -362,14 +362,16 @@ func TestRunInterruptedArmsAreNeverEntered(t *testing.T) {
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
 		binary: armExecution(func(arm int) {
 			arms = arm
-			if arm == 1 {
-				if err := os.MkdirAll(leftover, 0o755); err != nil {
-					t.Fatal(err)
-				}
-			}
 		}),
 	}
-	out := &cancelOnRecorded{cancel: cancel}
+	out := &cancelOnRecorded{
+		cancel: func() {
+			if err := os.MkdirAll(leftover, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cancel()
+		},
+	}
 	err := runRun(ctx, out, &bytes.Buffer{}, rc, []string{"."})
 	if err == nil || !strings.Contains(err.Error(), "interrupted: 1 recorded, 2 not measured") {
 		t.Fatalf("runRun = %v; want the kept arm and the two unmeasured counted\n%s", err, out.b.String())
