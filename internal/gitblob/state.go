@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
+	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 	"github.com/go-git/go-git/v5/plumbing/format/index"
 )
 
@@ -53,6 +55,15 @@ func Snapshot(dir string, excludeDirs ...string) (RepositoryState, error) {
 	wt, err := r.repo.Worktree()
 	if err != nil {
 		return RepositoryState{}, fmt.Errorf("gitblob: worktree: %w", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(r.root, ".git", "info", "exclude")); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			wt.Excludes = append(wt.Excludes, gitignore.ParsePattern(line, nil))
+		}
 	}
 	st, err := wt.Status()
 	if err != nil {
