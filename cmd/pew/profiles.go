@@ -337,12 +337,12 @@ func captureDiagnostic(ctx context.Context, errw io.Writer, rc runConfig, gc *gi
 	}
 	// Deliberately no PrepareOutcomeSupport: ordinary harness support cannot
 	// cover the profiler's pre-testlog startup and post-testlog flush.
-	excludeDirs := append([]string(nil), gc.exclude...)
-	if objects != nil && objects.Root != "" {
-		excludeDirs = append(excludeDirs, objects.Root)
+	excludePaths := make([]string, 0, len(prep.destinations))
+	for _, d := range prep.destinations {
+		excludePaths = append(excludePaths, d.Path)
 	}
 	identity := "profile:" + kind + ":" + p.ImportPath + ":" + name
-	contribution, err := unit.Register(ctx, built, gofresh.ProcessDescription{Identity: identity, Capture: testlog, ExcludedPaths: bracketExclusions(p.Module.Dir, excludeDirs...), ScratchNamespaces: observationNamespaces(prep.pkgRel, prep.scratch)})
+	contribution, err := unit.Register(ctx, built, gofresh.ProcessDescription{Identity: identity, Capture: testlog, ExcludedPaths: bracketExclusions(p.Module.Dir, excludePaths...), ScratchNamespaces: observationNamespaces(prep.pkgRel, prep.scratch)})
 	if err != nil {
 		return err
 	}
@@ -399,6 +399,13 @@ func captureDiagnostic(ctx context.Context, errw io.Writer, rc runConfig, gc *gi
 	if err := unit.Submit(contribution, gofresh.Terminal{Kind: gofresh.NormalCompletion}); err != nil {
 		return err
 	}
+	gotBinary, err := readProfileFile(bin)
+	if err != nil {
+		return fmt.Errorf("profile: reading executable after diagnostic: %w", err)
+	}
+	if !bytes.Equal(binary, gotBinary) {
+		return fmt.Errorf("profile: executable changed during diagnostic")
+	}
 	reportPhase(gate, "finalizing profile "+p.ImportPath+"."+name)
 	final, err := unit.Close(gate)
 	if err != nil {
@@ -416,13 +423,6 @@ func captureDiagnostic(ctx context.Context, errw io.Writer, rc runConfig, gc *gi
 	}
 	if !start.Equal(end) {
 		return fmt.Errorf("profile: repository state moved during diagnostic")
-	}
-	gotBinary, err := readProfileFile(bin)
-	if err != nil {
-		return fmt.Errorf("profile: reading executable after diagnostic: %w", err)
-	}
-	if !bytes.Equal(binary, gotBinary) {
-		return fmt.Errorf("profile: executable changed during diagnostic")
 	}
 	for _, src := range sources {
 		b, err := os.ReadFile(src.Filename)

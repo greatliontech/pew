@@ -958,7 +958,7 @@ func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStat
 	testlogPath := testlog.Name()
 	_ = testlog.Close()
 	defer os.Remove(testlogPath)
-	contribution, err := unit.Register(ctx, artifact.binding, gofresh.ProcessDescription{Identity: identity, Capture: testlogPath, ExcludedPaths: bracketExclusions(p.Module.Dir, gc.exclude...), ScratchNamespaces: observationNamespaces(pkgRel, scratch)})
+	contribution, err := unit.Register(ctx, artifact.binding, gofresh.ProcessDescription{Identity: identity, Capture: testlogPath, ScratchNamespaces: observationNamespaces(pkgRel, scratch)})
 	if err != nil {
 		return armMeasurement{}, nil, err
 	}
