@@ -6,12 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
+	gofreshtool "github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/pew/internal/recordingtest"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/spf13/cobra"
@@ -52,6 +52,11 @@ func TestVouchedEngineDischargesPinnedCulprit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds gofresh views over the protobuf graph")
 	}
+	gocache, err := gofreshtool.GoBuildCache(t.Context(), os.Environ())
+	if err != nil {
+		t.Fatalf("resolve GOCACHE: %v", err)
+	}
+	t.Setenv("GOCACHE", gocache)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	out, err := exec.Command("go", "env", "GOMODCACHE").Output()
 	if err != nil {
@@ -141,12 +146,12 @@ func BenchmarkCount(b *testing.B) {
 	if !strings.Contains(verdict.Reason, "shares mutated dynamic state") {
 		t.Fatalf("plain verdict = %+v, want the downgrade", verdict)
 	}
-	m := regexp.MustCompile(`([^\s:]+): ([^\s:]+)\.([\p{L}_][\p{L}\p{Nd}_]*) `).FindStringSubmatch(verdict.Reason + " ")
-	if m == nil || m[1] != m[2] {
+	culpritSubj, ok := gofresh.CulpritFromReason(verdict.Reason)
+	if !ok {
 		t.Fatalf("no culprit parsed from %q", verdict.Reason)
 	}
-	culprit := m[1] + "." + m[3]
-	culpritEntry := m[1] + ":" + m[3] // the IMPORT-PATH:VARIABLE spelling
+	culprit := culpritSubj.Package + "." + culpritSubj.Symbol
+	culpritEntry := culpritSubj.Package + ":" + culpritSubj.Symbol // the IMPORT-PATH:VARIABLE spelling
 
 	fp := capture(culprit)
 	if fp.DynamicStateVouches != culprit {

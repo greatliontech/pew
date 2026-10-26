@@ -18,6 +18,7 @@ func TestNoncallAndMutableLocalMovementStalesStoredMeasurement(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads source-movement fixture modules")
 	}
+	t.Parallel()
 	for _, tc := range []struct {
 		name, source, path, replacement string
 		extra                           map[string]string
@@ -28,6 +29,7 @@ func TestNoncallAndMutableLocalMovementStalesStoredMeasurement(t *testing.T) {
 		{"replace", "package movement\nimport \"example.com/dep\"\nfunc Value() int { return dep.Value() }\n", "dep/value.go", "package dep\nfunc Value() int { return 2 }\n", map[string]string{"dep/go.mod": "module example.com/dep\n\ngo 1.26\n", "dep/value.go": "package dep\nfunc Value() int { return 1 }\n"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			root := t.TempDir()
 			mod := "module example.com/movement\n\ngo 1.26\n"
 			if tc.name == "replace" {

@@ -76,6 +76,19 @@ func (r *comparisonProfileObject) ReadObject(hash string, size int64) ([]byte, e
 	return b, err
 }
 
+func unavailableProfileStatus(pkg, benchmark, kind, reason string) profileStatus {
+	return profileStatus{
+		Package:   pkg,
+		Benchmark: benchmark,
+		Kind:      kind,
+		Integrity: "unavailable",
+		Freshness: "unavailable",
+		Relation:  "unverified",
+		Outcome:   "unavailable",
+		Reason:    reason,
+	}
+}
+
 func compareStatProfiles(ctx context.Context, m *statModule, key statKey, bl baseline, kinds []string, resolved statSubjects, analysis *statAnalysis) []profileComparison {
 	if len(kinds) == 0 {
 		return nil
@@ -89,7 +102,7 @@ func compareStatProfiles(ctx context.Context, m *statModule, key statKey, bl bas
 		var blobs [2][]byte
 		for i, ref := range []string{bl.baseRef, bl.newRef} {
 			pkg := []string{resolved.base.Package, resolved.newer.Package}[i]
-			status := profileStatus{Package: pkg, Benchmark: key.bench, Kind: kind, Integrity: "unavailable", Freshness: "unavailable", Relation: "unverified", Outcome: "unavailable", Reason: "requested capture absent"}
+			status := unavailableProfileStatus(pkg, key.bench, kind, "requested capture absent")
 			adm := m.admission(ref, key)
 			if !adm.ok {
 				status.Reason = "measurement unavailable or not admitted: " + adm.class

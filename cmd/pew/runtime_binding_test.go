@@ -21,6 +21,7 @@ func TestRuntimeBindingsPreserveBuildAndProcessProvenance(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds and executes a retained artifact under distinct runtime bindings")
 	}
+	t.Parallel()
 	root := t.TempDir()
 	root, err := filepath.EvalSymlinks(root)
 	if err != nil {

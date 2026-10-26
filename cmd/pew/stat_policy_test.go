@@ -417,7 +417,7 @@ func TestStatFreshnessPolicyUsesSharedValidAndStaleJudgments(t *testing.T) {
 	}
 	dir := twoArmFixture(t)
 	withWorkingDir(t, dir)
-	source := "package arms\nimport \"testing\"\n//gofresh:pure\nfunc BenchmarkFirst(b *testing.B) {}\n//gofresh:pure\nfunc BenchmarkSecond(b *testing.B) {}\n"
+	source := "package arms\nimport \"testing\"\nfunc BenchmarkFirst(b *testing.B) {}\nfunc BenchmarkSecond(b *testing.B) {}\n"
 	writeFile(t, filepath.Join(dir, "bench_test.go"), source)
 	repo, err := gogit.PlainOpen(dir)
 	if err != nil {

@@ -19,6 +19,7 @@ func TestSideGuardsCaptureTheModulesIdentity(t *testing.T) {
 	if testing.Short() {
 		t.Skip("spawns the toolchain over a fixture module")
 	}
+	t.Parallel()
 	dir := abFixtureRepo(t)
 	resolved, err := filepath.EvalSymlinks(dir)
 	if err != nil {

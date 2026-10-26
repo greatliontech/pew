@@ -16,6 +16,7 @@ func TestNewEngineHonorsDirectives(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
+	t.Parallel()
 	const pkg = "github.com/greatliontech/pew/internal/fixtures/purebench"
 	const bench = "BenchmarkPureRead"
 	e, _, err := newEngineAt(context.Background(), ".", ".", false, testEnvironment(t, os.Environ()))

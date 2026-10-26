@@ -20,8 +20,10 @@ func TestLanguageShapeCanaries(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads a temp module per shape-corpus entry (the full tier and the rc leg run it)")
 	}
+	t.Parallel()
 	for _, entry := range shapecorpus.Entries() {
 		t.Run(entry.Name, func(t *testing.T) {
+			t.Parallel()
 			dir := t.TempDir()
 			for file, content := range entry.BenchFiles() {
 				if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o644); err != nil {

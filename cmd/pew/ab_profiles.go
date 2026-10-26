@@ -91,7 +91,7 @@ func captureABProfiles(ctx context.Context, w, errw io.Writer, ac abConfig, prep
 				var captures [2]*profiles.Capture
 				var blobs [2][]byte
 				for i, side := range prep.diagnostics {
-					status := profileStatus{Kind: kind, Integrity: "unavailable", Freshness: "unavailable", Relation: "unverified", Outcome: "unavailable", Reason: "diagnostic not completed"}
+					status := unavailableProfileStatus("", "", kind, "diagnostic not completed")
 					var rows []*benchfmt.Result
 					for _, row := range prep.rows[i] {
 						if run.BenchName(string(row.Name)) == name {
@@ -108,67 +108,11 @@ func captureABProfiles(ctx context.Context, w, errw io.Writer, ac abConfig, prep
 					}
 					if err == nil && len(rows) != 0 {
 						err = captureDiagnostic(ctx, errw, rc, gc, side.prep, envs, conditions, side.view, name, kind, ac.profileBenchtime, selection, rows, nil, objects, func(gate context.Context, c profiles.Capture, blob []byte) error {
-							// The ordinary comparison domain permits different source
-							// coordinates. Bind it to this producing side through the
-							// same native closing check; never rewrite native evidence.
-							p := side.prep.pkg
-							ordinary, err := ac.sideGuards(gate, p.Module.Dir, p.Dir, p.Name == "main", envs.analysis)
+							verified, err := verifyABDiagnosticCapture(gate, ac, prep, i, side, envs, rows, objects, kind, c, blob)
 							if err != nil {
 								return err
 							}
-							expected := prep.guardsA
-							if i == 1 {
-								expected = prep.guardsB
-							}
-							if ordinary != expected {
-								return fmt.Errorf("ab: diagnostic comparison guards changed since its timed build")
-							}
-							if err := validateProfileSnapshot(gate, side.view, gofresh.Subject{Package: c.Package, Symbol: c.Benchmark}); err != nil {
-								return err
-							}
-							facts, err := side.view.CurrentFacts(gate, gofresh.Subject{Package: c.Package, Symbol: c.Benchmark})
-							if err != nil {
-								return err
-							}
-							if c.Fingerprint.Guards != facts.Guards {
-								return fmt.Errorf("ab: diagnostic guards differ from its timed build facts")
-							}
-							if len(c.Children) == 0 {
-								return fmt.Errorf("ab: diagnostic has no children")
-							}
-							children := map[string]bool{}
-							for _, r := range rows {
-								children[string(r.Name)] = true
-							}
-							if len(children) != len(c.Children) {
-								return fmt.Errorf("ab: diagnostic child selection differs")
-							}
-							for _, ch := range c.Children {
-								if !children[ch.Name] {
-									return fmt.Errorf("ab: diagnostic child selection differs")
-								}
-							}
-							if ac.out != "" {
-								if ac.artifact.ownership != nil {
-									if err := ac.artifact.ownership.validate(); err != nil {
-										return err
-									}
-								}
-								// The shared confined store owns object mapping and immutable install.
-								if _, err := objects.PutObject(gate, blob); err != nil {
-									return err
-								}
-								sideName := []string{"A", "B"}[i]
-								if err := ac.artifact.publishBlocks(gate, abBlock{pkg: c.Package, ref: ac.ref, side: sideName, profile: &c}); err != nil {
-									return err
-								}
-							}
-							metrics, err := profiles.Analyze(blob, kind, c.Sources)
-							if err != nil {
-								return err
-							}
-							empty := profiles.Empty(metrics)
-							status = profileStatus{Package: c.Package, Benchmark: c.Benchmark, Kind: kind, Integrity: "verified", Freshness: "unverifiable", Relation: "unverified", Outcome: "identity-only", Reason: profiles.UnsupportedReason, Empty: &empty, Metrics: metrics}
+							status = verified
 							captures[i] = &c
 							blobs[i] = blob
 							return nil
@@ -210,4 +154,79 @@ func captureABProfiles(ctx context.Context, w, errw io.Writer, ac abConfig, prep
 		return &profileUnfulfilledError{}
 	}
 	return nil
+}
+
+func verifyABDiagnosticCapture(gate context.Context, ac abConfig, prep *abPreparation, sideIndex int, side *abProfileSide, envs environments, rows []*benchfmt.Result, objects *store.Store, kind string, c profiles.Capture, blob []byte) (profileStatus, error) {
+	// The ordinary comparison domain permits different source
+	// coordinates. Bind it to this producing side through the
+	// same native closing check; never rewrite native evidence.
+	p := side.prep.pkg
+	ordinary, err := ac.sideGuards(gate, p.Module.Dir, p.Dir, p.Name == "main", envs.analysis)
+	if err != nil {
+		return profileStatus{}, err
+	}
+	expected := prep.guardsA
+	if sideIndex == 1 {
+		expected = prep.guardsB
+	}
+	if ordinary != expected {
+		return profileStatus{}, fmt.Errorf("ab: diagnostic comparison guards changed since its timed build")
+	}
+	if err := validateProfileSnapshot(gate, side.view, gofresh.Subject{Package: c.Package, Symbol: c.Benchmark}); err != nil {
+		return profileStatus{}, err
+	}
+	facts, err := side.view.CurrentFacts(gate, gofresh.Subject{Package: c.Package, Symbol: c.Benchmark})
+	if err != nil {
+		return profileStatus{}, err
+	}
+	if c.Fingerprint.Guards != facts.Guards {
+		return profileStatus{}, fmt.Errorf("ab: diagnostic guards differ from its timed build facts")
+	}
+	if len(c.Children) == 0 {
+		return profileStatus{}, fmt.Errorf("ab: diagnostic has no children")
+	}
+	children := map[string]bool{}
+	for _, r := range rows {
+		children[string(r.Name)] = true
+	}
+	if len(children) != len(c.Children) {
+		return profileStatus{}, fmt.Errorf("ab: diagnostic child selection differs")
+	}
+	for _, ch := range c.Children {
+		if !children[ch.Name] {
+			return profileStatus{}, fmt.Errorf("ab: diagnostic child selection differs")
+		}
+	}
+	if ac.out != "" {
+		if ac.artifact.ownership != nil {
+			if err := ac.artifact.ownership.validate(); err != nil {
+				return profileStatus{}, err
+			}
+		}
+		// The shared confined store owns object mapping and immutable install.
+		if _, err := objects.PutObject(gate, blob); err != nil {
+			return profileStatus{}, err
+		}
+		sideName := []string{"A", "B"}[sideIndex]
+		if err := ac.artifact.publishBlocks(gate, abBlock{pkg: c.Package, ref: ac.ref, side: sideName, profile: &c}); err != nil {
+			return profileStatus{}, err
+		}
+	}
+	metrics, err := profiles.Analyze(blob, kind, c.Sources)
+	if err != nil {
+		return profileStatus{}, err
+	}
+	empty := profiles.Empty(metrics)
+	return profileStatus{
+		Package:   c.Package,
+		Benchmark: c.Benchmark,
+		Kind:      kind,
+		Integrity: "verified",
+		Freshness: "unverifiable",
+		Relation:  "unverified",
+		Outcome:   "identity-only",
+		Reason:    profiles.UnsupportedReason,
+		Empty:     &empty,
+		Metrics:   metrics,
+	}, nil
 }
