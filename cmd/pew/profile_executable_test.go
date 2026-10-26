@@ -70,11 +70,11 @@ func TestProfileExecutableSurvivesCaptureAndRemainsGuarded(t *testing.T) {
 	if row.Verdict != "valid" || len(row.Profiles) != 1 || row.Profiles[0].Freshness == "stale" {
 		t.Fatalf("unchanged fixed producer/checker: %+v", row)
 	}
-	// An unobserved benchmark variable still belongs to the compiler's complete
-	// environment. Identical executable identities alone do not make two command
-	// environments compatible, even when a benchmark does not read the variable.
+	// An unobserved build-determining variable still belongs to the compiler's
+	// build environment. Identical executable identities alone do not make two
+	// compilation environments compatible, even when a benchmark does not read the variable.
 	t.Run("changed-build-environment", func(t *testing.T) {
-		t.Setenv("PEW_BUILD_ENVIRONMENT_PROBE", "different compiler input")
+		t.Setenv("CGO_CFLAGS", "-DPEW_BUILD_ENVIRONMENT_PROBE=different_compiler_input")
 		row := status()
 		if row.Verdict != "stale" || row.Reason != "buildconfig" || len(row.Profiles) != 1 || row.Profiles[0].Freshness != "stale" || !strings.Contains(row.Profiles[0].Reason, "buildconfig") {
 			t.Fatalf("different build environment unguarded: %+v", row)
@@ -87,7 +87,7 @@ func TestProfileExecutableSurvivesCaptureAndRemainsGuarded(t *testing.T) {
 		if !strings.Contains(text, "buildconfig: build description differed between capture and check (compilation environment and build inputs; values are not disclosed)") || !strings.Contains(text, "recorded observation:") || !strings.Contains(text, "outcome=identity-only") {
 			t.Fatalf("status --explain missing buildconfig/observation/profile attribution:\n%s", text)
 		}
-		if strings.Contains(text, "different compiler input") {
+		if strings.Contains(text, "different_compiler_input") {
 			t.Fatalf("status --explain disclosed environment value:\n%s", text)
 		}
 	})

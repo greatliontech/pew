@@ -166,6 +166,15 @@ func runProfiles(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitSt
 	if err := profiles.ValidateBudget(budget); err != nil {
 		return err
 	}
+	if prep != nil {
+		defer func() {
+			if prep.ownedArtifact != "" {
+				_ = os.Remove(prep.ownedArtifact)
+				prep.ownedArtifact = ""
+				prep.artifact = nil
+			}
+		}()
+	}
 	var failures []error
 	stopped := func(cause error) error {
 		return errors.Join(interrupted("interrupted during profiles; published measurements and diagnostic captures kept"), errors.Join(failures...), cause)
@@ -296,37 +305,35 @@ func captureDiagnostic(ctx context.Context, errw io.Writer, rc runConfig, gc *gi
 		return err
 	}
 	defer os.RemoveAll(dir)
-	bin, output, testlog := filepath.Join(dir, "testbin.exe"), filepath.Join(dir, "capture.pprof"), filepath.Join(dir, "testlog")
-	description, err := parent.Snapshot().BuildDescription(p.ImportPath)
+	output, testlog := filepath.Join(dir, "capture.pprof"), filepath.Join(dir, "testlog")
+	if prep.artifact == nil {
+		var warmupPath string
+		prep.artifact, warmupPath, err = compilePackageArtifact(ctx, rc, parent.Snapshot(), p.ImportPath)
+		if err != nil {
+			return err
+		}
+		prep.ownedArtifact = warmupPath
+	}
+	binary, err := readProfileFile(prep.artifact.path)
 	if err != nil {
 		return err
 	}
-	buildEnv, err := gotool.NewEnvironment(description.Environment)
-	if err != nil {
-		return err
+	if profiles.Digest(binary) != prep.artifact.digest {
+		return fmt.Errorf("retained test executable changed after its admitted build")
 	}
-	buildArgs := append([]string{"test", "-c", "-o", bin}, description.Flags...)
-	buildArgs = append(buildArgs, description.Package)
-	if _, err := rc.executeGo(ctx, description.Directory, "", buildEnv, buildArgs); err != nil {
-		return err
-	}
-	binary, err := readProfileFile(bin)
-	if err != nil {
-		return err
-	}
+	bin := filepath.Join(dir, "testbin.exe")
 	if objects != nil {
 		bin, err = objects.PutExecutable(ctx, binary)
 		if err != nil {
 			return err
 		}
+	} else if err := os.WriteFile(bin, binary, 0o700); err != nil {
+		return err
 	}
 	if err := validateProfileSnapshot(ctx, parent, subject); err != nil {
 		return err
 	}
-	built, err := parent.Snapshot().BindBuilt(p.ImportPath, profiles.Digest(binary))
-	if err != nil {
-		return err
-	}
+	built := prep.artifact.binding
 	ledger, err := parent.Snapshot().TestVariantLedger(subject)
 	if err != nil {
 		return err

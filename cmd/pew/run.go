@@ -450,6 +450,7 @@ type packagePreparation struct {
 	engine              *analysisSession
 	pgoInput            string
 	artifact            *builtBinary
+	ownedArtifact       string
 	harnessArgs         []string
 }
 
@@ -629,31 +630,16 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 	// covers the measurement, not the build (spec §9). One build serves every
 	// per-benchmark invocation; that exact artifact is retained until every arm
 	// using the snapshot has finished.
-	warmup, err := os.CreateTemp("", "pew-testbin-*")
-	if err != nil {
-		return err
-	}
-	warmupPath := warmup.Name()
-	_ = warmup.Close()
-	defer os.Remove(warmupPath)
 	reportPhase(ctx, "building "+p.ImportPath)
-	build, err := view.Snapshot().BuildDescription(p.ImportPath)
+	var warmupPath string
+	prep.artifact, warmupPath, err = compilePackageArtifact(ctx, rc, view.Snapshot(), p.ImportPath)
 	if err != nil {
 		return err
 	}
-	buildEnv, err := gotool.NewEnvironment(build.Environment)
-	if err != nil {
-		return err
-	}
-	buildArgs := append([]string{"test", "-c", "-o", warmupPath}, build.Flags...)
-	buildArgs = append(buildArgs, build.Package)
-	if _, err := rc.executeGo(ctx, build.Directory, "", buildEnv, buildArgs); err != nil {
-		return err
-	}
-	prep.artifact, err = bindBinary(ctx, view.Snapshot(), p.ImportPath, warmupPath)
-	if err != nil {
-		return err
-	}
+	defer func() {
+		_ = os.Remove(warmupPath)
+		prep.artifact = nil
+	}()
 	// The target platform is a per-package truth: it comes from the same
 	// toolchain and environment every per-benchmark invocation runs
 	// under.

@@ -900,10 +900,10 @@ A verdict of exactly stale `test variants` certifies the benchmark's own source 
 unchanged and nothing more — Gofresh orders the compartment comparison after the core and
 before the environment tiers, so a moved guard or runtime input can hide behind that reason
 (pew fingerprints never carry a refinement). The rule therefore completes the proof itself:
-the recording's `pew-test-variant-ledger` must diff **inert** against the current view's
-ledger per Gofresh's classifier — the only movement is added declarations no unchanged
-declaration can observe (a plain function that is not `TestMain`, a const, or a type; anything
-changed, removed, or initialization-bearing refuses) — and the shared explicit
+the recording's `pew-test-variant-ledger` must diff **inert** for the subject against the current view's
+ledger per Gofresh's classifier — no declaration in the subject's reachable reference cone (including
+`init`, `var`, `directive`, `TestMain`, and base-referenced declarations) changed or was removed, and any added
+declaration is an unobservable plain function, const, or type — and the shared explicit
 applicability-extension check licenses the current endpoint without modifying the
 producing fingerprint. Its verdict replaces the original one, so every
 remaining pin is enforced exactly as an ordinary verdict. Any fault refuses and the ordinary stale verdict stands (the safe direction:

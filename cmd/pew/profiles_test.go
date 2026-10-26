@@ -114,6 +114,7 @@ func BenchmarkFirst(b *testing.B) {
 	if _, present, err := profiles.FromRows(before); err != nil || present {
 		t.Fatal("unrequested diagnostics present")
 	}
+	builds := 0
 	rc.profile, rc.profileBenchtime = "cpu,alloc", "500ms"
 	rc.execute = func(dir, pin string, env, args []string) ([]byte, error) {
 		build := false
@@ -125,6 +126,7 @@ func BenchmarkFirst(b *testing.B) {
 		if !build {
 			t.Fatalf("served measurement reran: %v", args)
 		}
+		builds++
 		e, err := gotool.NewEnvironment(env)
 		if err != nil {
 			return nil, err
@@ -135,6 +137,9 @@ func BenchmarkFirst(b *testing.B) {
 	stderr.Reset()
 	if err := runRun(t.Context(), &stdout, &stderr, rc, []string{"."}); err != nil {
 		t.Fatalf("profiles: %v\n%s\n%s", err, &stdout, &stderr)
+	}
+	if builds != 1 {
+		t.Fatalf("profile capture compiled %d test binaries across cpu,alloc; want 1", builds)
 	}
 	after, err := st.Read("", "BenchmarkFirst", "")
 	if err != nil {

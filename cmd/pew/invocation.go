@@ -16,6 +16,19 @@ type invocation struct {
 	vouches     *vouchSource
 	diagnostics func(gofresh.Progress)
 	errw        io.Writer
+	sessions    map[sessionKey]*sessionEntry
+}
+
+type sessionEntry struct {
+	session  *gofresh.Session
+	seenDirs map[string]bool
+}
+
+type sessionKey struct {
+	moduleDir string
+	env       string
+	pgo       string
+	vouches   string
 }
 
 type invocationKey struct{}

@@ -313,7 +313,7 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 	}
 	commitAll(t, raw, "recorded baseline")
 	t.Run("unrelated-build-drift", func(t *testing.T) {
-		t.Setenv("PEW_BUILD_PROBE", "changed")
+		t.Setenv("PKG_CONFIG_PATH", "changed")
 		status.Reset()
 		if err := runStatus(t.Context(), &status, benchDir, "", false, true, false, []string{"./getwd"}); err != nil {
 			t.Fatal(err)

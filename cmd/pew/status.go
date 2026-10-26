@@ -193,13 +193,40 @@ func buildEngine(ctx context.Context, moduleDir, pkgDir string, env gotool.Envir
 	if err != nil {
 		return nil, err
 	}
-	runner := gotool.Runner(dependencies(ctx).prepare)
-	session, err := gofresh.NewSession(ctx,
-		gofresh.BuildDescription{Directory: moduleDir, Environment: env.Values(), Inputs: inputs},
-		gofresh.SessionPolicy{Vouches: vouches, Execution: gofresh.SingleSubjectExecution,
-			Runner: runner, Progress: func(p gofresh.Progress) { emitEngineDiagnostic(ctx, p) }})
-	if err != nil {
-		return nil, err
+	var session *gofresh.Session
+	inv, _ := ctx.Value(invocationKey{}).(*invocation)
+	var key sessionKey
+	canonPkgDir := gotool.CommandDir(pkgDir)
+	if inv != nil {
+		key = sessionKey{
+			moduleDir: gotool.CommandDir(moduleDir),
+			env:       strings.Join(env.Values(), "\x00"),
+			pgo:       pgo,
+			vouches:   strings.Join(vouches, "\x00"),
+		}
+		if entry := inv.sessions[key]; entry != nil && !entry.seenDirs[canonPkgDir] {
+			entry.seenDirs[canonPkgDir] = true
+			session = entry.session
+		}
+	}
+	if session == nil {
+		runner := gotool.Runner(dependencies(ctx).prepare)
+		session, err = gofresh.NewSession(ctx,
+			gofresh.BuildDescription{Directory: moduleDir, Environment: env.Values(), Inputs: inputs},
+			gofresh.SessionPolicy{Vouches: vouches, Execution: gofresh.SingleSubjectExecution,
+				Runner: runner, Progress: func(p gofresh.Progress) { emitEngineDiagnostic(ctx, p) }})
+		if err != nil {
+			return nil, err
+		}
+		if inv != nil {
+			if inv.sessions == nil {
+				inv.sessions = map[sessionKey]*sessionEntry{}
+			}
+			inv.sessions[key] = &sessionEntry{
+				session:  session,
+				seenDirs: map[string]bool{canonPkgDir: true},
+			}
+		}
 	}
 	return &analysisSession{build: session, runtime: gofresh.RuntimeDescription{Directory: pkgDir, Environment: runtimeEnv}}, nil
 }

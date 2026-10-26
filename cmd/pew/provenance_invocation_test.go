@@ -145,3 +145,42 @@ func TestJudgedVerbsShareSamplesOnlyWithinInvocation(t *testing.T) {
 		})
 	}
 }
+
+func TestInvocationSharesModuleSessionAcrossPackages(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/shared-session\n\ngo 1.26.4\n")
+	pkgA := filepath.Join(dir, "a")
+	pkgB := filepath.Join(dir, "b")
+	if err := os.MkdirAll(pkgA, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(pkgB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, _, err := beginInvocation(t.Context(), "", nil, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := testEnvironment(t, nil)
+	eA, err := buildEngine(ctx, dir, pkgA, env, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eB, err := buildEngine(ctx, dir, pkgB, env, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eA.build != eB.build {
+		t.Fatal("packages in the same module with identical build inputs did not share *gofresh.Session")
+	}
+	if eA.runtime.Directory != pkgA || eB.runtime.Directory != pkgB {
+		t.Fatalf("runtime directories = (%q, %q), want (%q, %q)", eA.runtime.Directory, eB.runtime.Directory, pkgA, pkgB)
+	}
+	ePGO, err := buildEngine(ctx, dir, pkgA, env, nil, "pgo:deadbeef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ePGO.build == eA.build {
+		t.Fatal("distinct PGO build input reused *gofresh.Session")
+	}
+}

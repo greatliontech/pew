@@ -432,7 +432,7 @@ func TestStatFreshnessPolicyUsesSharedValidAndStaleJudgments(t *testing.T) {
 	commitAll(t, repo, "recordings")
 	for _, state := range []string{"valid", "stale"} {
 		if state == "stale" {
-			writeFile(t, filepath.Join(dir, "bench_test.go"), strings.Replace(source, "BenchmarkFirst(b *testing.B) {}", "BenchmarkFirst(b *testing.B) { b.SetBytes(2) }", 1))
+			writeFile(t, filepath.Join(dir, "bench_test.go"), strings.ReplaceAll(source, "(b *testing.B) {}", "(b *testing.B) { b.SetBytes(2) }"))
 		}
 		for _, policy := range []string{"", "report", "require"} {
 			cmd := newRootCmd()

@@ -454,8 +454,7 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 			return prep, err
 		}
 		output := binaries[i]
-		buildArgs[i] = append([]string{"test", "-c", "-o", output}, description.Flags...)
-		buildArgs[i] = append(buildArgs[i], description.Package)
+		buildArgs[i] = description.TestCompileArgs(output)
 	}
 	if err := ac.buildBinary(ctx, p.Module.Dir, buildEnvs[0], buildArgs[0]); err != nil {
 		return prep, fmt.Errorf("ab: building side A (working tree): %w", err)
@@ -467,6 +466,13 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 		prep.executables[i], err = retainExecutable(ctx, path)
 		if err != nil {
 			return prep, err
+		}
+		if side := prep.diagnostics[i]; side != nil {
+			binding, err := side.view.Snapshot().BindBuilt(side.prep.pkg.ImportPath, prep.executables[i].digest)
+			if err != nil {
+				return prep, err
+			}
+			side.prep.artifact = &builtBinary{retainedExecutable: prep.executables[i], binding: binding}
 		}
 	}
 	// Guards are captured at build time, not after measurement: the stamp

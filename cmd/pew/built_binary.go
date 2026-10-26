@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/greatliontech/gofresh"
+	"github.com/greatliontech/pew/internal/gotool"
 )
 
 // builtBinary binds the caller-owned artifact bytes to the snapshot which
@@ -21,6 +22,35 @@ type builtBinary struct {
 
 type retainedExecutable struct {
 	path, digest string
+}
+
+func compilePackageArtifact(ctx context.Context, rc runConfig, snapshot *gofresh.Snapshot, pkg string) (*builtBinary, string, error) {
+	warmup, err := os.CreateTemp("", "pew-testbin-*")
+	if err != nil {
+		return nil, "", err
+	}
+	warmupPath := warmup.Name()
+	_ = warmup.Close()
+	build, err := snapshot.BuildDescription(pkg)
+	if err != nil {
+		_ = os.Remove(warmupPath)
+		return nil, "", err
+	}
+	buildEnv, err := gotool.NewEnvironment(build.Environment)
+	if err != nil {
+		_ = os.Remove(warmupPath)
+		return nil, "", err
+	}
+	if _, err := rc.executeGo(ctx, build.Directory, "", buildEnv, build.TestCompileArgs(warmupPath)); err != nil {
+		_ = os.Remove(warmupPath)
+		return nil, "", err
+	}
+	artifact, err := bindBinary(ctx, snapshot, pkg, warmupPath)
+	if err != nil {
+		_ = os.Remove(warmupPath)
+		return nil, "", err
+	}
+	return artifact, warmupPath, nil
 }
 
 func bindBinary(ctx context.Context, snapshot *gofresh.Snapshot, pkg, path string) (*builtBinary, error) {
