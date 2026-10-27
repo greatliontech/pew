@@ -45,9 +45,10 @@ type abConfig struct {
 	strict      bool
 	out         string
 	throttle    func() run.ThrottleSnapshot
-	execute     func(dir, pin string, env []string, bin string, args []string) ([]byte, error)
-	build       func(dir string, env []string, args []string) error
-	guards      func(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error)
+	execute         func(dir, pin string, env []string, bin string, args []string) ([]byte, error)
+	build           func(dir string, env []string, args []string) error
+	guards          func(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error)
+	harnessByModule map[string][]string
 }
 
 // sideGuards captures one side's comparison-guard values in that side's own
@@ -298,6 +299,7 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 	// 2 × count iterations, and a guard mismatch never reaches a first
 	// iteration.
 	var preps []*abPreparation
+	ac.harnessByModule = make(map[string][]string)
 	for i, p := range pkgs {
 		preparing := func() error {
 			return interrupted("ab: interrupted while preparing %s (package %d/%d); nothing compared", p.ImportPath, i+1, len(pkgs))
@@ -382,9 +384,16 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 	}
 	prep := &abPreparation{pkg: p, reference: b, selected: selected}
 	for i, moduleDir := range []string{p.Module.Dir, sideBModule} {
+		if cached, ok := ac.harnessByModule[moduleDir]; ok {
+			prep.harnessArgs[i] = cached
+			continue
+		}
 		prep.harnessArgs[i], err = prepareHarnessArgs(ctx, moduleDir, env)
 		if err != nil {
 			return prep, err
+		}
+		if ac.harnessByModule != nil {
+			ac.harnessByModule[moduleDir] = prep.harnessArgs[i]
 		}
 	}
 	// Both sides build BEFORE either side measures: two standing

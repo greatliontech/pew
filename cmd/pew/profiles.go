@@ -449,7 +449,7 @@ func captureDiagnostic(ctx context.Context, errw io.Writer, rc runConfig, gc *gi
 	if pgo != prep.pgoInput {
 		return fmt.Errorf("profile: PGO build input changed")
 	}
-	dirty, err := sourceInputsDirty(p.Module.Dir, start.Commit, parent.Snapshot().SourceFiles())
+	dirty, err := gc.sourceInputsDirty(p.Module.Dir, start.Commit, parent.Snapshot().SourceFiles())
 	if err != nil {
 		return err
 	}

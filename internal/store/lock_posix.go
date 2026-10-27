@@ -51,6 +51,10 @@ func (s *Store) lock(ctx context.Context) (func(), error) {
 				close()
 				return nil, err
 			}
+			if err := s.ensureStoreIgnore(); err != nil {
+				close()
+				return nil, err
+			}
 			return close, nil
 		}
 		if !errors.Is(err, unix.EACCES) && !errors.Is(err, unix.EAGAIN) && !errors.Is(err, unix.EINTR) {

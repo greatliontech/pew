@@ -573,9 +573,17 @@ func judgeRecordings(ctx context.Context, buildView func([]gofresh.Subject) (*go
 		return out, nil
 	}
 	subjects := make([]gofresh.Subject, 0, len(checks))
-	for _, c := range checks {
+	candidates := make([]gofresh.Candidate, 0, len(checks))
+	ledgers := make(map[int]gofresh.TestVariantLedger, len(checks))
+	for i, c := range checks {
 		s := gofresh.Subject{Package: pkgPath, Symbol: c.bench}
 		subjects = append(subjects, s)
+		candidates = append(candidates, gofresh.Candidate{Subject: s, Recorded: c.fp})
+		if c.ledger != "" {
+			if recorded, err := runpkg.DecodeLedger(c.ledger); err == nil {
+				ledgers[i] = recorded.ToGofresh()
+			}
+		}
 	}
 	// The caller's view when it has one (the run's, over every selected
 	// benchmark — the recorded ones are a subset). A view's subject set
@@ -590,57 +598,35 @@ func judgeRecordings(ctx context.Context, buildView func([]gofresh.Subject) (*go
 		}
 		view = built
 	}
-	for _, c := range checks {
+	batchVerdicts, err := view.CheckBatchWithLedgers(ctx, candidates, ledgers)
+	if err != nil {
+		return unjudged(err)
+	}
+	for i, c := range checks {
 		subject := gofresh.Subject{Package: pkgPath, Symbol: c.bench}
 		bv := out[c.bench]
 		bv.view = view
 		bv.fp = c.fp
-		v, err := view.Check(ctx, subject, c.fp)
-		if err != nil {
-			return unjudged(err)
-		}
-		pendingLedger := ""
-		var refreshedFP gofresh.Fingerprint
-		if v.Status == gofresh.Stale && v.Reason == gofresh.ReasonTestVariants {
-			if refreshed, encoded, rv, ok := inertGrownRecheckOn(ctx, view, subject, c.ledger, c.fp); ok {
-				v, refreshedFP, pendingLedger = rv, refreshed, encoded
+		res := batchVerdicts[i]
+		v := res.Verdict
+		if v.Status == gofresh.Valid && res.Extension != nil {
+			encoded, err := runpkg.EncodeLedger(runpkg.LedgerFromGofresh(res.Extension.Ledger))
+			if err != nil {
+				v = gofresh.Verdict{Status: gofresh.Stale, Reason: gofresh.ReasonTestVariants}
+			} else {
+				bv.grownLedger = encoded
+				bv.fp = res.Extension.Fingerprint
 			}
 		}
-		if v.Status == gofresh.Valid && pendingLedger != "" {
-			bv.grownLedger = pendingLedger
-			bv.fp = refreshedFP
-		}
 		bv.v, bv.reason = verdict(v.Status), v.Reason
-		bv.current, err = view.CurrentFacts(ctx, subject)
-		if err != nil {
-			return unjudged(err)
+		if bv.v != verdictValid {
+			bv.current, err = view.CurrentFacts(ctx, subject)
+			if err != nil {
+				return unjudged(err)
+			}
 		}
 	}
 	return out, nil
-}
-
-// inertGrownRecheckOn asks the shared engine to license applicability from
-// the paired historical ledger. No producing field is rewritten by Pew.
-func inertGrownRecheckOn(ctx context.Context, view *gofresh.RuntimeBinding, subject gofresh.Subject, recordedLedger string, fp gofresh.Fingerprint) (gofresh.Fingerprint, string, gofresh.Verdict, bool) {
-	if recordedLedger == "" {
-		return fp, "", gofresh.Verdict{}, false
-	}
-	recorded, err := runpkg.DecodeLedger(recordedLedger)
-	if err != nil {
-		return fp, "", gofresh.Verdict{}, false
-	}
-	refreshed, current, v, err := view.CheckInertExtension(ctx, subject, fp, recorded.ToGofresh())
-	if err != nil {
-		return fp, "", gofresh.Verdict{}, false
-	}
-	if v.Status != gofresh.Valid {
-		return fp, "", v, true
-	}
-	encoded, err := runpkg.EncodeLedger(runpkg.LedgerFromGofresh(current))
-	if err != nil {
-		return fp, "", gofresh.Verdict{}, false
-	}
-	return refreshed, encoded, v, true
 }
 
 // fingerprintFromConfig reads the native payload after the format rung and

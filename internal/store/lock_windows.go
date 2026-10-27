@@ -40,6 +40,12 @@ func (s *Store) lock(ctx context.Context) (func(), error) {
 		err := windows.LockFileEx(h, windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &overlap)
 		if err == nil {
 			if err := ctx.Err(); err != nil {
+				_ = windows.UnlockFileEx(h, 0, 1, 0, &overlap)
+				windows.CloseHandle(h)
+				return nil, err
+			}
+			if err := s.ensureStoreIgnore(); err != nil {
+				_ = windows.UnlockFileEx(h, 0, 1, 0, &overlap)
 				windows.CloseHandle(h)
 				return nil, err
 			}

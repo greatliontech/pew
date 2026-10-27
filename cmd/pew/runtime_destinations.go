@@ -6,16 +6,26 @@ import (
 )
 
 func rejectRecordingDestinations(sourceFiles, recordingPaths []string) error {
+	type resolvedDest struct {
+		raw   string
+		paths [2]string
+	}
+	dests := make([]resolvedDest, len(recordingPaths))
+	for i, recording := range recordingPaths {
+		dests[i] = resolvedDest{
+			raw:   recording,
+			paths: [2]string{recording, resolveExistingPrefix(recording)},
+		}
+	}
 	for _, input := range sourceFiles {
-		candidates := []string{input, resolveExistingPrefix(input)}
-		for _, recording := range recordingPaths {
-			recordings := []string{recording, resolveExistingPrefix(recording)}
+		candidates := [2]string{input, resolveExistingPrefix(input)}
+		for _, d := range dests {
 			for _, candidate := range candidates {
-				for _, destination := range recordings {
+				for _, destination := range d.paths {
 					if !pathsOverlap(candidate, destination) {
 						continue
 					}
-					return fmt.Errorf("run: recording destination %s overlaps source input %s", recording, input)
+					return fmt.Errorf("run: recording destination %s overlaps source input %s", d.raw, input)
 				}
 			}
 		}

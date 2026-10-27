@@ -23,9 +23,11 @@ import (
 
 // Repo is an opened repository for reading committed blobs.
 type Repo struct {
-	repo *gogit.Repository
-	root string // absolute worktree root, for repo-relative path resolution
-	refs map[string]plumbing.Hash
+	repo        *gogit.Repository
+	root        string // absolute worktree root, for repo-relative path resolution
+	refs        map[string]plumbing.Hash
+	commitTrees map[plumbing.Hash]*object.Tree
+	trees       map[plumbing.Hash]*object.Tree
 }
 
 // SnapshotRefs returns an invocation-owned reader whose named refs resolve to
@@ -34,6 +36,8 @@ type Repo struct {
 func (r *Repo) SnapshotRefs(refs ...string) (*Repo, error) {
 	copy := *r
 	copy.refs = make(map[string]plumbing.Hash, len(refs))
+	copy.commitTrees = make(map[plumbing.Hash]*object.Tree)
+	copy.trees = make(map[plumbing.Hash]*object.Tree)
 	for _, ref := range refs {
 		h, err := r.resolve(ref)
 		if err != nil {
@@ -49,6 +53,45 @@ func (r *Repo) resolve(ref string) (*plumbing.Hash, error) {
 		return &h, nil
 	}
 	return r.repo.ResolveRevision(plumbing.Revision(ref))
+}
+
+func (r *Repo) commitTree(h plumbing.Hash) (*object.Tree, error) {
+	if r.commitTrees != nil {
+		if tree, ok := r.commitTrees[h]; ok {
+			return tree, nil
+		}
+	}
+	commit, err := r.repo.CommitObject(h)
+	if err != nil {
+		return nil, fmt.Errorf("gitblob: commit %s: %w", &h, err)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, fmt.Errorf("gitblob: tree %s: %w", &h, err)
+	}
+	if r.commitTrees != nil {
+		r.commitTrees[h] = tree
+	}
+	if r.trees != nil {
+		r.trees[tree.Hash] = tree
+	}
+	return tree, nil
+}
+
+func (r *Repo) treeObject(h plumbing.Hash) (*object.Tree, error) {
+	if r.trees != nil {
+		if tree, ok := r.trees[h]; ok {
+			return tree, nil
+		}
+	}
+	tree, err := r.repo.TreeObject(h)
+	if err != nil {
+		return nil, err
+	}
+	if r.trees != nil {
+		r.trees[h] = tree
+	}
+	return tree, nil
 }
 
 // Root returns the repository worktree root used for absolute path resolution.
@@ -69,7 +112,12 @@ func Open(dir string) (*Repo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gitblob: worktree: %w", err)
 	}
-	return &Repo{repo: repo, root: wt.Filesystem.Root()}, nil
+	return &Repo{
+		repo:        repo,
+		root:        wt.Filesystem.Root(),
+		commitTrees: make(map[plumbing.Hash]*object.Tree),
+		trees:       make(map[plumbing.Hash]*object.Tree),
+	}, nil
 }
 
 // ReadAt returns the content of the file at absPath as committed at ref. ok is
@@ -86,11 +134,11 @@ func (r *Repo) ReadAt(ref, absPath string) (content []byte, ok bool, err error) 
 	if err != nil {
 		return nil, false, fmt.Errorf("gitblob: resolve ref %q: %w", ref, err)
 	}
-	commit, err := r.repo.CommitObject(*h)
+	tree, err := r.commitTree(*h)
 	if err != nil {
-		return nil, false, fmt.Errorf("gitblob: commit %s: %w", h, err)
+		return nil, false, err
 	}
-	f, err := commit.File(rel)
+	f, err := tree.File(rel)
 	if err != nil {
 		if errors.Is(err, object.ErrFileNotFound) {
 			return nil, false, nil
@@ -118,13 +166,9 @@ func (r *Repo) ListAt(ref, absDir string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gitblob: resolve ref %q: %w", ref, err)
 	}
-	commit, err := r.repo.CommitObject(*h)
+	tree, err := r.commitTree(*h)
 	if err != nil {
-		return nil, fmt.Errorf("gitblob: commit %s: %w", h, err)
-	}
-	tree, err := commit.Tree()
-	if err != nil {
-		return nil, fmt.Errorf("gitblob: tree %s: %w", h, err)
+		return nil, err
 	}
 	prefix := filepath.ToSlash(relDir)
 	if prefix == "." {

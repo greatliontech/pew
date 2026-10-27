@@ -39,6 +39,12 @@ func (s *Store) lock(ctx context.Context) (func(), error) {
 		err = unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB)
 		if err == nil {
 			if err := ctx.Err(); err != nil {
+				_ = unix.Flock(fd, unix.LOCK_UN)
+				f.Close()
+				return nil, err
+			}
+			if err := s.ensureStoreIgnore(); err != nil {
+				_ = unix.Flock(fd, unix.LOCK_UN)
 				f.Close()
 				return nil, err
 			}

@@ -240,6 +240,11 @@ func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []str
 	}
 	// Destination ownership is known from declarations alone. Admit the whole
 	// invocation before resolving expensive per-package build configuration.
+	type cachedHarnessArgs struct {
+		args []string
+		err  error
+	}
+	harnessByModule := make(map[string]cachedHarnessArgs)
 	for i, prep := range prepared {
 		if len(prep.runBenches) == 0 {
 			continue
@@ -248,7 +253,15 @@ func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []str
 			return interrupted("interrupted while preparing %s; nothing measured", prep.pkg.ImportPath)
 		}
 		reportPhase(ctx, fmt.Sprintf("preparing build configuration %s (%d/%d)", prep.pkg.ImportPath, i+1, len(prepared)))
-		harnessArgs, err := prepareHarnessArgs(ctx, prep.pkg.Module.Dir, envs.analysis)
+		cached, ok := harnessByModule[prep.pkg.Module.Dir]
+		if !ok {
+			args, err := prepareHarnessArgs(ctx, prep.pkg.Module.Dir, envs.analysis)
+			cached = cachedHarnessArgs{args: args, err: err}
+			if !cancelledBy(ctx, err) {
+				harnessByModule[prep.pkg.Module.Dir] = cached
+			}
+		}
+		harnessArgs, err := cached.args, cached.err
 		var engine *analysisSession
 		var pgo string
 		if err == nil {
@@ -324,8 +337,15 @@ func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []str
 // exclude recording writes made by earlier packages without changing the
 // provenance recorded for the command.
 type gitStateCache struct {
-	entries map[string]gitStateResult
-	exclude []string
+	entries      map[string]gitStateResult
+	repos        map[[2]string]*gitblob.Repo
+	reproducible map[[3]string]reproducibleResult
+	exclude      []string
+}
+
+type reproducibleResult struct {
+	matches bool
+	err     error
 }
 
 type gitStateResult struct {
@@ -799,7 +819,7 @@ func persistArm(ctx context.Context, w, errw io.Writer, rc runConfig, gc *gitSta
 	dirty := initialDirty
 	if !dirty {
 		var err error
-		dirty, err = sourceInputsDirty(p.Module.Dir, commit, snapshot.SourceFiles())
+		dirty, err = gc.sourceInputsDirty(p.Module.Dir, commit, snapshot.SourceFiles())
 		if err != nil {
 			return err
 		}

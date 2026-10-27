@@ -32,6 +32,10 @@ func (s *Store) lock(ctx context.Context) (func(), error) {
 				f.Close()
 				return nil, fmt.Errorf("store: lock lacks exclusive-open mode: %v", err)
 			}
+			if err := s.ensureStoreIgnore(); err != nil {
+				f.Close()
+				return nil, err
+			}
 			return func() { _ = f.Close() }, nil
 		}
 		if !strings.Contains(err.Error(), "exclusive") && !strings.Contains(err.Error(), "in use") {

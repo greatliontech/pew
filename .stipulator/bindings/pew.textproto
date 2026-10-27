@@ -1322,16 +1322,6 @@ bindings {
 }
 
 bindings {
-  requirement_id: "REQ-pew-validity-verdict"
-  content_hash: "43790486e4b9e8c96f9506428acc922f88363f2e36e4fe217da4e4b7c56e66a8"
-  source_hash: "5e6ab71a8d316453013d646f73ffea1e1af03bc3412ef5185dbc3e1e41068e9e"
-  backend: "go"
-  symbol: "github.com/greatliontech/pew/cmd/pew.inertGrownRecheckOn"
-  role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "8c1ce42e50be09dfffc04ea5c5561256d66e9c9855ffd0470c67e472254234fb"
-}
-
-bindings {
   requirement_id: "REQ-pew-closure-soundness"
   content_hash: "6df308b31bed02dc43a87c6126ba77585a9574d1a967d019f9c3bbe91ac11438"
   source_hash: "3677924f3981ae127b90e4238f796bfa9d519a4bd3e51f6abf349575d58b4168"

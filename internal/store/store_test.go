@@ -844,3 +844,49 @@ func TestWriteRefusesAnUnboundedRowAndAWhitespaceEdgedPart(t *testing.T) {
 		t.Fatalf("foreign oversized file: err = %v, want the plain read error", err)
 	}
 }
+
+func TestWriteEnsuresStoreIgnore(t *testing.T) {
+	s := New(t.TempDir())
+	if err := s.Write("p", "BenchmarkRun", "", parse(t, sample)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	ignorePath := filepath.Join(s.Root, ".gitignore")
+	got, err := os.ReadFile(ignorePath)
+	if err != nil {
+		t.Fatalf("ReadFile(.gitignore): %v", err)
+	}
+	if string(got) != storeIgnoreContent {
+		t.Fatalf(".gitignore = %q, want %q", got, storeIgnoreContent)
+	}
+
+	// An existing user .gitignore is preserved untouched.
+	custom := "# custom\n.pew-lock\n"
+	if err := os.WriteFile(ignorePath, []byte(custom), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Write("p", "BenchmarkRun", "", parse(t, sample)); err != nil {
+		t.Fatalf("second Write: %v", err)
+	}
+	got, err = os.ReadFile(ignorePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != custom {
+		t.Fatalf(".gitignore = %q, want preserved %q", got, custom)
+	}
+
+	// A symlink at .gitignore is refused.
+	if err := os.Remove(ignorePath); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside-ignore")
+	if err := os.WriteFile(outside, []byte(custom), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, ignorePath); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if err := s.Write("p", "BenchmarkRun", "", parse(t, sample)); err == nil {
+		t.Fatal("Write succeeded with symlink .gitignore")
+	}
+}

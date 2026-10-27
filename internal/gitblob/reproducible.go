@@ -1,10 +1,8 @@
 package gitblob
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,17 +42,13 @@ func (r *Repo) reproducibleAt(ref, absPath, boundary string, visiting map[string
 		return false, err
 	}
 
-	h, err := r.repo.ResolveRevision(plumbing.Revision(ref))
+	h, err := r.resolve(ref)
 	if err != nil {
 		return false, fmt.Errorf("gitblob: resolve ref %q: %w", ref, err)
 	}
-	commit, err := r.repo.CommitObject(*h)
+	tree, err := r.commitTree(*h)
 	if err != nil {
-		return false, fmt.Errorf("gitblob: commit %s: %w", h, err)
-	}
-	tree, err := commit.Tree()
-	if err != nil {
-		return false, fmt.Errorf("gitblob: tree %s: %w", h, err)
+		return false, err
 	}
 
 	rel = filepath.ToSlash(rel)
@@ -145,7 +139,7 @@ func (r *Repo) findTreeEntry(tree *object.Tree, rel string) (entry *object.TreeE
 		if entry.Mode != filemode.Dir {
 			return nil, false, nil
 		}
-		tree, err = r.repo.TreeObject(entry.Hash)
+		tree, err = r.treeObject(entry.Hash)
 		if err != nil {
 			return nil, false, fmt.Errorf("gitblob: read tree %s: %w", strings.Join(parts[:i+1], "/"), err)
 		}
@@ -200,7 +194,7 @@ func (r *Repo) reproducibleEntry(ref, path, rel string, entry *object.TreeEntry,
 		}
 		return r.reproducibleAt(ref, targetPath, boundary, visiting)
 	case filemode.Dir:
-		tree, err := r.repo.TreeObject(entry.Hash)
+		tree, err := r.treeObject(entry.Hash)
 		if err != nil {
 			return false, fmt.Errorf("gitblob: read tree %s: %w", rel, err)
 		}
@@ -261,21 +255,8 @@ func (r *Repo) reproducibleTree(ref, path, rel string, tree *object.Tree, bounda
 }
 
 func (r *Repo) reproducibleBlob(content []byte, hash plumbing.Hash, rel string) (bool, error) {
-	blob, err := r.repo.BlobObject(hash)
-	if err != nil {
+	if err := r.repo.Storer.HasEncodedObject(hash); err != nil {
 		return false, fmt.Errorf("gitblob: read blob %s: %w", rel, err)
 	}
-	reader, err := blob.Reader()
-	if err != nil {
-		return false, fmt.Errorf("gitblob: read blob %s: %w", rel, err)
-	}
-	committed, readErr := io.ReadAll(reader)
-	closeErr := reader.Close()
-	if readErr != nil {
-		return false, fmt.Errorf("gitblob: read blob %s: %w", rel, readErr)
-	}
-	if closeErr != nil {
-		return false, fmt.Errorf("gitblob: close blob %s: %w", rel, closeErr)
-	}
-	return bytes.Equal(content, committed), nil
+	return plumbing.ComputeHash(plumbing.BlobObject, content) == hash, nil
 }

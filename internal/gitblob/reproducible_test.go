@@ -548,3 +548,26 @@ func writeFile(t *testing.T, path, content string, mode os.FileMode) {
 func testSignature() *object.Signature {
 	return &object.Signature{Name: "pew test", Email: "pew@example.invalid", When: time.Unix(1, 0)}
 }
+
+func TestReproducibleAtSnapshotRefsAndTreeCache(t *testing.T) {
+	repo, _ := reproducibleFixture(t)
+	snapped, err := repo.SnapshotRefs("HEAD")
+	if err != nil {
+		t.Fatalf("SnapshotRefs: %v", err)
+	}
+	deep := filepath.Join(repo.root, "tree", "nested", "deep.txt")
+	if got, err := snapped.ReproducibleAt("HEAD", deep); err != nil || !got {
+		t.Fatalf("first ReproducibleAt = %v, %v; want true, nil", got, err)
+	}
+	if len(snapped.commitTrees) == 0 || len(snapped.trees) == 0 {
+		t.Fatalf("expected commitTrees and trees caches to be populated; got %d, %d", len(snapped.commitTrees), len(snapped.trees))
+	}
+	// Advance HEAD in the repository while restoring worktree content to the
+	// snapshotted commit; snapped must still evaluate against its pinned HEAD.
+	writeFile(t, deep, "newer\n", 0o644)
+	_ = commitAll(t, repo.repo)
+	writeFile(t, deep, "deep\n", 0o644)
+	if got, err := snapped.ReproducibleAt("HEAD", deep); err != nil || !got {
+		t.Fatalf("snapped ReproducibleAt after HEAD advanced = %v, %v; want true, nil", got, err)
+	}
+}

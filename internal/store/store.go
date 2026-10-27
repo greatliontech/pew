@@ -821,6 +821,23 @@ func checkRegularFile(path string) error {
 	return nil
 }
 
+const storeIgnoreContent = ".gitignore\n.pew-lock\n.pew-*.tmp\n"
+
+// ensureStoreIgnore writes a self-ignoring .gitignore in the store root when
+// none exists so the permanent .pew-lock inode and transient .pew-*.tmp staging
+// files do not appear as untracked worktree noise in git status.
+func (s *Store) ensureStoreIgnore() error {
+	p := filepath.Join(s.Root, ".gitignore")
+	err := checkRegularFile(p)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return os.WriteFile(p, []byte(storeIgnoreContent), 0o644)
+}
+
 // encodeRecording is the one file encoding of a recording, read by
 // every write path: each result's config in its chunked file form (a
 // chunked row's value as continuation lines of at most run.ChunkBound

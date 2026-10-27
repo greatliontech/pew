@@ -5,7 +5,7 @@ go 1.27.0
 require (
 	github.com/go-git/go-git/v5 v5.19.1
 	github.com/google/pprof v0.0.0-20260906184651-6331bc6350fe
-	github.com/greatliontech/gofresh v0.119.1
+	github.com/greatliontech/gofresh v0.120.0
 	github.com/greatliontech/gofresh/toolversion v0.0.0-20261012210745-f5a40c0055e1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9
@@ -25,7 +25,7 @@ require (
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.0 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
-	github.com/greatliontech/go-x-tools v0.50.1-0.20261009182129-f5608c7b7b28 // indirect
+	github.com/greatliontech/go-x-tools v0.51.1-0.20261026181510-e3066d594d0a // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
