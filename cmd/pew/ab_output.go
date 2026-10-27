@@ -43,7 +43,7 @@ func prepareABOutput(ctx context.Context, out string, profiling bool, pkgs []pkg
 // build selection. The caller unions both sides before spending any build.
 func (o *abOutputOwnership) includePackages(ctx context.Context, pkgs []pkgMeta, env gotool.Environment) error {
 	configured := ""
-	if inv, ok := ctx.Value(invocationKey{}).(*invocation); ok {
+	if inv := currentInvocation(ctx); inv != nil && inv.vouches != nil {
 		configured = inv.vouches.storeDir
 	}
 	modules := map[string][]string{}

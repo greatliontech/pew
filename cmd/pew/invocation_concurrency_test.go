@@ -42,7 +42,7 @@ func TestConcurrentInvocationsKeepEvidenceIsolated(t *testing.T) {
 		writeFile(t, filepath.Join(l.store, vouchFileName), "example.com/"+l.marker+":Standing\n")
 		l.vouches = "example.com/" + l.marker + ".Flag,example.com/" + l.marker + ".Standing"
 		owned, deps := testDependencies(t)
-		owned = context.WithValue(ctx, dependenciesKey{}, deps)
+		owned = withDependencies(ctx, deps)
 		owned, stop := startReporter(owned, &l.log, 0)
 		t.Cleanup(stop)
 		var err error

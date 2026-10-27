@@ -217,7 +217,7 @@ func TestProfileReadAndCheckingFailuresBothRemainVisible(t *testing.T) {
 	deps.view = func(*analysisSession, context.Context, []gofresh.Subject, string, gofresh.Kind) (*gofresh.RuntimeBinding, error) {
 		return nil, errors.New("checking unavailable")
 	}
-	ctx := context.WithValue(t.Context(), dependenciesKey{}, deps)
+	ctx := withDependencies(t.Context(), deps)
 	var out bytes.Buffer
 	err = runStat(ctx, &out, io.Discard, statConfig{profile: "cpu", jsonOut: true, opts: compare.DefaultOptions()}, nil)
 	if err == nil || exitCode(err) != 1 {
@@ -253,7 +253,7 @@ func TestStatProfilesSharePackageFactsWithIndependentChecks(t *testing.T) {
 		}
 		return e.bind(ctx, subjects, kind)
 	}
-	ctx := context.WithValue(t.Context(), dependenciesKey{}, deps)
+	ctx := withDependencies(t.Context(), deps)
 	var out bytes.Buffer
 	if err := runStat(ctx, &out, io.Discard, statConfig{profile: "cpu", jsonOut: true, opts: compare.DefaultOptions()}, nil); err != nil {
 		t.Fatalf("%v\n%s", err, &out)

@@ -6,6 +6,7 @@ import (
 	"os/exec"
 
 	"github.com/greatliontech/gofresh"
+	gofreshtool "github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/pew/internal/gotool"
 )
 
@@ -17,6 +18,8 @@ type invocation struct {
 	diagnostics func(gofresh.Progress)
 	errw        io.Writer
 	sessions    map[sessionKey]*sessionEntry
+	readers     *gofreshtool.RunMemo[*gofreshtool.EnvReader]
+	deps        *executionDependencies
 }
 
 type sessionEntry struct {
@@ -38,11 +41,24 @@ type executionDependencies struct {
 	prepare func(*exec.Cmd)
 	view    func(*analysisSession, context.Context, []gofresh.Subject, string, gofresh.Kind) (*gofresh.RuntimeBinding, error)
 }
-type dependenciesKey struct{}
+
+func currentInvocation(ctx context.Context) *invocation {
+	inv, _ := ctx.Value(invocationKey{}).(*invocation)
+	return inv
+}
+
+func withDependencies(ctx context.Context, d *executionDependencies) context.Context {
+	var next invocation
+	if prev := currentInvocation(ctx); prev != nil {
+		next = *prev
+	}
+	next.deps = d
+	return context.WithValue(ctx, invocationKey{}, &next)
+}
 
 func dependencies(ctx context.Context) *executionDependencies {
-	if d, ok := ctx.Value(dependenciesKey{}).(*executionDependencies); ok {
-		return d
+	if inv := currentInvocation(ctx); inv != nil && inv.deps != nil {
+		return inv.deps
 	}
 	return &executionDependencies{sample: sampleGoVersion, view: func(e *analysisSession, ctx context.Context, subjects []gofresh.Subject, dir string, kind gofresh.Kind) (*gofresh.RuntimeBinding, error) {
 		return e.bind(ctx, subjects, kind)
@@ -63,13 +79,23 @@ func beginInvocation(ctx context.Context, storeDir string, entries []string, err
 	if err != nil {
 		return ctx, nil, err
 	}
-	i := &invocation{env: env, vouches: vouches, diagnostics: gofresh.DiagnosticsTo(errw), errw: errw}
-	ctx = withToolchainSampler(ctx)
+	var deps *executionDependencies
+	if prev := currentInvocation(ctx); prev != nil {
+		deps = prev.deps
+	}
+	i := &invocation{
+		env:         env,
+		vouches:     vouches,
+		diagnostics: gofresh.DiagnosticsTo(errw),
+		errw:        errw,
+		readers:     &gofreshtool.RunMemo[*gofreshtool.EnvReader]{},
+		deps:        deps,
+	}
 	return context.WithValue(ctx, invocationKey{}, i), i, nil
 }
 
 func invocationVouches(ctx context.Context, moduleDir string) ([]string, error) {
-	if i, ok := ctx.Value(invocationKey{}).(*invocation); ok {
+	if i := currentInvocation(ctx); i != nil && i.vouches != nil {
 		return i.vouches.engineVouches(moduleDir)
 	}
 	// Direct engine callers own a single independent preparation operation.

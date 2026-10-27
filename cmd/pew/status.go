@@ -137,7 +137,7 @@ func newEngineAtProducer(ctx context.Context, moduleDir, pkgDir string, mainPkg 
 // verdicts with nothing naming the walk needed.
 func emitEngineDiagnostic(ctx context.Context, p gofresh.Progress) {
 	if _, diagnostic := p.Diagnostic(); diagnostic {
-		if i, ok := ctx.Value(invocationKey{}).(*invocation); ok && i.diagnostics != nil {
+		if i := currentInvocation(ctx); i != nil && i.diagnostics != nil {
 			i.diagnostics(p)
 		} else {
 			gofresh.DiagnosticsTo(os.Stderr)(p)
@@ -194,10 +194,10 @@ func buildEngine(ctx context.Context, moduleDir, pkgDir string, env gotool.Envir
 		return nil, err
 	}
 	var session *gofresh.Session
-	inv, _ := ctx.Value(invocationKey{}).(*invocation)
+	inv := currentInvocation(ctx)
 	var key sessionKey
 	canonPkgDir := gotool.CommandDir(pkgDir)
-	if inv != nil {
+	if inv != nil && inv.vouches != nil {
 		key = sessionKey{
 			moduleDir: gotool.CommandDir(moduleDir),
 			env:       strings.Join(env.Values(), "\x00"),
@@ -218,7 +218,7 @@ func buildEngine(ctx context.Context, moduleDir, pkgDir string, env gotool.Envir
 		if err != nil {
 			return nil, err
 		}
-		if inv != nil {
+		if inv != nil && inv.vouches != nil {
 			if inv.sessions == nil {
 				inv.sessions = map[sessionKey]*sessionEntry{}
 			}
@@ -244,8 +244,8 @@ func prepareHarnessArgs(ctx context.Context, moduleDir string, env gotool.Enviro
 }
 
 func runStatus(ctx context.Context, w io.Writer, benchDir, label string, staleOnly, explain, jsonOut bool, patterns []string) error {
-	inv, ok := ctx.Value(invocationKey{}).(*invocation)
-	if !ok {
+	inv := currentInvocation(ctx)
+	if inv == nil || inv.vouches == nil {
 		var err error
 		ctx, inv, err = beginInvocation(ctx, benchDir, nil, os.Stderr)
 		if err != nil {

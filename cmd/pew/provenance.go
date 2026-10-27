@@ -20,13 +20,16 @@ type toolchainProvenanceError struct{ err error }
 func (e *toolchainProvenanceError) Error() string { return e.err.Error() }
 func (e *toolchainProvenanceError) Unwrap() error { return e.err }
 
-type preparationReaderKey struct{}
-
 // withToolchainSampler owns the preparation readers for one judged invocation.
 // Toolchain provenance and build configuration read the same snapshot. Write
 // validation constructs a fresh reader instead of serving preparation evidence.
 func withToolchainSampler(ctx context.Context) context.Context {
-	return context.WithValue(ctx, preparationReaderKey{}, &gofreshtool.RunMemo[*gofreshtool.EnvReader]{})
+	var next invocation
+	if prev := currentInvocation(ctx); prev != nil {
+		next = *prev
+	}
+	next.readers = &gofreshtool.RunMemo[*gofreshtool.EnvReader]{}
+	return context.WithValue(ctx, invocationKey{}, &next)
 }
 
 func preparationReader(ctx context.Context, dir string, env gotool.Environment) (*gofreshtool.EnvReader, error) {
@@ -37,7 +40,10 @@ func preparationReader(ctx context.Context, dir string, env gotool.Environment) 
 			}
 		})
 	}
-	memo, _ := ctx.Value(preparationReaderKey{}).(*gofreshtool.RunMemo[*gofreshtool.EnvReader])
+	var memo *gofreshtool.RunMemo[*gofreshtool.EnvReader]
+	if inv := currentInvocation(ctx); inv != nil {
+		memo = inv.readers
+	}
 	if memo == nil {
 		return makeReader(), nil
 	}

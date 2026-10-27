@@ -8,5 +8,5 @@ import (
 func testDependencies(t *testing.T) (context.Context, *executionDependencies) {
 	t.Helper()
 	d := dependencies(t.Context())
-	return context.WithValue(t.Context(), dependenciesKey{}, d), d
+	return withDependencies(t.Context(), d), d
 }
