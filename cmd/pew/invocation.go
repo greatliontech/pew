@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/greatliontech/gofresh"
 	gofreshtool "github.com/greatliontech/gofresh/gotool"
@@ -13,6 +14,7 @@ import (
 // invocation owns policy and preparation for one judged command. Its context
 // binding carries ownership through cancellation and bounded publication contexts.
 type invocation struct {
+	workDir     string
 	env         gotool.Environment
 	vouches     *vouchSource
 	diagnostics func(gofresh.Progress)
@@ -56,6 +58,45 @@ func withDependencies(ctx context.Context, d *executionDependencies) context.Con
 	return context.WithValue(ctx, invocationKey{}, &next)
 }
 
+func withWorkDir(ctx context.Context, workDir string) context.Context {
+	if workDir != "" && !filepath.IsAbs(workDir) {
+		if abs, err := filepath.Abs(workDir); err == nil {
+			workDir = abs
+		}
+	}
+	var next invocation
+	if prev := currentInvocation(ctx); prev != nil {
+		next = *prev
+	}
+	next.workDir = workDir
+	return context.WithValue(ctx, invocationKey{}, &next)
+}
+
+func invocationWorkDir(ctx context.Context) string {
+	if inv := currentInvocation(ctx); inv != nil && inv.workDir != "" {
+		return inv.workDir
+	}
+	return "."
+}
+
+func resolveWorkPath(ctx context.Context, path string) (string, error) {
+	if path == "" {
+		path = invocationWorkDir(ctx)
+	} else if !filepath.IsAbs(path) {
+		path = filepath.Join(invocationWorkDir(ctx), path)
+	}
+	return filepath.Abs(path)
+}
+
+func resolveCommandDir(ctx context.Context, dir string) string {
+	if dir == "" {
+		dir = invocationWorkDir(ctx)
+	} else if !filepath.IsAbs(dir) {
+		dir = filepath.Join(invocationWorkDir(ctx), dir)
+	}
+	return gotool.CommandDir(dir)
+}
+
 func dependencies(ctx context.Context) *executionDependencies {
 	if inv := currentInvocation(ctx); inv != nil && inv.deps != nil {
 		return inv.deps
@@ -66,6 +107,22 @@ func dependencies(ctx context.Context) *executionDependencies {
 }
 
 func beginInvocation(ctx context.Context, storeDir string, entries []string, errw io.Writer) (context.Context, *invocation, error) {
+	var deps *executionDependencies
+	var workDir string
+	if prev := currentInvocation(ctx); prev != nil {
+		deps = prev.deps
+		workDir = prev.workDir
+	}
+	if workDir == "" {
+		if abs, err := filepath.Abs("."); err == nil {
+			workDir = abs
+		} else {
+			workDir = "."
+		}
+	}
+	if storeDir != "" && !filepath.IsAbs(storeDir) {
+		storeDir = filepath.Join(workDir, storeDir)
+	}
 	vouches, err := newVouchSource(storeDir, entries)
 	if err != nil {
 		return ctx, nil, err
@@ -79,11 +136,8 @@ func beginInvocation(ctx context.Context, storeDir string, entries []string, err
 	if err != nil {
 		return ctx, nil, err
 	}
-	var deps *executionDependencies
-	if prev := currentInvocation(ctx); prev != nil {
-		deps = prev.deps
-	}
 	i := &invocation{
+		workDir:     workDir,
 		env:         env,
 		vouches:     vouches,
 		diagnostics: gofresh.DiagnosticsTo(errw),

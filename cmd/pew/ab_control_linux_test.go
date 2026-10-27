@@ -128,6 +128,7 @@ func TestABNativeGitCancellationContainsDescendants(t *testing.T) {
 }
 
 func TestABCleanupRefusesForeignOwnershipAndReportsFailure(t *testing.T) {
+	t.Parallel()
 	repo := abFixtureRepo(t)
 	g := abGitControl{env: testEnvironment(t, nil)}
 	dir, cleanup, err := g.add(t.Context(), repo, filepath.Dir(repo), "HEAD")

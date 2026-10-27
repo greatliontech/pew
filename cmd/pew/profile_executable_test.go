@@ -22,7 +22,7 @@ func TestProfileExecutableSurvivesCaptureAndRemainsGuarded(t *testing.T) {
 	}
 	root := twoArmFixture(t)
 	writeFile(t, filepath.Join(root, "bench_test.go"), "package arms\nimport \"testing\"\nvar sink uint64\nfunc BenchmarkFirst(b *testing.B) { for b.Loop() { sink++ } }\nfunc BenchmarkSecond(b *testing.B) {}\n")
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
 	rc := runConfig{benchDir: benchDir, profile: "cpu", profileBenchtime: "300ms", opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "^BenchmarkFirst$"}}
 	var executable string
@@ -31,7 +31,7 @@ func TestProfileExecutableSurvivesCaptureAndRemainsGuarded(t *testing.T) {
 		return runpkg.ExecuteDiagnostic(ctx, dir, pin, env, bin, args, w)
 	}
 	var out, diagnostics bytes.Buffer
-	if err := runRun(t.Context(), &out, &diagnostics, rc, []string{"."}); err != nil {
+	if err := runRun(ctx, &out, &diagnostics, rc, []string{"."}); err != nil {
 		t.Fatalf("run: %v\n%s\n%s", err, &out, &diagnostics)
 	}
 	data, err := os.ReadFile(executable)
@@ -50,7 +50,7 @@ func TestProfileExecutableSurvivesCaptureAndRemainsGuarded(t *testing.T) {
 	status := func() statusJSONRow {
 		t.Helper()
 		out.Reset()
-		if err := runStatus(t.Context(), &out, benchDir, "", false, false, true, []string{"."}); err != nil {
+		if err := runStatus(ctx, &out, benchDir, "", false, false, true, []string{"."}); err != nil {
 			t.Fatal(err)
 		}
 		decoder := json.NewDecoder(&out)
@@ -80,7 +80,7 @@ func TestProfileExecutableSurvivesCaptureAndRemainsGuarded(t *testing.T) {
 			t.Fatalf("different build environment unguarded: %+v", row)
 		}
 		var explained bytes.Buffer
-		if err := runStatus(t.Context(), &explained, benchDir, "", false, true, false, []string{"."}); err != nil {
+		if err := runStatus(ctx, &explained, benchDir, "", false, true, false, []string{"."}); err != nil {
 			t.Fatalf("status --explain: %v", err)
 		}
 		text := explained.String()

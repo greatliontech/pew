@@ -25,6 +25,7 @@ import (
 // the verdict is checked against the labeled recording, so a benchmark recorded
 // only under a label is unrecorded without --label and visible with it.
 func TestStatusPackageUsesLabel(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
@@ -73,6 +74,7 @@ func TestStatusPackageUsesLabel(t *testing.T) {
 // unverifiable (external directive) against a recording whose every hashable
 // guard holds, and a recorded pure: true assertion never upgrades it.
 func TestStatusHonorsExternalDirective(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
@@ -131,6 +133,7 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 // table naming the moving guard, and the runtime manifest's watched
 // identities are disclosed as identities only.
 func TestStatusExplainNamesTheMovingGuard(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
@@ -188,6 +191,7 @@ func TestStatusExplainNamesTheMovingGuard(t *testing.T) {
 // moved, over the manifest's per-input digests - environment entries as
 // names only, the observed value never disclosed (§7.8).
 func TestStatusExplainNamesMovedInputs(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
@@ -235,6 +239,7 @@ func TestStatusExplainNamesMovedInputs(t *testing.T) {
 // TestStatusJSONRows pins spec §12's status -json shape: one JSON object per
 // row with stable field names, the same verdicts the text view reports.
 func TestStatusJSONRows(t *testing.T) {
+	t.Parallel()
 	e, _, err := newEngineAt(context.Background(), ".", ".", false, testEnvironment(t, os.Environ()))
 	if err != nil {
 		t.Fatal(err)
@@ -280,6 +285,7 @@ func TestStatusJSONRows(t *testing.T) {
 // unlabeled rows never mention it), and a package whose benchmark
 // declarations cannot be read emits a {package, error} object.
 func TestStatusJSONLabelAndErrorRows(t *testing.T) {
+	t.Parallel()
 	e, _, err := newEngineAt(context.Background(), ".", ".", false, testEnvironment(t, os.Environ()))
 	if err != nil {
 		t.Fatal(err)
@@ -315,9 +321,9 @@ func TestStatusJSONLabelAndErrorRows(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	out.Reset()
-	if err := runStatus(context.Background(), &out, "", "", false, false, true, []string{"."}); err == nil || !strings.Contains(err.Error(), "incomplete report") {
+	if err := runStatus(ctx, &out, "", "", false, false, true, []string{"."}); err == nil || !strings.Contains(err.Error(), "incomplete report") {
 		t.Fatalf("incomplete status report succeeded: %v", err)
 	}
 	var row struct {
@@ -336,6 +342,7 @@ func TestStatusJSONLabelAndErrorRows(t *testing.T) {
 // (spec §5's read arm) - detection at every verdict read, regeneration
 // the remediation.
 func TestStatusWarnsOnForeignConfigKeys(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
@@ -377,6 +384,7 @@ func TestStatusWarnsOnForeignConfigKeys(t *testing.T) {
 // stays a recognized recording (never alien), it is simply re-measured,
 // no back-fill (spec §5's pew-dynamic-state row).
 func TestStatusRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
@@ -442,6 +450,7 @@ func statusPackageOf(w, errw io.Writer, e *analysisSession, benchDir, label stri
 // no strategy row — two hashes folded by different strategies say
 // nothing about each other's source (spec §5's `pew-closure-strategy`).
 func TestExplainNamesAClosureDerivationMove(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain")
 	}

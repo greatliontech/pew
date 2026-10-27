@@ -15,7 +15,7 @@ import (
 )
 
 func TestOrdinaryEffortRefusesBeforeListing(t *testing.T) {
-	withWorkingDir(t, t.TempDir())
+	ctx := withWorkingDir(t, t.TempDir())
 	// If entry admission disappears, pin derivation cannot find taskset and
 	// wins the refusal before runRun's own entry check. No listing is needed.
 	t.Setenv("PATH", t.TempDir())
@@ -24,18 +24,19 @@ func TestOrdinaryEffortRefusesBeforeListing(t *testing.T) {
 		cmd.SetArgs(args)
 		cmd.SetOut(&bytes.Buffer{})
 		cmd.SetErr(&bytes.Buffer{})
-		if err := cmd.Execute(); err == nil || !(strings.Contains(err.Error(), "count must be positive") || strings.Contains(err.Error(), "benchtime")) {
+		if err := cmd.ExecuteContext(ctx); err == nil || !(strings.Contains(err.Error(), "count must be positive") || strings.Contains(err.Error(), "benchtime")) {
 			t.Fatalf("%v: %v", args, err)
 		}
 	}
 	for _, options := range []run.Options{{Count: 0, Benchtime: "1x"}, {Count: 1, Benchtime: "bogus"}} {
-		if err := runRun(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, runConfig{opts: options}, []string{"./..."}); err == nil || !(strings.Contains(err.Error(), "count must be positive") || strings.Contains(err.Error(), "benchtime")) {
+		if err := runRun(ctx, &bytes.Buffer{}, &bytes.Buffer{}, runConfig{opts: options}, []string{"./..."}); err == nil || !(strings.Contains(err.Error(), "count must be positive") || strings.Contains(err.Error(), "benchtime")) {
 			t.Fatalf("direct invocation: %v", err)
 		}
 	}
 }
 
 func TestInvocationDestinationsCannotBeDirectoriesOfOtherRecordings(t *testing.T) {
+	t.Parallel()
 	st := store.New(t.TempDir())
 	root, err := st.Destinations([]store.Key{{Bench: "BenchmarkWork"}})
 	if err != nil {
@@ -55,6 +56,7 @@ func TestInvocationDestinationsCannotBeDirectoriesOfOtherRecordings(t *testing.T
 }
 
 func TestLocallyRefusedPackageOwnsNoInvocationDestination(t *testing.T) {
+	t.Parallel()
 	storeRoot := t.TempDir()
 	if err := os.Mkdir(filepath.Join(storeRoot, "BenchmarkBlocked.txt"), 0700); err != nil {
 		t.Fatal(err)
@@ -84,6 +86,7 @@ func TestLocallyRefusedPackageOwnsNoInvocationDestination(t *testing.T) {
 }
 
 func TestPrivateRunDefaultEffortAndPreparationAttribution(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("prepares two fixture packages")
 	}
@@ -93,9 +96,8 @@ func TestPrivateRunDefaultEffortAndPreparationAttribution(t *testing.T) {
 		writeFile(t, filepath.Join(dir, pkg, "bench_test.go"), "package bench\nimport \"testing\"\nfunc BenchmarkWork(b *testing.B) {}\n")
 	}
 	commitFixture(t, dir)
-	withWorkingDir(t, dir)
 	owned, deps := testDependencies(t)
-	ctx, stop := startReporter(owned, &bytes.Buffer{}, 0)
+	ctx, stop := startReporter(withWorkDir(owned, dir), &bytes.Buffer{}, 0)
 	defer stop()
 	reporter := ctx.Value(reporterKey{}).(*reporter)
 	var queryPhase string
@@ -150,9 +152,8 @@ func TestInvocationRefusesCrossModuleDestinationCollision(t *testing.T) {
 	}
 	t.Setenv("GOWORK", filepath.Join(root, "go.work"))
 	commitFixture(t, root)
-	withWorkingDir(t, root)
 	var phases []string
-	ctx, stop := startReporter(context.Background(), &bytes.Buffer{}, 0)
+	ctx, stop := startReporter(withWorkingDir(t, root), &bytes.Buffer{}, 0)
 	defer stop()
 	ctx.Value(reporterKey{}).(*reporter).onPhase = func(phase string) { phases = append(phases, phase) }
 	config := runConfig{benchDir: filepath.Join(root, "recordings"), opts: run.Options{Count: 1, Benchtime: "1x", Bench: "."}, execute: func(string, string, []string, []string) ([]byte, error) {

@@ -27,13 +27,14 @@ func (w *afterRecording) Write(p []byte) (int, error) {
 }
 
 func TestRetainedExecutableIsCheckedAtEachArmAndClosing(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("builds and executes a retained benchmark artifact")
 	}
 	for _, phase := range []string{"after execution", "between arms"} {
 		t.Run(phase, func(t *testing.T) {
 			dir := twoArmFixture(t)
-			withWorkingDir(t, dir)
+			ctx := withWorkingDir(t, dir)
 			st := store.New(filepath.Join(t.TempDir(), "recordings"))
 			writeStatRecording(t, st, "", "BenchmarkFirst", 41)
 			writeStatRecording(t, st, "", "BenchmarkSecond", 42)
@@ -73,7 +74,7 @@ func TestRetainedExecutableIsCheckedAtEachArmAndClosing(t *testing.T) {
 			if phase == "between arms" {
 				out.action = change
 			}
-			err := runRun(t.Context(), &out, &bytes.Buffer{}, rc, []string{"."})
+			err := runRun(ctx, &out, &bytes.Buffer{}, rc, []string{"."})
 			if err == nil || !strings.Contains(out.String(), "retained test executable changed") || calls != 1 {
 				t.Fatalf("artifact replacement crossed execution/closing: calls=%d, %v\n%s", calls, err, out.String())
 			}

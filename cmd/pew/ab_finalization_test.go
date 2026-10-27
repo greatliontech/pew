@@ -41,12 +41,11 @@ func BenchmarkWork(b *testing.B) { b.Run("base",func(b *testing.B){for i:=0;i<b.
 			}
 			commitAll(t, repo, "base child")
 			writeFile(t, filepath.Join(root, "p", "p_test.go"), strings.Replace(source, `"base"`, `"new"`, 1))
-			withWorkingDir(t, root)
 			realGit, err := exec.LookPath("git")
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithCancel(t.Context())
+			ctx, cancel := context.WithCancel(withWorkingDir(t, root))
 			defer cancel()
 			watchDone := make(chan error, 1)
 			stopWatch := make(chan struct{})

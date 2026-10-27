@@ -32,6 +32,7 @@ import (
 // (REQ-pew-interruption: every stage on the verb's path reports the
 // same way). ab's preparation observes it in the guard capture.
 func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("lists fixture modules through the toolchain")
 	}
@@ -58,7 +59,7 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/stage\n\ngo 1.24\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg_test.go"), "package pkg\n\nimport \"testing\"\n\nfunc BenchmarkStage(b *testing.B) {}\n")
-	withWorkingDir(t, dir)
+	owned = withWorkDir(owned, dir)
 	var ctx context.Context
 	ctx, cancel = context.WithCancel(owned)
 	defer cancel()
@@ -110,7 +111,7 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	st := store.New(filepath.Join(statDir, "benchmarks"))
 	writeStatRecording(t, st, "pkg", "BenchmarkStage", 100)
 	commitAll(t, repo, "base")
-	withWorkingDir(t, statDir)
+	owned = withWorkDir(owned, statDir)
 	ctx, cancel = context.WithCancel(owned)
 	defer cancel()
 	assertInterrupted("stat", runStat(ctx, &w, &ew, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, nil), "stat: interrupted at pkg.BenchmarkStage")
@@ -130,7 +131,7 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	writeStatRecording(t, two, "pkg", "BenchmarkA", 100)
 	writeStatRecording(t, two, "pkg", "BenchmarkB", 100)
 	commitAll(t, twoRepo, "base")
-	withWorkingDir(t, twoDir)
+	owned = withWorkDir(owned, twoDir)
 	deps.sample = orig
 	owned, stopReporter := startReporter(owned, io.Discard, time.Hour)
 	t.Cleanup(stopReporter)
@@ -205,7 +206,7 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	// that lists no package at all.
 	gcDir := t.TempDir()
 	writeFile(t, filepath.Join(gcDir, "go.mod"), "module example.com/gcmod\n\ngo 1.24\n")
-	withWorkingDir(t, gcDir)
+	owned = withWorkDir(owned, gcDir)
 	ctx, cancel = context.WithCancel(owned)
 	defer cancel()
 	setPhaseHook(ctx, func(phase string) {
@@ -221,7 +222,7 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	}
 
 	abDir := abFixtureRepo(t)
-	withWorkingDir(t, abDir)
+	owned = withWorkDir(owned, abDir)
 	ctx, cancel = context.WithCancel(owned)
 	defer cancel()
 	ac := abConfig{
@@ -241,13 +242,13 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 // write and the verb then ends with the arm reported as recorded
 // (REQ-pew-unit-persistence, REQ-pew-interruption).
 func TestMeasuredArmPersistsUnderAnInterruptedGate(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain with the execute seam stubbed")
 	}
 	dir := twoArmFixture(t)
-	withWorkingDir(t, dir)
 	benchDir := filepath.Join(dir, "benchmarks")
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(withWorkingDir(t, dir))
 	defer cancel()
 	rc := runConfig{
 		benchDir: benchDir,
@@ -278,6 +279,7 @@ func TestMeasuredArmPersistsUnderAnInterruptedGate(t *testing.T) {
 // context ends it with the cancellation, so an interruption during
 // the sample is the verb's and never a memoized fact about the module.
 func TestGoVersionSampleHonorsTheCallersContext(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/sample\n\ngo 1.24\n")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -315,6 +317,7 @@ func (c cancelOnWrite) Write(p []byte) (int, error) {
 // the verb ends by the signal with exit 130 rather than answering as
 // if none had come (REQ-pew-interruption).
 func TestVerbsEndByAnInterruptionReceivedAfterTheLastUnit(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads fixture packages through the toolchain with the execute seams stubbed")
 	}
@@ -333,9 +336,8 @@ func TestVerbsEndByAnInterruptionReceivedAfterTheLastUnit(t *testing.T) {
 	// run: the signal lands during the last arm's write gate — the arm
 	// is written (the gate runs detached) and the verb ends by the signal.
 	dir := twoArmFixture(t)
-	withWorkingDir(t, dir)
 	benchDir := filepath.Join(dir, "benchmarks")
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(withWorkingDir(t, dir))
 	defer cancel()
 	rc := runConfig{
 		benchDir: benchDir,
@@ -368,19 +370,17 @@ func TestVerbsEndByAnInterruptionReceivedAfterTheLastUnit(t *testing.T) {
 	sst := store.New(filepath.Join(statDir, "benchmarks"))
 	writeStatRecording(t, sst, "pkg", "BenchmarkEnd", 100)
 	commitAll(t, repo, "base")
-	withWorkingDir(t, statDir)
 	// Every stage of the comparison observes a cancellation and reports
 	// it, so the end check is reached only by a signal landing after the
 	// last comparison's work — as the table is written.
-	ctx, cancel = context.WithCancel(context.Background())
+	ctx, cancel = context.WithCancel(withWorkingDir(t, statDir))
 	defer cancel()
 	assertInterrupted("stat", runStat(ctx, cancelOnWrite{w: &w, cancel: cancel}, &ew, statConfig{benchDir: sst.Root, opts: compare.DefaultOptions()}, nil), "stat: interrupted after the last comparison")
 
 	// ab: the signal lands during the last iteration's second side; the
 	// pair completes into the artifact and the verb ends by the signal.
 	abDir := abFixtureRepo(t)
-	withWorkingDir(t, abDir)
-	ctx, cancel = context.WithCancel(context.Background())
+	ctx, cancel = context.WithCancel(withWorkingDir(t, abDir))
 	defer cancel()
 	runs := 0
 	ac := abConfig{
@@ -405,8 +405,7 @@ func TestVerbsEndByAnInterruptionReceivedAfterTheLastUnit(t *testing.T) {
 	gcDir := t.TempDir()
 	writeFile(t, filepath.Join(gcDir, "go.mod"), "module example.com/gcend\n\ngo 1.24\n")
 	writeFile(t, filepath.Join(gcDir, "pkg", "pkg.go"), "package pkg\n")
-	withWorkingDir(t, gcDir)
-	ctx, cancel = context.WithCancel(context.Background())
+	ctx, cancel = context.WithCancel(withWorkingDir(t, gcDir))
 	defer cancel()
 	assertInterrupted("gc", runGC(ctx, cancelOnWrite{w: &w, cancel: cancel}, filepath.Join(gcDir, "b")), "gc: interrupted after the last store")
 }
@@ -417,6 +416,7 @@ func TestVerbsEndByAnInterruptionReceivedAfterTheLastUnit(t *testing.T) {
 // that package's failure row, and a gate the bound expired names the
 // gate (REQ-pew-interruption, REQ-pew-unit-persistence).
 func TestMeasurementStagesReportTheirCancellationAsInterruption(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads fixture packages through the toolchain with the execute seams stubbed")
 	}
@@ -436,8 +436,7 @@ func TestMeasurementStagesReportTheirCancellationAsInterruption(t *testing.T) {
 	// signal — what the real executor returns is the context's error.
 	for _, killed := range []int{3, 4} {
 		abDir := abFixtureRepo(t)
-		withWorkingDir(t, abDir)
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(withWorkingDir(t, abDir))
 		defer cancel()
 		runs := 0
 		out := filepath.Join(t.TempDir(), "ab.txt")
@@ -466,8 +465,7 @@ func TestMeasurementStagesReportTheirCancellationAsInterruption(t *testing.T) {
 	// run: the signal lands during the package's warm-up build, before
 	// any arm — the package is not measured, not failed.
 	dir := twoArmFixture(t)
-	withWorkingDir(t, dir)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(withWorkingDir(t, dir))
 	defer cancel()
 	rc := runConfig{
 		benchDir: filepath.Join(dir, "benchmarks"),
@@ -493,7 +491,7 @@ func TestMeasurementStagesReportTheirCancellationAsInterruption(t *testing.T) {
 	// run: a measured arm whose write gate exceeded its bound is
 	// discarded by the gate, naming it — not by the verb's context.
 	dir = twoArmFixture(t)
-	withWorkingDir(t, dir)
+	ctx = withWorkingDir(t, dir)
 	rc = runConfig{
 		writeGateBound: time.Nanosecond,
 		benchDir:       filepath.Join(dir, "benchmarks"),
@@ -502,7 +500,7 @@ func TestMeasurementStagesReportTheirCancellationAsInterruption(t *testing.T) {
 		binary:         armExecution(nil),
 	}
 	w.Reset()
-	err := runRun(context.Background(), &w, &ew, rc, []string{"."})
+	err := runRun(ctx, &w, &ew, rc, []string{"."})
 	if err == nil || !strings.Contains(w.String(), "the arm's write gate exceeded 1ns") {
 		t.Fatalf("expired gate = %v; output:\n%s\nwant the gate named", err, w.String())
 	}

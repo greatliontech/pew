@@ -34,7 +34,7 @@ func BenchmarkSecond(b *testing.B) { _,_=os.ReadFile("fixture.txt") }
 `)
 	writeFile(t, filepath.Join(root, "fixture.txt"), "stable file")
 	t.Setenv("PEW_OBSERVED_VALUE", "before")
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	buildEnvironment := testEnvironment(t, os.Environ())
 	st := store.New(filepath.Join(root, "benchmarks"))
 	repo, err := gogit.PlainOpen(root)
@@ -43,7 +43,7 @@ func BenchmarkSecond(b *testing.B) { _,_=os.ReadFile("fixture.txt") }
 	}
 	commitAll(t, repo, "measured subjects")
 	var log bytes.Buffer
-	if err := runRun(context.Background(), io.Discard, &log, runConfig{all: true, benchDir: st.Root, opts: runpkg.Options{Bench: ".", Count: 1, Benchtime: "1x"}}, []string{"."}); err != nil {
+	if err := runRun(ctx, io.Discard, &log, runConfig{all: true, benchDir: st.Root, opts: runpkg.Options{Bench: ".", Count: 1, Benchtime: "1x"}}, []string{"."}); err != nil {
 		t.Fatalf("run: %v\n%s", err, &log)
 	}
 	read := func() admission {
@@ -100,14 +100,14 @@ func BenchmarkSecond(b *testing.B) { _,_=os.ReadFile("fixture.txt") }
 		t.Fatalf("observed verdicts: first=%+v second=%+v", rows[subject.Symbol], rows["BenchmarkSecond"])
 	}
 	var statusOut bytes.Buffer
-	if err := runStatus(t.Context(), &statusOut, st.Root, "", false, false, true, []string{"."}); err != nil {
+	if err := runStatus(ctx, &statusOut, st.Root, "", false, false, true, []string{"."}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(statusOut.String(), `"benchmark":"BenchmarkFirst","verdict":"valid"`) || !strings.Contains(statusOut.String(), `"benchmark":"BenchmarkSecond","verdict":"unverifiable"`) {
 		t.Fatalf("status disagrees: %s", &statusOut)
 	}
 	var served bytes.Buffer
-	if err := runRun(t.Context(), &served, io.Discard, runConfig{benchDir: st.Root, opts: runpkg.Options{Bench: "^BenchmarkFirst$", Count: 1, Benchtime: "1x"}, execute: func(string, string, []string, []string) ([]byte, error) {
+	if err := runRun(ctx, &served, io.Discard, runConfig{benchDir: st.Root, opts: runpkg.Options{Bench: "^BenchmarkFirst$", Count: 1, Benchtime: "1x"}, execute: func(string, string, []string, []string) ([]byte, error) {
 		t.Fatal("valid observed arm was remeasured")
 		return nil, nil
 	}}, []string{"."}); err != nil {
@@ -124,7 +124,7 @@ func BenchmarkSecond(b *testing.B) { _,_=os.ReadFile("fixture.txt") }
 		return load(e, ctx, subjects, dir, kind)
 	}
 	var statOut, statErr bytes.Buffer
-	if err := runStat(statCtx, &statOut, &statErr, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, nil); err != nil {
+	if err := runStat(withWorkDir(statCtx, root), &statOut, &statErr, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if loads != 1 || strings.Contains(statErr.String(), "BenchmarkFirst is") || !strings.Contains(statErr.String(), "BenchmarkSecond is unverifiable") {

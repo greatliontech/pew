@@ -20,6 +20,7 @@ import (
 // real: an omitted mandatory row fails the shape check, a set row
 // replaces the writer's line rather than duplicating it.
 func TestRecordingBuilderIsTheWritersShape(t *testing.T) {
+	t.Parallel()
 	recs := recordingtest.Results("BenchmarkX", []float64{1, 2})
 	if !store.IsRecording(recs) || !store.IsRecordingShape(recs) {
 		t.Fatalf("the default recording is not a current-shape recording: %+v", recs[0].Config)

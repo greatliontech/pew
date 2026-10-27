@@ -265,7 +265,7 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 		}
 		return err
 	}
-	repo, err := gitblob.Open(".")
+	repo, err := gitblob.Open(invocationWorkDir(ctx))
 	if err != nil {
 		return err
 	}
@@ -290,7 +290,7 @@ func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []strin
 		}
 		m.repo = frozen
 	}
-	scanRoots, err := historicalScanRoots(modules)
+	scanRoots, err := historicalScanRoots(ctx, modules)
 	if err != nil {
 		return err
 	}
@@ -737,7 +737,7 @@ func statModules(pkgs []pkgMeta, sc statConfig, errw io.Writer) ([]*statModule, 
 	return mods, nil
 }
 
-func historicalScanRoots(mods []*statModule) ([]string, error) {
+func historicalScanRoots(ctx context.Context, mods []*statModule) ([]string, error) {
 	seen := map[string]bool{}
 	var roots []string
 	for _, m := range mods {
@@ -748,7 +748,7 @@ func historicalScanRoots(mods []*statModule) ([]string, error) {
 		}
 	}
 	if len(roots) == 0 {
-		cwd, err := filepath.Abs(".")
+		cwd, err := resolveWorkPath(ctx, ".")
 		if err != nil {
 			return nil, err
 		}
@@ -843,7 +843,7 @@ func fallbackStatPackages(ctx context.Context, env gotool.Environment) ([]pkgMet
 }
 
 func currentModulePackage(ctx context.Context, env gotool.Environment) (pkgMeta, error) {
-	out, err := gotool.List(ctx, "", env, "-m", "-json")
+	out, err := gotool.List(ctx, invocationWorkDir(ctx), env, "-m", "-json")
 	if err != nil {
 		return pkgMeta{}, err
 	}

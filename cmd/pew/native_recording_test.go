@@ -21,6 +21,7 @@ import (
 // Exercise the real file boundary with every native field, including proofs whose
 // integrity the shared checker (not the recording decoder) is responsible for.
 func TestNativeFingerprintStoreRoundTrip(t *testing.T) {
+	t.Parallel()
 	rng := rand.New(rand.NewSource(1907))
 	for n := 0; n < 40; n++ {
 		fp := recordingtest.Defaults().Fingerprint
@@ -111,6 +112,7 @@ func FuzzNativeFingerprintEnvelope(f *testing.F) {
 }
 
 func TestNativePayloadRefusalsAndAllRowAdmission(t *testing.T) {
+	t.Parallel()
 	rows := recordingtest.Results("X", []float64{1, 2})
 	encoded := rows[0].GetConfig(runpkg.KeyFingerprint.Name)
 	native, err := base64.RawURLEncoding.DecodeString(encoded)
@@ -239,6 +241,7 @@ func TestNativePayloadRefusalsAndAllRowAdmission(t *testing.T) {
 }
 
 func TestRefreshPreservesNativeHistoricalEvidence(t *testing.T) {
+	t.Parallel()
 	for _, proof := range []bool{false, true} {
 		fp := recordingtest.Defaults().Fingerprint
 		fp.ClosureStrategy = "" // No refresh can manufacture a historical derivation.

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -28,6 +27,7 @@ func historicalRows(pkg string, opts ...recordingtest.Option) []*benchfmt.Result
 }
 
 func TestStatHistoricalSubjectsIgnoreCurrentModuleRename(t *testing.T) {
+	t.Parallel()
 	for _, withPkg := range []bool{false, true} {
 		for _, dirty := range []bool{false, true} {
 			t.Run(strings.Join([]string{boolName(withPkg), boolName(dirty)}, "/"), func(t *testing.T) {
@@ -50,10 +50,10 @@ func TestStatHistoricalSubjectsIgnoreCurrentModuleRename(t *testing.T) {
 				}
 				b := commitAll(t, repo, "historical new").String()
 				writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/newmodule\n\ngo 1.26.4\n")
-				withWorkingDir(t, dir)
+				ctx := withWorkingDir(t, dir)
 				for _, machine := range []bool{false, true} {
 					var out bytes.Buffer
-					if err := runStat(context.Background(), &out, io.Discard, statConfig{opts: compare.DefaultOptions(), jsonOut: machine}, []string{a, b}); err != nil {
+					if err := runStat(ctx, &out, io.Discard, statConfig{opts: compare.DefaultOptions(), jsonOut: machine}, []string{a, b}); err != nil {
 						t.Fatal(err)
 					}
 					if strings.Contains(out.String(), "example.com/newmodule") || !strings.Contains(out.String(), "example.com/oldmodule/pkg") {
@@ -91,6 +91,7 @@ func boolName(v bool) string {
 }
 
 func TestStatRenamePairingRetainsSideContextsAndConfigurations(t *testing.T) {
+	t.Parallel()
 	for _, changedPkg := range []bool{false, true} {
 		t.Run(boolName(changedPkg), func(t *testing.T) {
 			dir, repo, st := policyRepo(t)
@@ -110,9 +111,9 @@ func TestStatRenamePairingRetainsSideContextsAndConfigurations(t *testing.T) {
 				}
 			}
 			b := commitAll(t, repo, "new module").String()
-			withWorkingDir(t, dir)
+			ctx := withWorkingDir(t, dir)
 			var out bytes.Buffer
-			if err := runStat(context.Background(), &out, io.Discard, statConfig{opts: compare.DefaultOptions(), jsonOut: true}, []string{a, b}); err != nil {
+			if err := runStat(ctx, &out, io.Discard, statConfig{opts: compare.DefaultOptions(), jsonOut: true}, []string{a, b}); err != nil {
 				t.Fatal(err)
 			}
 			ds, c, _ := decodedPolicyReport(t, out.String())
@@ -133,6 +134,7 @@ func TestStatRenamePairingRetainsSideContextsAndConfigurations(t *testing.T) {
 }
 
 func TestStatBlockedAuditNotesHaveTextJSONParity(t *testing.T) {
+	t.Parallel()
 	for _, blocker := range []string{"dirty", "strategy", "format"} {
 		for _, shape := range []string{"matched", "disjoint-child", "disjoint-config", "matched-children"} {
 			t.Run(blocker+"/"+shape, func(t *testing.T) {
@@ -196,14 +198,14 @@ func TestStatBlockedAuditNotesHaveTextJSONParity(t *testing.T) {
 				if blocker != "strategy" {
 					refs = append(refs, commitAll(t, repo, "blocked historical").String())
 				}
-				withWorkingDir(t, dir)
+				ctx := withWorkingDir(t, dir)
 				var text, jsonOut bytes.Buffer
 				for _, machine := range []bool{false, true} {
 					var out io.Writer = &text
 					if machine {
 						out = &jsonOut
 					}
-					err := runStat(context.Background(), out, io.Discard, statConfig{opts: compare.DefaultOptions(), jsonOut: machine, failOnRegression: true}, refs)
+					err := runStat(ctx, out, io.Discard, statConfig{opts: compare.DefaultOptions(), jsonOut: machine, failOnRegression: true}, refs)
 					var empty *nothingComparedError
 					if !errors.As(err, &empty) {
 						t.Fatalf("blocked gate: %v", err)

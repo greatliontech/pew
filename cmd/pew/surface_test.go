@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -77,6 +76,7 @@ func verbDefaultsTable(t *testing.T) (map[string]tableRow, []string) {
 // also a default, and the guidance document's stated defaults and
 // opt-in purposes agree.
 func TestSurfaceTableTracksTheCommands(t *testing.T) {
+	t.Parallel()
 	table, order := verbDefaultsTable(t)
 	stated := map[string]bool{}
 	for _, verb := range order {
@@ -213,6 +213,7 @@ func TestSurfaceTableTracksTheCommands(t *testing.T) {
 // added, the run serves two and measures one, saying so on one line,
 // and an unchanged tree says nothing to run with its count.
 func TestRunReportsServedBenchmarks(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("measures a fixture package through the real executor")
 	}
@@ -236,21 +237,21 @@ func TestRunReportsServedBenchmarks(t *testing.T) {
 		}
 	}
 	commitFixture(t, dir)
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	rc := runConfig{
 		benchDir: filepath.Join(dir, "benchmarks"),
 		opts:     run.Options{Count: 1, Benchtime: "1x", Bench: "."},
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
 	}
 	var out bytes.Buffer
-	if err := runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"./..."}); err != nil {
+	if err := runRun(ctx, &out, &bytes.Buffer{}, rc, []string{"./..."}); err != nil {
 		t.Fatalf("first run: %v\n%s", err, out.String())
 	}
 	if strings.Count(out.String(), "recorded     ") != 3 || strings.Contains(out.String(), "served       ") {
 		t.Fatalf("first run over an unrecorded tree:\n%s", out.String())
 	}
 	out.Reset()
-	if err := runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"./..."}); err != nil {
+	if err := runRun(ctx, &out, &bytes.Buffer{}, rc, []string{"./..."}); err != nil {
 		t.Fatalf("second run: %v\n%s", err, out.String())
 	}
 	if !strings.Contains(out.String(), "served       example.com/served/a: 2 valid, nothing to run") || !strings.Contains(out.String(), "served       example.com/served/b: 1 valid, nothing to run") {
@@ -282,7 +283,7 @@ func TestRunReportsServedBenchmarks(t *testing.T) {
 		t.Fatal(err)
 	}
 	out.Reset()
-	if err := runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"./..."}); err != nil {
+	if err := runRun(ctx, &out, &bytes.Buffer{}, rc, []string{"./..."}); err != nil {
 		t.Fatalf("third run: %v\n%s", err, out.String())
 	}
 	got := out.String()

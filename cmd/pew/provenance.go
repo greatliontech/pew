@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/greatliontech/gofresh"
 	gofreshtool "github.com/greatliontech/gofresh/gotool"
@@ -33,6 +34,7 @@ func withToolchainSampler(ctx context.Context) context.Context {
 }
 
 func preparationReader(ctx context.Context, dir string, env gotool.Environment) (*gofreshtool.EnvReader, error) {
+	dir = resolveCommandDir(ctx, dir)
 	makeReader := func() *gofreshtool.EnvReader {
 		return gotool.Reader(dir, env, func(cmd *exec.Cmd) {
 			if hook := dependencies(ctx).prepare; hook != nil {
@@ -59,7 +61,7 @@ func sampleGoVersion(ctx context.Context, dir string, env gotool.Environment) (s
 	if err != nil {
 		return "", err
 	}
-	return (gofreshtool.SnapshotSampler{Reader: reader}).Sample(ctx, gotool.CommandDir(dir), env.Values())
+	return (gofreshtool.SnapshotSampler{Reader: reader}).Sample(ctx, resolveCommandDir(ctx, dir), env.Values())
 }
 
 // checkToolchainProvenance refuses the judged-run states where this
@@ -77,6 +79,9 @@ func checkToolchainProvenance(ctx context.Context, dir string, env gotool.Enviro
 	// names what this side could read beside a failed sample (spec §7's
 	// refusal contract); the invocation owns the sampler memo, so a
 	// composite per check does not repeat its toolchain query.
+	if dir == "" || !filepath.IsAbs(dir) {
+		dir = resolveCommandDir(ctx, dir)
+	}
 	var sample gofresh.SampleFunc
 	goVersionSampler := dependencies(ctx).sample
 	if goVersionSampler != nil {

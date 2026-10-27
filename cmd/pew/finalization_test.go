@@ -7,6 +7,7 @@ import (
 )
 
 func TestExitCodeClassifiesEveryFinalizationCause(t *testing.T) {
+	t.Parallel()
 	unfulfilled := &profileUnfulfilledError{}
 	empty := &nothingComparedError{reason: "empty"}
 	cleanup := errors.New("cleanup failed")

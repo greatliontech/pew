@@ -39,16 +39,17 @@ func (w *statusExplanationWriter) Write(p []byte) (int, error) {
 }
 
 func TestStatusExplanationFailureCannotReportSuccess(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package")
 	}
 	dir := twoArmFixture(t)
 	writeFile(t, filepath.Join(dir, "bench_test.go"), "package arms\nimport \"testing\"\nfunc BenchmarkFirst(b *testing.B) {}\n")
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	writeStatRecording(t, store.New(filepath.Join(dir, "benchmarks")), "", "BenchmarkFirst", 100)
 	cause := errors.New("explanation output failed")
 	w := &statusExplanationWriter{err: cause}
-	if err := runStatus(t.Context(), w, "", "", false, true, false, []string{"."}); !errors.Is(err, cause) {
+	if err := runStatus(ctx, w, "", "", false, true, false, []string{"."}); !errors.Is(err, cause) {
 		t.Fatalf("lost explanation failure: %v", err)
 	}
 	if w.calls < 2 || !strings.Contains(w.first.String(), "stale") || !strings.Contains(w.first.String(), "BenchmarkFirst") {
@@ -58,7 +59,7 @@ func TestStatusExplanationFailureCannotReportSuccess(t *testing.T) {
 	// stale verdict remains visible, but an incomplete requested explanation
 	// is not a successful complete status report either.
 	var out bytes.Buffer
-	if err := runStatus(t.Context(), &out, "", "", false, true, false, []string{"."}); err == nil || !strings.Contains(err.Error(), "decode manifest") || !strings.Contains(out.String(), "BenchmarkFirst") {
+	if err := runStatus(ctx, &out, "", "", false, true, false, []string{"."}); err == nil || !strings.Contains(err.Error(), "decode manifest") || !strings.Contains(out.String(), "BenchmarkFirst") {
 		t.Fatalf("incomplete explanation reported success: %v\n%s", err, &out)
 	}
 }
@@ -69,12 +70,12 @@ func TestStatusPreservesInventoryWhenEnginePreparationFails(t *testing.T) {
 	}
 	dir := twoArmFixture(t)
 	writeFile(t, filepath.Join(dir, "third_test.go"), "package arms\nimport \"testing\"\nfunc BenchmarkThird(b *testing.B) {}\n")
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	unusableRecordings(t, dir)
 	writeStatRecording(t, store.New(filepath.Join(dir, "benchmarks")), "", "BenchmarkFirst", 100)
 	t.Setenv("GOFLAGS", "-pgo="+filepath.Join(dir, "missing.pgo"))
 	var out bytes.Buffer
-	err := runStatus(t.Context(), &out, "", "", false, false, true, []string{"."})
+	err := runStatus(ctx, &out, "", "", false, false, true, []string{"."})
 	if err == nil || !strings.Contains(err.Error(), "missing.pgo") {
 		t.Fatalf("preparation failure missing: %v\n%s", err, &out)
 	}
@@ -103,8 +104,8 @@ func TestStatusProvenanceRefusalPrecedesEveryVerdict(t *testing.T) {
 		writeFile(t, filepath.Join(dir, name, "bench_test.go"), "package bench\nimport \"testing\"\nfunc BenchmarkProbe(b *testing.B) {}\n")
 	}
 	t.Setenv("GOWORK", filepath.Join(dir, "go.work"))
-	withWorkingDir(t, dir)
 	ctx, deps := testDependencies(t)
+	ctx = withWorkDir(ctx, dir)
 	deps.sample = func(_ context.Context, moduleDir string, _ testEnvironmentValue) (string, error) {
 		if filepath.Base(moduleDir) == "two" {
 			return "go99.1.0", nil
@@ -120,6 +121,7 @@ func TestStatusProvenanceRefusalPrecedesEveryVerdict(t *testing.T) {
 }
 
 func TestStatusReportsIndependentRowsAndFailsIncompleteReports(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads fixture packages")
 	}
@@ -127,7 +129,7 @@ func TestStatusReportsIndependentRowsAndFailsIncompleteReports(t *testing.T) {
 		t.Run(failure, func(t *testing.T) {
 			ctx, deps := testDependencies(t)
 			dir := twoArmFixture(t)
-			withWorkingDir(t, dir)
+			ctx = withWorkDir(ctx, dir)
 			unusableRecordings(t, dir)
 			st := store.New(filepath.Join(dir, "benchmarks"))
 			if failure == "read" {
@@ -196,22 +198,23 @@ func unusableRecordings(t *testing.T, dir string) map[string][]byte {
 }
 
 func TestRunRegeneratesUnusableRecordingsWithoutDeletingFirst(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads fixture packages")
 	}
 	for _, outcome := range []string{"success", "failure", "interruption"} {
 		t.Run(outcome, func(t *testing.T) {
 			dir := twoArmFixture(t)
-			withWorkingDir(t, dir)
+			baseCtx := withWorkingDir(t, dir)
 			old := unusableRecordings(t, dir)
 			var out bytes.Buffer
-			if err := runStatus(t.Context(), &out, "", "", false, false, true, []string{"."}); err != nil {
+			if err := runStatus(baseCtx, &out, "", "", false, false, true, []string{"."}); err != nil {
 				t.Fatalf("status could not inventory known format failures: %v\n%s", err, &out)
 			}
 			if strings.Count(out.String(), `"verdict":"stale"`) != 2 || strings.Count(out.String(), `"reason":"format"`) != 2 {
 				t.Fatalf("format failures disappeared from status: %s", &out)
 			}
-			ctx, cancel := context.WithCancel(t.Context())
+			ctx, cancel := context.WithCancel(baseCtx)
 			defer cancel()
 			rc := runConfig{opts: run.Options{Count: 1, Benchtime: "1x", Bench: "."}, binary: func(ctx context.Context, dir, pin string, env gotool.Environment, binary string, args []string) ([]byte, error) {
 				if outcome == "interruption" {
@@ -249,6 +252,7 @@ func TestRunRegeneratesUnusableRecordingsWithoutDeletingFirst(t *testing.T) {
 }
 
 func TestStatInventoriesUnusableHistoricalRecordingsAsFormatFailures(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads fixture packages")
 	}
@@ -257,9 +261,9 @@ func TestStatInventoriesUnusableHistoricalRecordingsAsFormatFailures(t *testing.
 	writeFile(t, filepath.Join(dir, "bench_test.go"), "package recovery\nimport \"testing\"\nfunc BenchmarkFirst(b *testing.B) {}\nfunc BenchmarkSecond(b *testing.B) {}\n")
 	old := unusableRecordings(t, dir)
 	commitFixture(t, dir)
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errout bytes.Buffer
-	err := runStat(t.Context(), &out, &errout, statConfig{opts: compare.DefaultOptions(), failOnRegression: true}, nil)
+	err := runStat(ctx, &out, &errout, statConfig{opts: compare.DefaultOptions(), failOnRegression: true}, nil)
 	var empty *nothingComparedError
 	if !errors.As(err, &empty) || !strings.Contains(errout.String(), "BenchmarkFirst") || !strings.Contains(errout.String(), "BenchmarkSecond") || !strings.Contains(out.String()+errout.String()+err.Error(), "format") {
 		t.Fatalf("legacy inventory not reported as format failures: %v\n%s\n%s", err, &out, &errout)

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -46,15 +45,9 @@ func fixtureABBuild(_ string, _ []string, args []string) error {
 // repository; a placement on another filesystem is refused, never
 // silently degraded (spec §12).
 func TestABWorktreeDirPlacesSideBWhereTheOperatorNames(t *testing.T) {
+	t.Parallel()
 	dir := abFixtureRepo(t)
-	prior, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(filepath.Join(dir, "p")); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(prior)
+	ctx := withWorkingDir(t, filepath.Join(dir, "p"))
 	placement := filepath.Join(t.TempDir(), "scratch")
 	if err := os.MkdirAll(placement, 0o755); err != nil {
 		t.Fatal(err)
@@ -70,7 +63,7 @@ func TestABWorktreeDirPlacesSideBWhereTheOperatorNames(t *testing.T) {
 		return fixtureABBuild(buildDir, env, args)
 	}
 	var out, errOut bytes.Buffer
-	if err := runAB(context.Background(), &out, &errOut, ac, []string{"."}); err != nil {
+	if err := runAB(ctx, &out, &errOut, ac, []string{"."}); err != nil {
 		t.Fatalf("runAB: %v\nstderr: %s", err, errOut.String())
 	}
 	if len(seenDirs) != 2 {
@@ -132,6 +125,7 @@ func TestABWorktreeDirPlacesSideBWhereTheOperatorNames(t *testing.T) {
 // and so does a sibling repository's worktree in the same placement,
 // registered or not (spec §12).
 func TestABSweepsStaleSideBWorktrees(t *testing.T) {
+	t.Parallel()
 	dir := abFixtureRepo(t)
 	placement := filepath.Dir(dir)
 	control := abGitControl{env: testEnvironment(t, nil)}
@@ -248,16 +242,9 @@ func TestABSweepsStaleSideBWorktrees(t *testing.T) {
 	}
 	// End to end: a run reports the sweep on stderr.
 	stale = mintResidue()
-	prior, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(filepath.Join(dir, "p")); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(prior)
+	ctx := withWorkingDir(t, filepath.Join(dir, "p"))
 	var out, errOut bytes.Buffer
-	if err := runAB(context.Background(), &out, &errOut, abConfigStub(""), []string{"."}); err != nil {
+	if err := runAB(ctx, &out, &errOut, abConfigStub(""), []string{"."}); err != nil {
 		t.Fatalf("runAB: %v\nstderr: %s", err, errOut.String())
 	}
 	if !strings.Contains(errOut.String(), "swept a stale side-B worktree "+stale) {

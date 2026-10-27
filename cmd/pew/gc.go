@@ -37,6 +37,13 @@ func newGCCmd() *cobra.Command {
 }
 
 func runGC(ctx context.Context, w io.Writer, benchDir string) error {
+	if benchDir != "" {
+		var err error
+		benchDir, err = resolveWorkPath(ctx, benchDir)
+		if err != nil {
+			return err
+		}
+	}
 	env, err := gotool.NewEnvironment(nil)
 	if err != nil {
 		return err
@@ -214,7 +221,7 @@ func addStoreOnlySourceBenchmarks(w io.Writer, st *store.Store, moduleDir string
 }
 
 func currentModuleDir(ctx context.Context, env gotool.Environment) (string, error) {
-	reader := gotool.Reader("", env, nil)
+	reader := gotool.Reader(invocationWorkDir(ctx), env, nil)
 	gomod, err := gotool.EnvValue(ctx, reader, "GOMOD")
 	if err != nil {
 		return "", err

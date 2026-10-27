@@ -23,6 +23,7 @@ import (
 )
 
 func TestABPackageSelectsBenchmarkOnlySingleCountProcesses(t *testing.T) {
+	t.Parallel()
 	const pattern = "^BenchmarkSelected$/case"
 	dirA, dirB := t.TempDir(), t.TempDir()
 	binA, binB := filepath.Join(dirA, "binary-A"), filepath.Join(dirB, "binary-B")
@@ -76,6 +77,7 @@ func TestABPackageSelectsBenchmarkOnlySingleCountProcesses(t *testing.T) {
 }
 
 func TestExplainDynamicStrategyNamesFullDistinctValues(t *testing.T) {
+	t.Parallel()
 	const before = "gofresh/dynamic-state@123456789 old derivation"
 	const after = "gofresh/dynamic-state@123456789 new derivation"
 	for _, current := range []string{before, after} {
@@ -105,6 +107,7 @@ func TestExplainDynamicStrategyNamesFullDistinctValues(t *testing.T) {
 }
 
 func TestAdmissionFormatRefusalAcrossRows(t *testing.T) {
+	t.Parallel()
 	for _, working := range []bool{false, true} {
 		valid := func() []*benchfmt.Result {
 			return []*benchfmt.Result{admissionRow(admissionConfig(gofresh.DynamicStateStrategy)), admissionRow(admissionConfig(gofresh.DynamicStateStrategy)), admissionRow(admissionConfig(gofresh.DynamicStateStrategy))}
@@ -139,6 +142,7 @@ func TestAdmissionFormatRefusalAcrossRows(t *testing.T) {
 }
 
 func TestInheritedMalformedEnvironmentRefusesBeforeListing(t *testing.T) {
+	t.Parallel()
 	const modeKey = "PEW_ENVIRONMENT_REFUSAL_CHILD"
 	const malformed = "PEW_INHERITED_ENTRY_WITHOUT_EQUALS"
 	if mode := os.Getenv(modeKey); mode != "" {

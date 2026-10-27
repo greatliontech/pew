@@ -15,13 +15,14 @@ import (
 )
 
 func TestRunInvalidSampleKeepsPriorRecordingAndSibling(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain")
 	}
 	for _, bad := range []string{"NaN", "+Inf", "-Inf", "-1"} {
 		t.Run(bad, func(t *testing.T) {
 			dir := twoArmFixture(t)
-			withWorkingDir(t, dir)
+			ctx := withWorkingDir(t, dir)
 			st := store.New(filepath.Join(dir, "benchmarks"))
 			writeStatRecording(t, st, "", "BenchmarkFirst", 42)
 			path, err := st.Path("", "BenchmarkFirst", "")
@@ -45,7 +46,7 @@ func TestRunInvalidSampleKeepsPriorRecordingAndSibling(t *testing.T) {
 				return out, err
 			}}
 			var out, errOut bytes.Buffer
-			if err := runRun(context.Background(), &out, &errOut, rc, []string{"."}); err == nil {
+			if err := runRun(ctx, &out, &errOut, rc, []string{"."}); err == nil {
 				t.Fatalf("invalid run succeeded: %s", out.String())
 			}
 			after, err := os.ReadFile(path)

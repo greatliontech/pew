@@ -12,6 +12,7 @@ import (
 )
 
 func TestProfileRequestIncludesBenchmarksUnrecordedOnBothSides(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("produces a real measurement and diagnostic beside an unrecorded declaration")
 	}
@@ -25,10 +26,10 @@ func BenchmarkRecorded(b *testing.B) { for b.Loop() { sink = make([]byte, 2<<20)
 func BenchmarkMissing(b *testing.B) {}
 `)
 	commitFixture(t, root)
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	var output, diagnostics bytes.Buffer
 	rc := runConfig{opts: run.Options{Bench: "^BenchmarkRecorded$", Count: 2, Benchtime: "1x"}, profile: "alloc", profileBenchtime: "32x"}
-	if err := runRun(t.Context(), &output, &diagnostics, rc, []string{"."}); err != nil {
+	if err := runRun(ctx, &output, &diagnostics, rc, []string{"."}); err != nil {
 		t.Fatalf("produce positive diagnostic: %v\n%s\n%s", err, &output, &diagnostics)
 	}
 	repo, err := git.PlainOpen(root)
@@ -39,7 +40,7 @@ func BenchmarkMissing(b *testing.B) {}
 	for _, jsonOut := range []bool{false, true} {
 		output.Reset()
 		diagnostics.Reset()
-		err := runStat(t.Context(), &output, &diagnostics, statConfig{profile: "alloc", jsonOut: jsonOut, opts: compare.DefaultOptions()}, []string{ref})
+		err := runStat(ctx, &output, &diagnostics, statConfig{profile: "alloc", jsonOut: jsonOut, opts: compare.DefaultOptions()}, []string{ref})
 		if err == nil || exitCode(err) != 2 {
 			t.Fatalf("json=%t: absent requested diagnostic disappeared: %v\n%s\n%s", jsonOut, err, &output, &diagnostics)
 		}
@@ -69,7 +70,7 @@ func BenchmarkMissing(b *testing.B) {}
 	// Historical comparisons promise only the union of historical recordings;
 	// today's unrecorded declaration must not widen that separate population.
 	output.Reset()
-	if err := runStat(t.Context(), &output, &diagnostics, statConfig{profile: "alloc", jsonOut: true, opts: compare.DefaultOptions()}, []string{ref, ref}); err != nil {
+	if err := runStat(ctx, &output, &diagnostics, statConfig{profile: "alloc", jsonOut: true, opts: compare.DefaultOptions()}, []string{ref, ref}); err != nil {
 		t.Fatalf("historical recorded-only request: %v\n%s", err, &output)
 	}
 	reports, _ := decodeProfileReport(t, output.Bytes())
@@ -78,7 +79,7 @@ func BenchmarkMissing(b *testing.B) {}
 	}
 	// Informational statistics without a profile request keep their own policy.
 	output.Reset()
-	if err := runStat(t.Context(), &output, &diagnostics, statConfig{jsonOut: true, opts: compare.DefaultOptions()}, []string{ref}); err != nil {
+	if err := runStat(ctx, &output, &diagnostics, statConfig{jsonOut: true, opts: compare.DefaultOptions()}, []string{ref}); err != nil {
 		t.Fatalf("unrequested profile changed statistical exit: %v", err)
 	}
 	if reports, _ := decodeProfileReport(t, output.Bytes()); len(reports) != 0 {

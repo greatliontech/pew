@@ -70,6 +70,7 @@ func TestProvenanceReadsPreparationSnapshot(t *testing.T) {
 }
 
 func TestJudgedVerbsShareSamplesOnlyWithinInvocation(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads fixture packages through the toolchain")
 	}
@@ -89,8 +90,8 @@ func TestJudgedVerbsShareSamplesOnlyWithinInvocation(t *testing.T) {
 				writeStatRecording(t, st, pkg, "BenchmarkSample", 100)
 			}
 			commitFixture(t, dir)
-			withWorkingDir(t, dir)
 			ctx, deps := testDependencies(t)
+			ctx = withWorkDir(ctx, dir)
 			checks := 0
 			readers := map[*gofreshtool.EnvReader]int{}
 			deps.sample = func(ctx context.Context, dir string, env testEnvironmentValue) (string, error) {
@@ -147,6 +148,7 @@ func TestJudgedVerbsShareSamplesOnlyWithinInvocation(t *testing.T) {
 }
 
 func TestInvocationSharesModuleSessionAcrossPackages(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/shared-session\n\ngo 1.26.4\n")
 	pkgA := filepath.Join(dir, "a")

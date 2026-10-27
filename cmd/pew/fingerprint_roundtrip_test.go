@@ -11,6 +11,7 @@ import (
 
 // Every native fingerprint field survives the envelope without reconstruction.
 func TestFingerprintConfigRoundTrip(t *testing.T) {
+	t.Parallel()
 	want := gofresh.Fingerprint{
 		MaximalClosure:     "closure-hash",
 		TestVariantClosure: "variant-hash",

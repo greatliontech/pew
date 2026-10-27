@@ -43,12 +43,13 @@ func commitFixture(t *testing.T, dir string) {
 // listing would fail with its own error, so the label's refusal is the
 // proof it fired first.
 func TestRunRefusesAnInvalidLabelAtEntry(t *testing.T) {
-	withWorkingDir(t, t.TempDir())
+	t.Parallel()
+	ctx := withWorkingDir(t, t.TempDir())
 	cmd := newRunCmd()
 	cmd.SetArgs([]string{"--label", "a b"})
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
-	err := cmd.Execute()
+	err := cmd.ExecuteContext(ctx)
 	if err == nil || !strings.Contains(err.Error(), "invalid label") {
 		t.Fatalf("run --label 'a b' = %v; want the label refusal before any listing", err)
 	}
@@ -56,7 +57,7 @@ func TestRunRefusesAnInvalidLabelAtEntry(t *testing.T) {
 	cmd.SetArgs([]string{"--bench", "("})
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
-	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "pattern") {
+	if err := cmd.ExecuteContext(ctx); err == nil || !strings.Contains(err.Error(), "pattern") {
 		t.Fatalf("run --bench '(' = %v; want the pattern refusal before any listing", err)
 	}
 }
@@ -66,6 +67,7 @@ func TestRunRefusesAnInvalidLabelAtEntry(t *testing.T) {
 // directory) is reported before the first package's measurement, and
 // the first package still measures and records (REQ-pew-preparation).
 func TestRunPreparesEveryPackageBeforeAnyMeasurement(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads two fixture packages through the toolchain with the execute seam stubbed")
 	}
@@ -105,7 +107,7 @@ func TestRunPreparesEveryPackageBeforeAnyMeasurement(t *testing.T) {
 	if err := os.MkdirAll(occupied, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var events []string
 	rc := runConfig{
 		benchDir: benchDir,
@@ -121,7 +123,7 @@ func TestRunPreparesEveryPackageBeforeAnyMeasurement(t *testing.T) {
 		},
 	}
 	var out bytes.Buffer
-	err = runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"./..."})
+	err = runRun(ctx, &out, &bytes.Buffer{}, rc, []string{"./..."})
 	if err == nil || !strings.Contains(err.Error(), "1 package(s) failed") {
 		t.Fatalf("runRun = %v\n%s", err, out.String())
 	}
@@ -150,6 +152,7 @@ func TestRunPreparesEveryPackageBeforeAnyMeasurement(t *testing.T) {
 // typed view exists, before the warm-up build and the first arm
 // (REQ-pew-preparation).
 func TestRunRefusesAStoreCoveredSourceBeforeTheWarmupBuild(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain with the execute seam stubbed")
 	}
@@ -169,7 +172,7 @@ func TestRunRefusesAStoreCoveredSourceBeforeTheWarmupBuild(t *testing.T) {
 		}
 	}
 	commitFixture(t, dir)
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	executions := 0
 	rc := runConfig{
 		benchDir: filepath.Join(dir, "benchmarks"),
@@ -181,7 +184,7 @@ func TestRunRefusesAStoreCoveredSourceBeforeTheWarmupBuild(t *testing.T) {
 		},
 	}
 	var out bytes.Buffer
-	err := runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"./benchmarks/in"})
+	err := runRun(ctx, &out, &bytes.Buffer{}, rc, []string{"./benchmarks/in"})
 	if err == nil || !strings.Contains(out.String(), "lies under the recording store") {
 		t.Fatalf("runRun = %v\n%s", err, out.String())
 	}
@@ -196,6 +199,7 @@ func TestRunRefusesAStoreCoveredSourceBeforeTheWarmupBuild(t *testing.T) {
 // refuses at entry, and the standing binaries live beside the
 // repository, never under the temp root (REQ-pew-preparation).
 func TestABPreparesEveryPackageBeforeAnyIteration(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads the fixture through the toolchain with the build and execute seams stubbed")
 	}
@@ -217,7 +221,7 @@ func TestABPreparesEveryPackageBeforeAnyIteration(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	builds, iterations := 0, 0
 	var binaryDirs []string
 	ac := abConfig{
@@ -240,7 +244,7 @@ func TestABPreparesEveryPackageBeforeAnyIteration(t *testing.T) {
 			return guard.Guards{Toolchain: "go1", BuildConfig: "b", Machine: "m", RuntimeConfig: "r"}, nil
 		},
 	}
-	err := runAB(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, ac, []string{"./p", "./zlate"})
+	err := runAB(ctx, &bytes.Buffer{}, &bytes.Buffer{}, ac, []string{"./p", "./zlate"})
 	if err == nil || !strings.Contains(err.Error(), "zlate: pattern \"BenchmarkWork\" selects no benchmark on side A") {
 		t.Fatalf("ab with a later package the pattern misses = %v; want its refusal before the first package's iterations", err)
 	}
@@ -261,7 +265,7 @@ func TestABPreparesEveryPackageBeforeAnyIteration(t *testing.T) {
 	cmd.SetArgs([]string{"--bench", "("})
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
-	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "pattern") {
+	if err := cmd.ExecuteContext(ctx); err == nil || !strings.Contains(err.Error(), "pattern") {
 		t.Fatalf("ab --bench '(' = %v; want the pattern refusal at entry", err)
 	}
 }
@@ -273,6 +277,7 @@ func TestABPreparesEveryPackageBeforeAnyIteration(t *testing.T) {
 // (REQ-pew-preparation). A source under the store proper is the sibling
 // store-covered refusal; the alias is what reaches this one.
 func TestRunRefusesAnOverlappingDestinationBeforeTheWarmupBuild(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain with the execute seam stubbed")
 	}
@@ -299,7 +304,7 @@ func TestRunRefusesAnOverlappingDestinationBeforeTheWarmupBuild(t *testing.T) {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 	commitFixture(t, dir)
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	executions := 0
 	rc := runConfig{
 		benchDir: filepath.Join(dir, "benchmarks"),
@@ -311,7 +316,7 @@ func TestRunRefusesAnOverlappingDestinationBeforeTheWarmupBuild(t *testing.T) {
 		},
 	}
 	var out bytes.Buffer
-	err := runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"./sub"})
+	err := runRun(ctx, &out, &bytes.Buffer{}, rc, []string{"./sub"})
 	if err == nil || !strings.Contains(out.String(), "overlaps source input") {
 		t.Fatalf("runRun = %v\n%s", err, out.String())
 	}
@@ -324,6 +329,7 @@ func TestRunRefusesAnOverlappingDestinationBeforeTheWarmupBuild(t *testing.T) {
 // an unchanged tree measures nothing and says so; --all measures the
 // valid benchmark again (REQ-pew-serve-proven).
 func TestRunServesValidRecordingsByDefault(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain and runs its benchmarks once")
 	}
@@ -341,7 +347,7 @@ func TestRunServesValidRecordingsByDefault(t *testing.T) {
 		}
 	}
 	commitFixture(t, dir)
-	withWorkingDir(t, dir)
+	baseCtx := withWorkingDir(t, dir)
 	measurements := 0
 	rc := runConfig{
 		benchDir: filepath.Join(dir, "benchmarks"),
@@ -355,7 +361,7 @@ func TestRunServesValidRecordingsByDefault(t *testing.T) {
 		},
 	}
 	var out bytes.Buffer
-	if err := runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"."}); err != nil {
+	if err := runRun(baseCtx, &out, &bytes.Buffer{}, rc, []string{"."}); err != nil {
 		t.Fatalf("first run: %v\n%s", err, out.String())
 	}
 	if measurements != 2 {
@@ -366,6 +372,7 @@ func TestRunServesValidRecordingsByDefault(t *testing.T) {
 	// capture: the second run loads exactly once.
 	loads := 0
 	ctx, deps := testDependencies(t)
+	ctx = withWorkDir(ctx, dir)
 	prior := deps.view
 	deps.view = func(e *analysisSession, ctx context.Context, subjects []gofresh.Subject, moduleDir string, kind gofresh.Kind) (*gofresh.RuntimeBinding, error) {
 		loads++
@@ -383,7 +390,7 @@ func TestRunServesValidRecordingsByDefault(t *testing.T) {
 	all := rc
 	all.all = true
 	out.Reset()
-	if err := runRun(context.Background(), &out, &bytes.Buffer{}, all, []string{"."}); err != nil {
+	if err := runRun(baseCtx, &out, &bytes.Buffer{}, all, []string{"."}); err != nil {
 		t.Fatalf("--all run: %v\n%s", err, out.String())
 	}
 	if measurements != 4 {
@@ -415,12 +422,12 @@ func TestStatusBuildsNoEngineForABenchmarklessPackage(t *testing.T) {
 		}
 	}
 	commitFixture(t, dir)
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	// An unreadable PGO profile fails every engine this environment builds.
 	t.Setenv("GOFLAGS", "-pgo="+filepath.Join(dir, "missing.pgo"))
 	writeStatRecording(t, store.New(filepath.Join(dir, "benchmarks")), "withbench", "BenchmarkW", 100)
 	var out bytes.Buffer
-	if err := runStatus(context.Background(), &out, filepath.Join(dir, "benchmarks"), "", false, false, false, []string{"./..."}); err == nil || !strings.Contains(err.Error(), "missing.pgo") {
+	if err := runStatus(ctx, &out, filepath.Join(dir, "benchmarks"), "", false, false, false, []string{"./..."}); err == nil || !strings.Contains(err.Error(), "missing.pgo") {
 		t.Fatalf("missing PGO did not fail the incomplete report: %v", err)
 	}
 	errors := strings.Count(out.String(), "error ")

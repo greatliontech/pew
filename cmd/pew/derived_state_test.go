@@ -44,7 +44,7 @@ func TestDerivedStateColdWarmDiscardedCacheAndDependencyEquivalence(t *testing.T
 		t.Fatal(err)
 	}
 	commitAll(t, repo, "initial")
-	withWorkingDir(t, dirA)
+	ctx := withWorkingDir(t, dirA)
 
 	closure.PruneMemos(0)
 	t.Cleanup(func() { closure.PruneMemos(0) })
@@ -54,11 +54,11 @@ func TestDerivedStateColdWarmDiscardedCacheAndDependencyEquivalence(t *testing.T
 	subject := gofresh.Subject{Package: pkg, Symbol: bench}
 	env := testEnvironment(t, os.Environ())
 
-	eCold, _, err := newEngineAt(t.Context(), dirA, dirA, false, env)
+	eCold, _, err := newEngineAt(ctx, dirA, dirA, false, env)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fp, err := fixtureFacts(t.Context(), eCold, subject)
+	fp, err := fixtureFacts(ctx, eCold, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,12 +74,12 @@ func TestDerivedStateColdWarmDiscardedCacheAndDependencyEquivalence(t *testing.T
 
 	check := func(root string, st *store.Store) (verdict, string, gofresh.Fingerprint) {
 		t.Helper()
-		e, _, err := newEngineAt(t.Context(), root, root, false, env)
+		e, _, err := newEngineAt(ctx, root, root, false, env)
 		if err != nil {
 			t.Fatal(err)
 		}
-		batch, err := checkPackage(t.Context(), st, func(subjects []gofresh.Subject) (*gofresh.RuntimeBinding, error) {
-			return newViewFor(e, t.Context(), subjects, root, gofresh.Measurement)
+		batch, err := checkPackage(ctx, st, func(subjects []gofresh.Subject) (*gofresh.RuntimeBinding, error) {
+			return newViewFor(e, ctx, subjects, root, gofresh.Measurement)
 		}, pkg, "", root, []string{bench}, "", nil)
 		if err != nil {
 			t.Fatal(err)
@@ -134,11 +134,11 @@ func TestDerivedStateColdWarmDiscardedCacheAndDependencyEquivalence(t *testing.T
 	if v, _, _ := check(dirA, stA); v != verdictValid {
 		t.Fatalf("restored dirA = %s, want valid", v)
 	}
-	withWorkingDir(t, dirB)
+	ctx = withWorkingDir(t, dirB)
 	if v, reason, _ := check(dirB, stB); v != verdictStale || reason != "closure" {
 		t.Fatalf("distinct checkout coordinate dirB borrowed dirA's memo: %s (%s)", v, reason)
 	}
-	withWorkingDir(t, dirA)
+	ctx = withWorkingDir(t, dirA)
 
 	// 4. Budget-cut availability fails with context cancellation rather than
 	// fabricating authority, and historical predating evidence is not upgraded.
@@ -159,7 +159,7 @@ func TestDerivedStateColdWarmDiscardedCacheAndDependencyEquivalence(t *testing.T
 		t.Fatal(err)
 	}
 	var statusOut bytes.Buffer
-	ctx, _, err := beginInvocation(t.Context(), stA.Root, nil, io.Discard)
+	ctx, _, err = beginInvocation(ctx, stA.Root, nil, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}

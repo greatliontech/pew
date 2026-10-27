@@ -18,11 +18,12 @@ import (
 // "keeps what was persisted and says so", not a bare tool error. One
 // anchor per verb; stat's is TestStatInterruptedEndsWithAReport.
 func TestVerbsReportACancelledListingAsInterruption(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/i\n\ngo 1.24\n")
-	withWorkingDir(t, dir)
+	baseCtx := withWorkingDir(t, dir)
 	cancelled := func() context.Context {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(baseCtx)
 		cancel()
 		return ctx
 	}

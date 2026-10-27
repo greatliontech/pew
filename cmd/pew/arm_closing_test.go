@@ -17,14 +17,14 @@ import (
 )
 
 func TestInterruptedArmNamesItsDetachedClosingFailure(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("executes producing benchmark arms")
 	}
 	for _, mode := range []string{"expiry", "source drift"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := twoArmFixture(t)
-			withWorkingDir(t, dir)
-			ctx, cancel := context.WithCancel(t.Context())
+			ctx, cancel := context.WithCancel(withWorkingDir(t, dir))
 			defer cancel()
 			st := store.New(filepath.Join(t.TempDir(), "recordings"))
 			writeStatRecording(t, st, "", "BenchmarkFirst", 42)
@@ -59,6 +59,7 @@ func TestInterruptedArmNamesItsDetachedClosingFailure(t *testing.T) {
 }
 
 func TestABArtifactClosingStopsBeforeInstallAndKeepsCommittedState(t *testing.T) {
+	t.Parallel()
 	for _, stage := range []string{"staged", "committed"} {
 		t.Run(stage, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "ab.txt")
@@ -97,12 +98,12 @@ func TestABArtifactClosingStopsBeforeInstallAndKeepsCommittedState(t *testing.T)
 }
 
 func TestArmProgressFollowsItsOwnedStageBoundaries(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("executes two independently closed arms")
 	}
 	dir := twoArmFixture(t)
-	withWorkingDir(t, dir)
-	ctx, stop := startReporter(t.Context(), &bytes.Buffer{}, 0)
+	ctx, stop := startReporter(withWorkingDir(t, dir), &bytes.Buffer{}, 0)
 	defer stop()
 	var stages []string
 	setPhaseHook(ctx, func(phase string) {
@@ -135,6 +136,7 @@ func TestArmProgressFollowsItsOwnedStageBoundaries(t *testing.T) {
 }
 
 func TestOrdinaryArmRefusesZeroExitWithoutHarnessCompletion(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("executes a test binary which never enters the test harness")
 	}
@@ -146,7 +148,7 @@ func BenchmarkOne(b *testing.B) {}
 func TestMain(m *testing.M) { fmt.Println("BenchmarkOne-2 1 5 ns/op") }
 `)
 	commitFixture(t, dir)
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	st := store.New(filepath.Join(t.TempDir(), "recordings"))
 	writeStatRecording(t, st, "", "BenchmarkOne", 99)
 	key := store.Key{Bench: "BenchmarkOne"}
@@ -155,7 +157,7 @@ func TestMain(m *testing.M) { fmt.Println("BenchmarkOne-2 1 5 ns/op") }
 		t.Fatal(err)
 	}
 	var out, log bytes.Buffer
-	err = runRun(t.Context(), &out, &log, runConfig{all: true, benchDir: st.Root, opts: run.Options{Count: 1, Benchtime: "1x", Bench: "."}}, []string{"."})
+	err = runRun(ctx, &out, &log, runConfig{all: true, benchDir: st.Root, opts: run.Options{Count: 1, Benchtime: "1x", Bench: "."}}, []string{"."})
 	if err == nil || !strings.Contains(out.String(), "benchmark harness completion missing") || strings.Contains(out.String(), "recorded     ") {
 		t.Fatalf("zero exit authenticated a missing harness: %v\n%s\n%s", err, &out, &log)
 	}

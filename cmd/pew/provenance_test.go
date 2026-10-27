@@ -19,6 +19,7 @@ import (
 )
 
 func TestEnginePreparationReportsTheCheckedSample(t *testing.T) {
+	t.Parallel()
 	const sampled = "go1.26.4"
 	ctx, deps := testDependencies(t)
 	calls := 0
@@ -46,6 +47,7 @@ func TestEnginePreparationReportsTheCheckedSample(t *testing.T) {
 // dir under the effective env — the same resolution the engine's own
 // loads use.
 func TestBuildEngineRefusesToolchainSkew(t *testing.T) {
+	t.Parallel()
 	ctx, deps := testDependencies(t)
 
 	var sampledDir string
@@ -78,6 +80,7 @@ func TestBuildEngineRefusesToolchainSkew(t *testing.T) {
 
 // Missing sampling behavior is construction failure, not toolchain skew.
 func TestToolchainProvenanceRequiresSampler(t *testing.T) {
+	t.Parallel()
 	ctx, deps := testDependencies(t)
 	deps.sample = nil
 	_, err := checkToolchainProvenance(ctx, t.TempDir(), testEnvironment(t, os.Environ()))
@@ -92,6 +95,7 @@ func TestToolchainProvenanceRequiresSampler(t *testing.T) {
 
 // An unidentifiable ambient toolchain refuses fail-closed.
 func TestBuildEngineRefusesUnidentifiableToolchain(t *testing.T) {
+	t.Parallel()
 	ctx, deps := testDependencies(t)
 	deps.sample = func(_ context.Context, dir string, env testEnvironmentValue) (string, error) {
 		return "devel +abc123", nil
@@ -181,6 +185,7 @@ func TestGoVersionSampleRunsUnderTheEnvironmentPolicy(t *testing.T) {
 // failed sample classifies identically — unidentifiable is not
 // agreement.
 func TestToolchainProvenanceErrorClassifies(t *testing.T) {
+	t.Parallel()
 	ctx, deps := testDependencies(t)
 
 	deps.sample = func(_ context.Context, dir string, env testEnvironmentValue) (string, error) {
@@ -208,6 +213,7 @@ func TestToolchainProvenanceErrorClassifies(t *testing.T) {
 // stale cancellation. The prepared commands are counted through the
 // runner's boundary hook, keyed by the directory the spawn resolved.
 func TestToolchainSamplerSamplesOncePerKey(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("spawns the toolchain")
 	}
@@ -276,6 +282,7 @@ func TestToolchainSamplerSamplesOncePerKey(t *testing.T) {
 // smoke check that the exec path (command, dir, trimming) works
 // outside the swapped-sampler tests.
 func TestSampleGoVersionSmoke(t *testing.T) {
+	t.Parallel()
 	v, err := sampleGoVersion(context.Background(), ".", testEnvironment(t, nil))
 	if err != nil {
 		t.Fatalf("sampleGoVersion: %v", err)
@@ -288,6 +295,7 @@ func TestSampleGoVersionSmoke(t *testing.T) {
 // Skew aborts run and status at the invocation level: no per-package
 // error rows, the refusal is the command's error.
 func TestRunAndStatusFailFastOnToolchainSkew(t *testing.T) {
+	t.Parallel()
 	ctx, deps := testDependencies(t)
 	deps.sample = func(_ context.Context, dir string, env testEnvironmentValue) (string, error) {
 		return "go99.1.0", nil
@@ -295,7 +303,7 @@ func TestRunAndStatusFailFastOnToolchainSkew(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/skewfast\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "bench_test.go"), "package skewfast\n\nimport \"testing\"\n\nfunc BenchmarkNop(b *testing.B) { for range b.N {} }\n")
-	withWorkingDir(t, dir)
+	ctx = withWorkDir(ctx, dir)
 
 	var out strings.Builder
 	err := runStatus(ctx, &out, "", "", false, false, false, []string{"."})

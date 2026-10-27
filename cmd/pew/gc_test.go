@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -44,6 +43,7 @@ func assertPathMissing(t *testing.T, path string) {
 }
 
 func TestGCStoreRemovesOnlyMissingBenchmarks(t *testing.T) {
+	t.Parallel()
 	st := store.New(t.TempDir())
 	live := writeRecording(t, st, "internal/foo", "BenchmarkLive", "")
 	liveLabel := writeRecording(t, st, "internal/foo", "BenchmarkLive", "x")
@@ -107,6 +107,7 @@ func TestGCStoreRemovesOnlyMissingBenchmarks(t *testing.T) {
 // reported with its error; a foreign layout-matching file (no pew marker)
 // stays silently ignored.
 func TestGCStoreSurfacesShapeFailingRecordings(t *testing.T) {
+	t.Parallel()
 	st := store.New(t.TempDir())
 	stripKey := func(path, key string) {
 		t.Helper()
@@ -178,6 +179,7 @@ func TestGCStoreSurfacesShapeFailingRecordings(t *testing.T) {
 // deleted from source whose only recording predates a mandatory field. It
 // must be removed, not silently skipped forever.
 func TestRunGCRemovesOldShapeOrphanInStoreOnlyPackage(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/gc\n\ngo 1.25\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -191,10 +193,10 @@ func TestRunGCRemovesOldShapeOrphanInStoreOnlyPackage(t *testing.T) {
 	if err := os.WriteFile(orphan, bytes.ReplaceAll(data, []byte("pew-format: "+runpkg.RecordingFormat+"\n"), []byte("pew-format: 3\n")), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Chdir(dir)
+	ctx := withWorkingDir(t, dir)
 
 	var out bytes.Buffer
-	if err := runGC(context.Background(), &out, st.Root); err != nil {
+	if err := runGC(ctx, &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathMissing(t, orphan)
@@ -210,6 +212,7 @@ func TestRunGCRemovesOldShapeOrphanInStoreOnlyPackage(t *testing.T) {
 // benchmark's recording would look orphaned and be deleted; it must instead
 // be kept and reported stale (format).
 func TestRunGCKeepsOldShapeRecordingInStoreOnlyPackage(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/gc\n\ngo 1.25\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -235,10 +238,10 @@ func TestRunGCKeepsOldShapeRecordingInStoreOnlyPackage(t *testing.T) {
 	if err := os.WriteFile(kept, bytes.ReplaceAll(data, []byte(runpkg.KeyRunConditions.Name+": "+recordingtest.QuietConditions+"\n"), nil), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Chdir(dir)
+	ctx := withWorkingDir(t, dir)
 
 	var out bytes.Buffer
-	if err := runGC(context.Background(), &out, st.Root); err != nil {
+	if err := runGC(ctx, &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathExists(t, kept)
@@ -255,6 +258,7 @@ func TestRunGCKeepsOldShapeRecordingInStoreOnlyPackage(t *testing.T) {
 // syntax-error test file) keeps its recordings behind a reported error line —
 // not behind silence, and not behind "gc: no stale recordings".
 func TestRunGCReportsScanErrorForStoreOnlyPackage(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/gc\n\ngo 1.25\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -271,10 +275,10 @@ func TestRunGCReportsScanErrorForStoreOnlyPackage(t *testing.T) {
 	}
 	st := store.New(filepath.Join(dir, "benchmarks"))
 	kept := writeRecording(t, st, "internal/_broken", "BenchmarkX", "")
-	t.Chdir(dir)
+	ctx := withWorkingDir(t, dir)
 
 	var out bytes.Buffer
-	if err := runGC(context.Background(), &out, st.Root); err != nil {
+	if err := runGC(ctx, &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathExists(t, kept)
@@ -287,6 +291,7 @@ func TestRunGCReportsScanErrorForStoreOnlyPackage(t *testing.T) {
 }
 
 func TestSourceBenchmarksIncludesBuildTaggedFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := []byte("//go:build exp\n\npackage p\n\nimport \"testing\"\n\nfunc BenchmarkTagged(b *testing.B) {}\n")
 	if err := os.WriteFile(filepath.Join(dir, "tag_bench_test.go"), content, 0o644); err != nil {
@@ -302,6 +307,7 @@ func TestSourceBenchmarksIncludesBuildTaggedFiles(t *testing.T) {
 }
 
 func TestSelectedBenchmarksUsesBuildSelectedTestFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	selected := []byte("package p\n\nimport \"testing\"\n\nfunc BenchmarkSelected(b *testing.B) {}\n")
 	if err := os.WriteFile(filepath.Join(dir, "selected_test.go"), selected, 0o644); err != nil {
@@ -322,6 +328,7 @@ func TestSelectedBenchmarksUsesBuildSelectedTestFiles(t *testing.T) {
 }
 
 func TestSourceBenchmarksAcceptsTestingBAlias(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := []byte("package p\n\nimport (\n\t\"testing\"\n\ttb \"example.com/tb\"\n)\n\ntype B = testing.B\n\nfunc BenchmarkAlias(b *B) {}\n\nfunc BenchmarkSelectorAlias(b *tb.B) {}\n")
 	if err := os.WriteFile(filepath.Join(dir, "alias_test.go"), content, 0o644); err != nil {
@@ -337,6 +344,7 @@ func TestSourceBenchmarksAcceptsTestingBAlias(t *testing.T) {
 }
 
 func TestSourceBenchmarksIgnoresInvalidBenchmarkSignature(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := []byte("package p\n\nimport \"testing\"\n\ntype MyB = testing.B\n\nfunc BenchmarkGone() {}\n\nfunc Benchmarkgone(b *testing.B) {}\n\nfunc BenchmarkGeneric[T any](b *testing.B) {}\n\nfunc BenchmarkMyAlias(b *MyB) {}\n\nfunc BenchmarkTwoParams(b, c *testing.B) {}\n")
 	if err := os.WriteFile(filepath.Join(dir, "gone_test.go"), content, 0o644); err != nil {
@@ -357,6 +365,7 @@ func TestSourceBenchmarksIgnoresInvalidBenchmarkSignature(t *testing.T) {
 }
 
 func TestRunGCRetainsSelectorAliasBenchmark(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/gc\n\ngo 1.25\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -379,10 +388,10 @@ func TestRunGCRetainsSelectorAliasBenchmark(t *testing.T) {
 
 	st := store.New(filepath.Join(dir, "benchmarks"))
 	kept := writeRecording(t, st, "internal/foo", "BenchmarkAlias", "")
-	t.Chdir(dir)
+	ctx := withWorkingDir(t, dir)
 
 	var out bytes.Buffer
-	if err := runGC(context.Background(), &out, st.Root); err != nil {
+	if err := runGC(ctx, &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathExists(t, kept)
@@ -392,6 +401,7 @@ func TestRunGCRetainsSelectorAliasBenchmark(t *testing.T) {
 }
 
 func TestRunGCRetainsTestingBAliasBenchmark(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/gc\n\ngo 1.25\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -407,10 +417,10 @@ func TestRunGCRetainsTestingBAliasBenchmark(t *testing.T) {
 
 	st := store.New(filepath.Join(dir, "benchmarks"))
 	kept := writeRecording(t, st, "internal/foo", "BenchmarkAlias", "")
-	t.Chdir(dir)
+	ctx := withWorkingDir(t, dir)
 
 	var out bytes.Buffer
-	if err := runGC(context.Background(), &out, st.Root); err != nil {
+	if err := runGC(ctx, &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathExists(t, kept)
@@ -420,6 +430,7 @@ func TestRunGCRetainsTestingBAliasBenchmark(t *testing.T) {
 }
 
 func TestRunGCRetainsBuildTaggedBenchmarkAndRemovesDeletedLabel(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/gc\n\ngo 1.25\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -439,10 +450,10 @@ func TestRunGCRetainsBuildTaggedBenchmarkAndRemovesDeletedLabel(t *testing.T) {
 	st := store.New(filepath.Join(dir, "benchmarks"))
 	kept := writeRecording(t, st, "internal/foo", "BenchmarkTagged", "")
 	removed := writeRecording(t, st, "internal/foo", "BenchmarkDeleted", "exp")
-	t.Chdir(dir)
+	ctx := withWorkingDir(t, dir)
 
 	var out bytes.Buffer
-	if err := runGC(context.Background(), &out, st.Root); err != nil {
+	if err := runGC(ctx, &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathExists(t, kept)
@@ -453,6 +464,7 @@ func TestRunGCRetainsBuildTaggedBenchmarkAndRemovesDeletedLabel(t *testing.T) {
 }
 
 func TestRunGCRemovesInvalidBenchmarkSignature(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/gc\n\ngo 1.25\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -470,10 +482,10 @@ func TestRunGCRemovesInvalidBenchmarkSignature(t *testing.T) {
 
 	st := store.New(filepath.Join(dir, "benchmarks"))
 	removed := writeRecording(t, st, "internal/foo", "BenchmarkGone", "exp")
-	t.Chdir(dir)
+	ctx := withWorkingDir(t, dir)
 
 	var out bytes.Buffer
-	if err := runGC(context.Background(), &out, st.Root); err != nil {
+	if err := runGC(ctx, &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathMissing(t, removed)
@@ -483,6 +495,7 @@ func TestRunGCRemovesInvalidBenchmarkSignature(t *testing.T) {
 }
 
 func TestRunGCProtectsStoreOnlyPackage(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/gc\n\ngo 1.25\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -502,10 +515,10 @@ func TestRunGCProtectsStoreOnlyPackage(t *testing.T) {
 	st := store.New(filepath.Join(dir, "benchmarks"))
 	kept := writeRecording(t, st, "internal/_tagged", "BenchmarkTagged", "exp")
 	removed := writeRecording(t, st, "internal/_tagged", "BenchmarkGone", "exp")
-	t.Chdir(dir)
+	ctx := withWorkingDir(t, dir)
 
 	var out bytes.Buffer
-	if err := runGC(context.Background(), &out, st.Root); err != nil {
+	if err := runGC(ctx, &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathExists(t, kept)
@@ -516,16 +529,17 @@ func TestRunGCProtectsStoreOnlyPackage(t *testing.T) {
 }
 
 func TestRunGCWithNoListedPackagesRemovesRecordings(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/gc\n\ngo 1.25\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	st := store.New(filepath.Join(dir, "benchmarks"))
 	removed := writeRecording(t, st, "internal/gone", "BenchmarkGone", "")
-	t.Chdir(dir)
+	ctx := withWorkingDir(t, dir)
 
 	var out bytes.Buffer
-	if err := runGC(context.Background(), &out, st.Root); err != nil {
+	if err := runGC(ctx, &out, st.Root); err != nil {
 		t.Fatalf("runGC: %v\n%s", err, out.String())
 	}
 	assertPathMissing(t, removed)
@@ -535,6 +549,7 @@ func TestRunGCWithNoListedPackagesRemovesRecordings(t *testing.T) {
 }
 
 func TestStoreOnlySourceBenchmarksProtectLiveTaggedPackage(t *testing.T) {
+	t.Parallel()
 	moduleDir := t.TempDir()
 	pkgDir := filepath.Join(moduleDir, "internal", "tagged")
 	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
@@ -564,6 +579,7 @@ func TestStoreOnlySourceBenchmarksProtectLiveTaggedPackage(t *testing.T) {
 }
 
 func TestGCStoreKeepsRootPackageRecording(t *testing.T) {
+	t.Parallel()
 	st := store.New(t.TempDir())
 	live := writeRecording(t, st, "", "BenchmarkRoot", "")
 	dead := writeRecording(t, st, "", "BenchmarkOldRoot", "")
@@ -592,6 +608,7 @@ func TestGCStoreKeepsRootPackageRecording(t *testing.T) {
 // the bracket and re-stale every later recording — printing each
 // removal, and touches nothing outside the declared patterns.
 func TestSweepScratchLeftovers(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	for _, name := range []string{"lcbench-123", "lcbench-456"} {
 		if err := os.MkdirAll(filepath.Join(dir, name, "wal"), 0o755); err != nil {
@@ -640,6 +657,7 @@ func TestSweepScratchLeftovers(t *testing.T) {
 }
 
 func TestScratchPatternsDiscoversDirectives(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := `package p
 

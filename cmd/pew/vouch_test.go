@@ -23,6 +23,7 @@ import (
 // characters, or a non-identifier variable refuse the whole set loudly
 // (spec §12 --vouch).
 func TestResolveVouchesTakesTheEnginesSet(t *testing.T) {
+	t.Parallel()
 	s, err := newVouchSource("", []string{"b.example/dep:Var", "a.example/dep:Var", "b.example/dep:Var"})
 	if err != nil || len(s.flags) != 2 || s.flags[0] != "a.example/dep.Var" || s.flags[1] != "b.example/dep.Var" {
 		t.Fatalf("resolved = %v, %v", s, err)
@@ -36,6 +37,7 @@ func TestResolveVouchesTakesTheEnginesSet(t *testing.T) {
 
 // Vouches cross the native payload boundary as audit evidence (spec §5).
 func TestVouchesConfigRoundTrip(t *testing.T) {
+	t.Parallel()
 	cfg := recordingtest.Config(recordingtest.Set(runpkg.KeyVouches, "a.example/dep.Var"))
 	fp, _, ok := fingerprintFromConfig(cfg)
 	if !ok || fp.DynamicStateVouches != "a.example/dep.Var" {
@@ -217,6 +219,7 @@ func BenchmarkCount(b *testing.B) {
 // Each invocation parses its own flag set and refuses malformed entries;
 // a later empty set neither inherits nor changes the earlier set.
 func TestResolveVouchesSeam(t *testing.T) {
+	t.Parallel()
 	s, err := newVouchSource("", []string{"a.example/dep:Var"})
 	if err != nil {
 		t.Fatal(err)
@@ -242,6 +245,7 @@ func TestResolveVouchesSeam(t *testing.T) {
 // file's set and never remove from it; the set is read from the store
 // --bench-dir names (REQ-pew-vouch-source).
 func TestVouchFileIsTheStandingSetTheFlagsExtend(t *testing.T) {
+	t.Parallel()
 	module := t.TempDir()
 	store := filepath.Join(module, "benchmarks")
 	if err := os.MkdirAll(store, 0o755); err != nil {
@@ -285,10 +289,11 @@ func TestVouchFileIsTheStandingSetTheFlagsExtend(t *testing.T) {
 // first engine builds, so the store the flag names is the store whose
 // vouch file governs (REQ-pew-vouch-source).
 func TestJudgedVerbsNameTheirStoreForTheVouchFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/vouchcmd\n\ngo 1.26\n")
 	writeFile(t, filepath.Join(dir, "bench_test.go"), "package vouchcmd\nimport \"testing\"\nfunc BenchmarkX(b *testing.B) {}\n")
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	storeDir := t.TempDir()
 	writeFile(t, filepath.Join(storeDir, vouchFileName), "malformed\n")
 	for _, verb := range []struct {
@@ -304,7 +309,7 @@ func TestJudgedVerbsNameTheirStoreForTheVouchFile(t *testing.T) {
 		cmd.SetArgs(verb.args)
 		cmd.SetOut(&bytes.Buffer{})
 		cmd.SetErr(&bytes.Buffer{})
-		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), filepath.Join(storeDir, vouchFileName)) {
+		if err := cmd.ExecuteContext(ctx); err == nil || !strings.Contains(err.Error(), filepath.Join(storeDir, vouchFileName)) {
 			t.Fatalf("%s ignored named store: %v", verb.name, err)
 		}
 	}

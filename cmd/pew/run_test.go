@@ -13,6 +13,7 @@ import (
 	"runtime/pprof"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 )
 
 func TestRequireBenchmarkGroupsRejectsMissingResult(t *testing.T) {
+	t.Parallel()
 	groups := map[string][]*benchfmt.Result{
 		"BenchmarkA": {{Name: benchfmt.Name("BenchmarkA")}},
 	}
@@ -36,6 +38,7 @@ func TestRequireBenchmarkGroupsRejectsMissingResult(t *testing.T) {
 }
 
 func TestMatchingBenchmarksAppliesRunSelection(t *testing.T) {
+	t.Parallel()
 	got, err := matchingBenchmarks([]string{"BenchmarkA", "BenchmarkB"}, "^BenchmarkA$/^case$")
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +59,7 @@ func TestMatchingBenchmarksAppliesRunSelection(t *testing.T) {
 }
 
 func TestRestrictBenchmarkPatternPreservesSubBenchmarkSelection(t *testing.T) {
+	t.Parallel()
 	got, err := restrictBenchmarkPattern("^BenchmarkA$/^one$|^BenchmarkB$/^two$", []string{"BenchmarkA"})
 	if err != nil {
 		t.Fatal(err)
@@ -66,6 +70,7 @@ func TestRestrictBenchmarkPatternPreservesSubBenchmarkSelection(t *testing.T) {
 }
 
 func TestGitStateCacheExcludesRecordingStoresAcrossModules(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	nested := filepath.Join(root, "nested")
 	if err := os.Mkdir(nested, 0o755); err != nil {
@@ -171,10 +176,10 @@ func TestRunRunKeepsSharedRepositoryModulesClean(t *testing.T) {
 	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
 		t.Fatal(err)
 	}
-	t.Chdir(root)
+	ctx := withWorkingDir(t, root)
 
 	var out, errOut bytes.Buffer
-	err = runRun(context.Background(), &out, &errOut, runConfig{
+	err = runRun(ctx, &out, &errOut, runConfig{
 		benchDir: "results",
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{".", "./nested"})
@@ -224,10 +229,10 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	benchDir := filepath.Join(dir, "benchmarks")
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 
 	var out, errOut bytes.Buffer
-	err = runRun(context.Background(), &out, &errOut, runConfig{
+	err = runRun(ctx, &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{"./..."})
@@ -236,7 +241,7 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 	}
 	st := store.New(benchDir)
 	for bench, pkgRel := range map[string]string{"BenchmarkNoIO": "pure", "BenchmarkReadError": "readerr", "BenchmarkGetwd": "getwd"} {
-		e, _, err := newEngineAt(context.Background(), dir, filepath.Join(dir, pkgRel), false, testEnvironment(t, os.Environ()))
+		e, _, err := newEngineAt(ctx, dir, filepath.Join(dir, pkgRel), false, testEnvironment(t, os.Environ()))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -262,7 +267,7 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 				t.Errorf("%s recorded governor %q, want observed %q", bench, got, wantGovernor)
 			}
 		}
-		v, reason, _, _, err := storedVerdict(context.Background(), st, e, "example.com/incompleterun/"+pkgRel, pkgRel, dir, bench, "")
+		v, reason, _, _, err := storedVerdict(ctx, st, e, "example.com/incompleterun/"+pkgRel, pkgRel, dir, bench, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -287,7 +292,7 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 			}
 			unsupported := fp
 			unsupported.ObservationAssertion, unsupported.ObservationProof = "", gofresh.ObservationProof{}
-			ordinary, err := fixtureCheck(context.Background(), e, unsupported, gofresh.Subject{Package: "example.com/incompleterun/" + pkgRel, Symbol: bench})
+			ordinary, err := fixtureCheck(ctx, e, unsupported, gofresh.Subject{Package: "example.com/incompleterun/" + pkgRel, Symbol: bench})
 			if err != nil || ordinary.Status != gofresh.Unverifiable {
 				t.Fatalf("ordinary policy = %+v, %v; observed proof must be load-bearing", ordinary, err)
 			}
@@ -305,7 +310,7 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 		}
 	}
 	var status strings.Builder
-	if err := runStatus(t.Context(), &status, benchDir, "", false, false, false, []string{"./getwd"}); err != nil {
+	if err := runStatus(ctx, &status, benchDir, "", false, false, false, []string{"./getwd"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Fields(status.String()); len(got) < 2 || got[0] != "valid" || got[1] != "example.com/incompleterun/getwd.BenchmarkGetwd" {
@@ -315,14 +320,14 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 	t.Run("unrelated-build-drift", func(t *testing.T) {
 		t.Setenv("PKG_CONFIG_PATH", "changed")
 		status.Reset()
-		if err := runStatus(t.Context(), &status, benchDir, "", false, true, false, []string{"./getwd"}); err != nil {
+		if err := runStatus(ctx, &status, benchDir, "", false, true, false, []string{"./getwd"}); err != nil {
 			t.Fatal(err)
 		}
 		if !strings.Contains(status.String(), "(buildconfig)") || strings.Contains(status.String(), "moved inputs: env PWD") {
 			t.Fatalf("explanation substituted the tool's PWD: %s", &status)
 		}
 		var comparison, explanation bytes.Buffer
-		if err := runStat(t.Context(), &comparison, &explanation, statConfig{benchDir: benchDir, explain: true, opts: compare.DefaultOptions()}, []string{"HEAD"}); err != nil {
+		if err := runStat(ctx, &comparison, &explanation, statConfig{benchDir: benchDir, explain: true, opts: compare.DefaultOptions()}, []string{"HEAD"}); err != nil {
 			t.Fatalf("stat: %v\n%s\n%s", err, &comparison, &explanation)
 		}
 		if !strings.Contains(explanation.String(), "getwd.BenchmarkGetwd is stale (buildconfig)") || strings.Contains(explanation.String(), "moved inputs: env PWD") {
@@ -339,6 +344,7 @@ func TestRunRecordsCompletedRuntimeEvidence(t *testing.T) {
 // governor equality check in TestRunRecordsIncompleteRuntimeEvidence adds the
 // live-host layer where a governor signal exists).
 func TestRunPackageRecordsProvidedConditions(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
@@ -367,8 +373,8 @@ func TestRunPackageRecordsProvidedConditions(t *testing.T) {
 		t.Fatal(err)
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
-	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
+	ctx := withWorkingDir(t, dir)
+	pkgs, err := resolvePackages(ctx, testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +382,7 @@ func TestRunPackageRecordsProvidedConditions(t *testing.T) {
 		t.Fatalf("resolved %d packages, want 1", len(pkgs))
 	}
 	env := os.Environ()
-	e, _, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
+	e, _, err := newEngineForPkg(ctx, pkgs[0], testEnvironment(t, env))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +398,7 @@ func TestRunPackageRecordsProvidedConditions(t *testing.T) {
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 		throttle: func() runpkg.ThrottleSnapshot { return runpkg.ThrottleSnapshot{"c0": 5} },
 	}
-	if err := runPackage(&out, io.Discard, e, newGitStateCache(nil), rc, pkgs[0], env, conditions, ""); err != nil {
+	if err := runPackage(ctx, &out, io.Discard, e, newGitStateCache(nil), rc, pkgs[0], env, conditions, ""); err != nil {
 		t.Fatalf("runPackage: %v\nstdout:\n%s", err, out.String())
 	}
 	recs, err := store.New(benchDir).Read("", "BenchmarkWire", "")
@@ -410,6 +416,7 @@ func TestRunPackageRecordsProvidedConditions(t *testing.T) {
 // throttled=true and warns after the measurement; under --strict the suspect
 // measurement is refused with nothing recorded.
 func TestRunPackageRecordsThrottleDelta(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
@@ -437,13 +444,13 @@ func TestRunPackageRecordsThrottleDelta(t *testing.T) {
 	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
 		t.Fatal(err)
 	}
-	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
+	ctx := withWorkingDir(t, dir)
+	pkgs, err := resolvePackages(ctx, testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	e, _, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
+	e, _, err := newEngineForPkg(ctx, pkgs[0], testEnvironment(t, env))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,7 +466,7 @@ func TestRunPackageRecordsThrottleDelta(t *testing.T) {
 		benchDir := filepath.Join(t.TempDir(), "benchmarks")
 		var out, errOut bytes.Buffer
 		rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}, throttle: movingCounter()}
-		if err := runPackage(&out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
+		if err := runPackage(ctx, &out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
 			t.Fatalf("runPackage: %v", err)
 		}
 		recs, err := store.New(benchDir).Read("", "BenchmarkHot", "")
@@ -492,7 +499,7 @@ func TestRunPackageRecordsThrottleDelta(t *testing.T) {
 		}
 		var out, errOut bytes.Buffer
 		rc := runConfig{benchDir: benchDir, strict: true, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}, throttle: movingCounter()}
-		err = runPackage(&out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, "")
+		err = runPackage(ctx, &out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, "")
 		if err == nil || !strings.Contains(err.Error(), "thermal throttling during measurement") {
 			t.Fatalf("err = %v, want the strict throttling refusal", err)
 		}
@@ -528,7 +535,7 @@ func TestRunPackageRecordsThrottleDelta(t *testing.T) {
 				return runpkg.ExecuteBinaryContext(ctx, dir, pin, env, binary, args)
 			},
 		}
-		if err := runPackage(io.Discard, io.Discard, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
+		if err := runPackage(ctx, io.Discard, io.Discard, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
 			t.Fatalf("runPackage: %v", err)
 		}
 		want := []string{"build", "snapshot", "measure", "snapshot"}
@@ -584,6 +591,7 @@ func assertRunConditionsLine(t *testing.T, bench, value string) {
 // covers the content the compile consumed, not the flag text. An unreadable
 // named profile fails engine construction closed.
 func TestRunPackagePGOContentMovesBuildconfig(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
@@ -630,8 +638,8 @@ func TestRunPackagePGOContentMovesBuildconfig(t *testing.T) {
 	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
 		t.Fatal(err)
 	}
-	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
+	ctx := withWorkingDir(t, dir)
+	pkgs, err := resolvePackages(ctx, testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -645,13 +653,13 @@ func TestRunPackagePGOContentMovesBuildconfig(t *testing.T) {
 
 	record := func(benchDir string) string {
 		t.Helper()
-		e, pgoInput, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
+		e, pgoInput, err := newEngineForPkg(ctx, pkgs[0], testEnvironment(t, env))
 		if err != nil {
 			t.Fatal(err)
 		}
 		var out bytes.Buffer
 		rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}
-		if err := runPackage(&out, io.Discard, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, pgoInput); err != nil {
+		if err := runPackage(ctx, &out, io.Discard, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, pgoInput); err != nil {
 			t.Fatalf("runPackage: %v\nstdout:\n%s", err, out.String())
 		}
 		recs, err := store.New(benchDir).Read("", "BenchmarkPGO", "")
@@ -678,10 +686,14 @@ func TestRunPackagePGOContentMovesBuildconfig(t *testing.T) {
 	}
 }
 
+var cpuProfileMu sync.Mutex
+
 // generateCPUProfile produces a small valid pprof profile — PGO tests need
 // bytes the compile genuinely consumes, so a garbage stand-in cannot serve.
 func generateCPUProfile(t *testing.T) []byte {
 	t.Helper()
+	cpuProfileMu.Lock()
+	defer cpuProfileMu.Unlock()
 	var buf bytes.Buffer
 	if err := pprof.StartCPUProfile(&buf); err != nil {
 		t.Fatal(err)
@@ -705,6 +717,7 @@ func generateCPUProfile(t *testing.T) []byte {
 // so its content digest must ride the recorded buildconfig — regenerating the
 // profile moves the guard with no flag change anywhere.
 func TestRunPackageDefaultPGOMovesBuildconfig(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
@@ -741,8 +754,8 @@ func TestRunPackageDefaultPGOMovesBuildconfig(t *testing.T) {
 	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
 		t.Fatal(err)
 	}
-	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
+	ctx := withWorkingDir(t, dir)
+	pkgs, err := resolvePackages(ctx, testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -758,7 +771,7 @@ func TestRunPackageDefaultPGOMovesBuildconfig(t *testing.T) {
 
 	record := func(benchDir string) string {
 		t.Helper()
-		e, pgoInput, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
+		e, pgoInput, err := newEngineForPkg(ctx, pkgs[0], testEnvironment(t, env))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -767,7 +780,7 @@ func TestRunPackageDefaultPGOMovesBuildconfig(t *testing.T) {
 		}
 		var out bytes.Buffer
 		rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}
-		if err := runPackage(&out, io.Discard, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, pgoInput); err != nil {
+		if err := runPackage(ctx, &out, io.Discard, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, pgoInput); err != nil {
 			t.Fatalf("runPackage: %v\nstdout:\n%s", err, out.String())
 		}
 		recs, err := store.New(benchDir).Read("", "BenchmarkMain", "")
@@ -799,6 +812,7 @@ func TestRunPackageDefaultPGOMovesBuildconfig(t *testing.T) {
 // recorded digest describe bytes the compile never consumed, so the package
 // is refused and nothing is recorded.
 func TestRunPackageRefusesPGOProfileDrift(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
@@ -834,8 +848,8 @@ func TestRunPackageRefusesPGOProfileDrift(t *testing.T) {
 	if _, err := wt.Commit("initial", &gogit.CommitOptions{Author: &object.Signature{Name: "t", Email: "t@example.invalid", When: time.Unix(1, 0)}}); err != nil {
 		t.Fatal(err)
 	}
-	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
+	ctx := withWorkingDir(t, dir)
+	pkgs, err := resolvePackages(ctx, testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -846,7 +860,7 @@ func TestRunPackageRefusesPGOProfileDrift(t *testing.T) {
 		}
 	}
 	env = append(env, "GOFLAGS=-pgo=prof.pgo")
-	e, pgoInput, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
+	e, pgoInput, err := newEngineForPkg(ctx, pkgs[0], testEnvironment(t, env))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -858,7 +872,7 @@ func TestRunPackageRefusesPGOProfileDrift(t *testing.T) {
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
 	var out bytes.Buffer
 	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}
-	err = runPackage(&out, io.Discard, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, pgoInput)
+	err = runPackage(ctx, &out, io.Discard, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, pgoInput)
 	if err == nil || !strings.Contains(err.Error(), "effective PGO input changed") {
 		t.Fatalf("err = %v, want the PGO drift refusal", err)
 	}
@@ -874,6 +888,7 @@ func TestRunPackageRefusesPGOProfileDrift(t *testing.T) {
 // the offending lines surfaced, while the package's clean benchmark records
 // normally — and its recording carries no salvage artifacts.
 func TestRunPackageSalvagesCorruptStream(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
@@ -916,8 +931,8 @@ func TestRunPackageSalvagesCorruptStream(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(benchDir, "BenchmarkNoisy.txt"), priorRecording, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
+	ctx := withWorkingDir(t, dir)
+	pkgs, err := resolvePackages(ctx, testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -925,13 +940,13 @@ func TestRunPackageSalvagesCorruptStream(t *testing.T) {
 		t.Fatalf("resolved %d packages, want 1", len(pkgs))
 	}
 	env := os.Environ()
-	e, _, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
+	e, _, err := newEngineForPkg(ctx, pkgs[0], testEnvironment(t, env))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
 	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 2, Benchtime: "1x", Bench: "."}}
-	refusal := runPackage(&out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, "")
+	refusal := runPackage(ctx, &out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, "")
 	if refusal == nil {
 		t.Fatalf("corrupted stream reported no error\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
 	}
@@ -985,6 +1000,7 @@ func TestRunPackageSalvagesCorruptStream(t *testing.T) {
 // nothing else refuses it. The run must record the benchmark without the
 // foreign key and name the dropped key on stderr.
 func TestRunPackageDropsForeignStreamConfig(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
@@ -1015,19 +1031,19 @@ func TestRunPackageDropsForeignStreamConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
-	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
+	ctx := withWorkingDir(t, dir)
+	pkgs, err := resolvePackages(ctx, testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	e, _, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
+	e, _, err := newEngineForPkg(ctx, pkgs[0], testEnvironment(t, env))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
 	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 2, Benchtime: "1x", Bench: "."}}
-	if err := runPackage(&out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
+	if err := runPackage(ctx, &out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
 		t.Fatalf("runPackage: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if !strings.Contains(errOut.String(), `dropping stream configuration key "raft"`) {
@@ -1063,6 +1079,7 @@ func TestRunPackageDropsForeignStreamConfig(t *testing.T) {
 // benchmark records nothing while its sibling — a separate process with a
 // clean stream — records normally.
 func TestRunPackageRefusesUnattributableOrphan(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
@@ -1096,8 +1113,8 @@ func TestRunPackageRefusesUnattributableOrphan(t *testing.T) {
 		t.Fatal(err)
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
-	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
+	ctx := withWorkingDir(t, dir)
+	pkgs, err := resolvePackages(ctx, testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1105,13 +1122,13 @@ func TestRunPackageRefusesUnattributableOrphan(t *testing.T) {
 		t.Fatalf("resolved %d packages, want 1", len(pkgs))
 	}
 	env := os.Environ()
-	e, _, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
+	e, _, err := newEngineForPkg(ctx, pkgs[0], testEnvironment(t, env))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
 	rc := runConfig{benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}
-	refusal := runPackage(&out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, "")
+	refusal := runPackage(ctx, &out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, "")
 	if refusal == nil {
 		t.Fatalf("unattributable orphan reported no error\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
 	}
@@ -1131,6 +1148,7 @@ func TestRunPackageRefusesUnattributableOrphan(t *testing.T) {
 }
 
 func TestRunDefaultFilterIntersectsBenchmarkPattern(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
@@ -1159,9 +1177,9 @@ func TestRunDefaultFilterIntersectsBenchmarkPattern(t *testing.T) {
 		t.Fatal(err)
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	err = runRun(context.Background(), &out, &errOut, runConfig{
+	err = runRun(ctx, &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "^BenchmarkSelected$"},
 	}, []string{"."})
@@ -1178,6 +1196,7 @@ func TestRunDefaultFilterIntersectsBenchmarkPattern(t *testing.T) {
 }
 
 func TestSourceInputsDirtyIncludesIgnoredAndMetadataStableSource(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
@@ -1250,6 +1269,7 @@ func TestSourceInputsDirtyIncludesIgnoredAndMetadataStableSource(t *testing.T) {
 }
 
 func TestRejectRecordingDestinations(t *testing.T) {
+	t.Parallel()
 	moduleDir := t.TempDir()
 	benchDir := filepath.Join(moduleDir, "benchmarks")
 	if err := os.Mkdir(benchDir, 0o755); err != nil {
@@ -1276,6 +1296,7 @@ func TestRejectRecordingDestinations(t *testing.T) {
 }
 
 func TestRunRunReturnsErrorOnPackageFailure(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/runfail\n\ngo 1.25\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1283,10 +1304,10 @@ func TestRunRunReturnsErrorOnPackageFailure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "p_test.go"), []byte("package runfail\n\nimport \"testing\"\n\nfunc BenchmarkX(b *testing.B) {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Chdir(dir)
+	ctx := withWorkingDir(t, dir)
 
 	var out, errOut bytes.Buffer
-	err := runRun(context.Background(), &out, &errOut, runConfig{opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}, []string{"./..."})
+	err := runRun(ctx, &out, &errOut, runConfig{opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}, []string{"./..."})
 	if err == nil {
 		t.Fatal("runRun succeeded despite a per-package failure")
 	}
@@ -1340,7 +1361,7 @@ func TestRunObservesThroughSymlinkedModule(t *testing.T) {
 		t.Fatal(err)
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
-	withWorkingDir(t, link)
+	ctx := withWorkingDir(t, link)
 	// The truthful-PWD posture of a shell-launched run: go's Getwd (and
 	// go list's module dir) honor an exported PWD naming the alias, so
 	// the module dir the run sees is the SYMLINK path — the shape the
@@ -1348,7 +1369,7 @@ func TestRunObservesThroughSymlinkedModule(t *testing.T) {
 	t.Setenv("PWD", link)
 
 	var out, errOut bytes.Buffer
-	err = runRun(context.Background(), &out, &errOut, runConfig{
+	err = runRun(ctx, &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{"./..."})
@@ -1389,6 +1410,7 @@ func TestRunObservesThroughSymlinkedModule(t *testing.T) {
 // created-and-removed scratch leaves no manifest identities, while the
 // identical bench without the declaration records them (spec §7.8).
 func TestRunScratchDirectiveKeepsManifestClean(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
@@ -1444,7 +1466,7 @@ func BenchmarkScratch(b *testing.B) {
 		t.Fatal(err)
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 
 	// A killed run's leftover in the DECLARED namespace is swept before
 	// the bracket forms (with a printed notice); the same name in the
@@ -1462,7 +1484,7 @@ func BenchmarkScratch(b *testing.B) {
 	}
 
 	var out, errOut bytes.Buffer
-	if err := runRun(context.Background(), &out, &errOut, runConfig{
+	if err := runRun(ctx, &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{"./..."}); err != nil {
@@ -1505,6 +1527,7 @@ func BenchmarkScratch(b *testing.B) {
 // so a relative --bench-dir made absolute through an alias cwd still
 // matches the resolved paths the exclusion compares against (spec §5).
 func TestModuleBenchDirResolvesThroughMissingStore(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 	real := filepath.Join(base, "real")
 	if err := os.Mkdir(real, 0o755); err != nil {
@@ -1530,6 +1553,7 @@ func TestModuleBenchDirResolvesThroughMissingStore(t *testing.T) {
 // The exclusion's precondition is enforced, not assumed: measured source
 // under the recording store refuses the run (spec §5).
 func TestRejectStoreCoveredSources(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 	store := filepath.Join(base, "benchmarks")
 	src := filepath.Join(store, "pkg", "code.go")
@@ -1549,6 +1573,7 @@ func TestRejectStoreCoveredSources(t *testing.T) {
 // shared-process model serves one union manifest to every sibling, so this
 // fails there by construction.
 func TestRunPerArmRuntimeManifestAttribution(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
@@ -1581,10 +1606,10 @@ func TestRunPerArmRuntimeManifestAttribution(t *testing.T) {
 		t.Fatal(err)
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 
 	var out, errOut bytes.Buffer
-	if err := runRun(context.Background(), &out, &errOut, runConfig{
+	if err := runRun(ctx, &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{"."}); err != nil {
@@ -1626,6 +1651,7 @@ func TestRunPerArmRuntimeManifestAttribution(t *testing.T) {
 // leak into the observed metric; in per-benchmark processes the counter is
 // untouched at observation time, so the recorded metric is exactly zero.
 func TestRunSingleSubjectProcessIsolation(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
@@ -1656,10 +1682,10 @@ func TestRunSingleSubjectProcessIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 
 	var out, errOut bytes.Buffer
-	if err := runRun(context.Background(), &out, &errOut, runConfig{
+	if err := runRun(ctx, &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{"."}); err != nil {
@@ -1690,6 +1716,7 @@ func TestRunSingleSubjectProcessIsolation(t *testing.T) {
 // records nothing, the sibling arm's process records a complete well-formed
 // recording, and the command still reports the failure and exits non-zero.
 func TestRunFailingArmDiscardsOnlyItsRecording(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
@@ -1720,10 +1747,10 @@ func TestRunFailingArmDiscardsOnlyItsRecording(t *testing.T) {
 		t.Fatal(err)
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 
 	var out, errOut bytes.Buffer
-	err = runRun(context.Background(), &out, &errOut, runConfig{
+	err = runRun(ctx, &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{"."})
@@ -1760,6 +1787,7 @@ func TestRunFailingArmDiscardsOnlyItsRecording(t *testing.T) {
 // throttled benchmark, and the invocation order is one build followed by a
 // snapshot/measure/snapshot bracket per arm.
 func TestRunPackagePerArmThrottleAttribution(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads the fixture through the toolchain (go list, the engine) with the execute seam stubbed")
 	}
@@ -1790,13 +1818,13 @@ func TestRunPackagePerArmThrottleAttribution(t *testing.T) {
 		t.Fatal(err)
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
-	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
+	ctx := withWorkingDir(t, dir)
+	pkgs, err := resolvePackages(ctx, testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	e, _, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
+	e, _, err := newEngineForPkg(ctx, pkgs[0], testEnvironment(t, env))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1837,7 +1865,7 @@ func TestRunPackagePerArmThrottleAttribution(t *testing.T) {
 		},
 	}
 	var out, errOut bytes.Buffer
-	if err := runPackage(&out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
+	if err := runPackage(ctx, &out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, ""); err != nil {
 		t.Fatalf("runPackage: %v\nstderr:\n%s", err, errOut.String())
 	}
 	want := []string{"build", "snapshot", "measureFirst", "snapshot", "snapshot", "measureSecond", "snapshot"}
@@ -1869,6 +1897,7 @@ func TestRunPackagePerArmThrottleAttribution(t *testing.T) {
 // records, and the package error names BOTH facts about the broken arm: the
 // process failure and the moved state bracket, neither masking the other.
 func TestRunFailingArmResidueRefusesOnlyItsArm(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
@@ -1899,10 +1928,10 @@ func TestRunFailingArmResidueRefusesOnlyItsArm(t *testing.T) {
 		t.Fatal(err)
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 
 	var out, errOut bytes.Buffer
-	err = runRun(context.Background(), &out, &errOut, runConfig{
+	err = runRun(ctx, &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{"."})
@@ -1941,6 +1970,7 @@ func TestRunFailingArmResidueRefusesOnlyItsArm(t *testing.T) {
 // as a parseable foreign row and refuses the arm — never a stderr warning
 // that lets the arm record.
 func TestRunPackageRefusesForeignCorruptEvidence(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads the fixture through the toolchain (go list, the engine) with the execute seam stubbed")
 	}
@@ -1971,13 +2001,13 @@ func TestRunPackageRefusesForeignCorruptEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
-	withWorkingDir(t, dir)
-	pkgs, err := resolvePackages(context.Background(), testEnvironment(t, nil), []string{"."})
+	ctx := withWorkingDir(t, dir)
+	pkgs, err := resolvePackages(ctx, testEnvironment(t, nil), []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	e, _, err := newEngineForPkg(context.Background(), pkgs[0], testEnvironment(t, env))
+	e, _, err := newEngineForPkg(ctx, pkgs[0], testEnvironment(t, env))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1996,7 +2026,7 @@ func TestRunPackageRefusesForeignCorruptEvidence(t *testing.T) {
 		},
 	}
 	var out, errOut bytes.Buffer
-	refusal := runPackage(&out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, "")
+	refusal := runPackage(ctx, &out, &errOut, e, newGitStateCache(nil), rc, pkgs[0], env, runpkg.Conditions{}, "")
 	if refusal == nil {
 		t.Fatalf("foreign corrupt evidence reported no error\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
 	}
@@ -2019,6 +2049,7 @@ func TestRunPackageRefusesForeignCorruptEvidence(t *testing.T) {
 // arm's brackets form, so the sibling's recording and manifest are
 // independent of sibling order.
 func TestRunPerArmScratchSweepIsolation(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
@@ -2050,10 +2081,10 @@ func TestRunPerArmScratchSweepIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 
 	var out, errOut bytes.Buffer
-	err = runRun(context.Background(), &out, &errOut, runConfig{
+	err = runRun(ctx, &out, &errOut, runConfig{
 		benchDir: benchDir,
 		opts:     runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."},
 	}, []string{"."})
@@ -2096,7 +2127,14 @@ func TestRunPerArmScratchSweepIsolation(t *testing.T) {
 // the shape the per-package tests drive, preparation included, so every
 // preparation-time refusal they exercise fires where the command fires
 // it.
-func runPackage(w, errw io.Writer, e *analysisSession, gc *gitStateCache, rc runConfig, p pkgMeta, env []string, conditions runpkg.Conditions, pgoInput string) error {
+func runPackage(ctx context.Context, w, errw io.Writer, e *analysisSession, gc *gitStateCache, rc runConfig, p pkgMeta, env []string, conditions runpkg.Conditions, pgoInput string) error {
+	if rc.benchDir != "" && !filepath.IsAbs(rc.benchDir) {
+		resolved, err := resolveWorkPath(ctx, rc.benchDir)
+		if err != nil {
+			return err
+		}
+		rc.benchDir = resolved
+	}
 	prep, err := preparePackageInputs(rc, p)
 	if err != nil {
 		return err
@@ -2109,5 +2147,5 @@ func runPackage(w, errw io.Writer, e *analysisSession, gc *gitStateCache, rc run
 	if err != nil {
 		return err
 	}
-	return runPreparedPackage(context.Background(), w, errw, gc, rc, prep, newEnvironments(normalized, rc.pin), conditions)
+	return runPreparedPackage(ctx, w, errw, gc, rc, prep, newEnvironments(normalized, rc.pin), conditions)
 }

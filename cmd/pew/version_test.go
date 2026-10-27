@@ -16,7 +16,7 @@ func TestVersionWorksWithoutAProject(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("malformed module\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Chdir(dir)
+	ctx := withWorkingDir(t, dir)
 	t.Setenv("PATH", t.TempDir())
 	var first string
 	for _, args := range [][]string{{"version"}, {"--version"}} {
@@ -25,7 +25,7 @@ func TestVersionWorksWithoutAProject(t *testing.T) {
 		root.SetOut(&out)
 		root.SetErr(&stderr)
 		root.SetArgs(args)
-		if err := root.Execute(); err != nil {
+		if err := root.ExecuteContext(ctx); err != nil {
 			t.Fatal(err)
 		}
 		got := out.String()
@@ -44,7 +44,7 @@ func TestVersionWorksWithoutAProject(t *testing.T) {
 	}
 	root := newRootCmd()
 	root.SetArgs([]string{"version", "unexpected"})
-	if err := root.Execute(); err == nil {
+	if err := root.ExecuteContext(ctx); err == nil {
 		t.Fatal("version accepted an operand")
 	}
 	entries, err := os.ReadDir(dir)
@@ -54,6 +54,7 @@ func TestVersionWorksWithoutAProject(t *testing.T) {
 }
 
 func TestVersionExecutableNeedsNoGoOrGit(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("builds the CLI")
 	}

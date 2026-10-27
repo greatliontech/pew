@@ -54,18 +54,12 @@ func abFixtureRepo(t *testing.T) string {
 // per iteration (block ordering folds machine drift into the delta),
 // each side runs from its own tree, and the report names the sides.
 func TestABInterleavesAfterBothSidesBuild(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads the fixture through the toolchain (go list, go env) with the build and execute seams stubbed")
 	}
 	dir := abFixtureRepo(t)
-	prior, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(filepath.Join(dir, "p")); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(prior)
+	ctx := withWorkingDir(t, filepath.Join(dir, "p"))
 
 	var log []string
 	ac := abConfig{
@@ -85,7 +79,7 @@ func TestABInterleavesAfterBothSidesBuild(t *testing.T) {
 		},
 	}
 	var out, errOut bytes.Buffer
-	if err := runAB(context.Background(), &out, &errOut, ac, []string{"."}); err != nil {
+	if err := runAB(ctx, &out, &errOut, ac, []string{"."}); err != nil {
 		t.Fatalf("runAB: %v\nstderr: %s", err, errOut.String())
 	}
 	var builds, runs []string
@@ -152,15 +146,9 @@ func TestABInterleavesAfterBothSidesBuild(t *testing.T) {
 // table; a genuine per-side difference in a build-identity guard must
 // still refuse with the mismatch named.
 func TestABStampsGuardProvenance(t *testing.T) {
+	t.Parallel()
 	dir := abFixtureRepo(t)
-	prior, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(filepath.Join(dir, "p")); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(prior)
+	ctx := withWorkingDir(t, filepath.Join(dir, "p"))
 
 	base := abConfig{
 		bench: ".", count: 3, ref: "HEAD",
@@ -192,7 +180,7 @@ func TestABStampsGuardProvenance(t *testing.T) {
 		return []byte(fmt.Sprintf("BenchmarkWork-8 1000 %d ns/op\nPASS\n", ns)), nil
 	}
 	var out, errOut bytes.Buffer
-	if err := runAB(context.Background(), &out, &errOut, shared, []string{"."}); err != nil {
+	if err := runAB(ctx, &out, &errOut, shared, []string{"."}); err != nil {
 		t.Fatalf("runAB: %v\nstderr: %s", err, errOut.String())
 	}
 	if strings.Contains(out.String(), "not compared") {
@@ -260,7 +248,7 @@ func TestABStampsGuardProvenance(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	err = runAB(context.Background(), &out, &errOut, split, []string{"."})
+	err := runAB(ctx, &out, &errOut, split, []string{"."})
 	if err == nil || !strings.Contains(err.Error(), "toolchain mismatch (A=go1 B=go2") {
 		t.Fatalf("differing toolchain guards did not refuse with the mismatch named: %v\n%s", err, out.String())
 	}
@@ -282,7 +270,7 @@ func TestABStampsGuardProvenance(t *testing.T) {
 	}
 	iterations = 0
 	out.Reset()
-	err = runAB(context.Background(), &out, &errOut, pgo, []string{"."})
+	err = runAB(ctx, &out, &errOut, pgo, []string{"."})
 	if err == nil || !strings.Contains(err.Error(), "buildconfig mismatch (A=b1 B=b2") || iterations != 0 {
 		t.Fatalf("differing PGO guards = %v after %d iterations; want the refusal before any", err, iterations)
 	}
@@ -290,12 +278,12 @@ func TestABStampsGuardProvenance(t *testing.T) {
 	// difference: two live captures compare by value, guard by guard.
 	shadow := pgo
 	shadow.guards = func(_ context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
-		g, _ := pgo.guards(context.Background(), moduleDir, pkgDir, mainPkg, env)
+		g, _ := pgo.guards(ctx, moduleDir, pkgDir, mainPkg, env)
 		g.Toolchain = ""
 		return g, nil
 	}
 	iterations = 0
-	err = runAB(context.Background(), &out, &errOut, shadow, []string{"."})
+	err = runAB(ctx, &out, &errOut, shadow, []string{"."})
 	if err == nil || !strings.Contains(err.Error(), "buildconfig mismatch (A=b1 B=b2") || iterations != 0 {
 		t.Fatalf("an empty toolchain guard shadowed the PGO difference: %v after %d iterations", err, iterations)
 	}
@@ -307,6 +295,7 @@ func TestABStampsGuardProvenance(t *testing.T) {
 // main — deriving both sides' kind from the working tree silently passes
 // a genuine per-ref PGO difference through the buildconfig guard.
 func TestABSideBPackageKindFromRef(t *testing.T) {
+	t.Parallel()
 	dir := abFixtureRepo(t)
 	// The commit holds package main; the working tree renames it to a
 	// library. go list resolves the working tree, the worktree holds the
@@ -338,14 +327,7 @@ func TestABSideBPackageKindFromRef(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "p/p_test.go"), []byte(libraryTest), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	prior, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(filepath.Join(dir, "p")); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(prior)
+	ctx := withWorkingDir(t, filepath.Join(dir, "p"))
 
 	kinds := map[string]bool{}
 	ac := abConfig{
@@ -361,7 +343,7 @@ func TestABSideBPackageKindFromRef(t *testing.T) {
 		},
 	}
 	var out, errOut bytes.Buffer
-	if err := runAB(context.Background(), &out, &errOut, ac, []string{"."}); err != nil {
+	if err := runAB(ctx, &out, &errOut, ac, []string{"."}); err != nil {
 		t.Fatalf("runAB: %v\nstderr: %s", err, errOut.String())
 	}
 	// Side A is the fixture module (the working tree, a library); the
@@ -398,6 +380,7 @@ func TestABSideBPackageKindFromRef(t *testing.T) {
 // and working directory sit on different devices (tmpfs vs disk — the
 // exact configuration the contract exists for), the check must say so.
 func TestSameDevice(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if same, err := sameDevice(dir, dir); err != nil || !same {
 		t.Fatalf("sameDevice(x, x) = %v, %v", same, err)
@@ -422,6 +405,7 @@ func TestSameDevice(t *testing.T) {
 
 // The artifact is marked out of every stat-baseline path by shape.
 func TestABArtifactIsDirtyMarked(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "ab.txt")
 	a := &abArtifact{path: path}
 	if err := a.pair("example.com/p", "HEAD", 1, fixtureABStream(t, []byte("BenchmarkA-8 1 9 ns/op\n"), "example.com/p", "BenchmarkA"), fixtureABStream(t, []byte("BenchmarkA-8 1 10 ns/op\n"), "example.com/p", "BenchmarkA")); err != nil {
@@ -442,6 +426,7 @@ func TestABArtifactIsDirtyMarked(t *testing.T) {
 // result names embed the suffix, comparisons never bridge it, and the
 // operator must not learn that from a later stat (spec §10.1).
 func TestWarnNewVariantLineage(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	st := store.New(dir)
 	prior := parseBench(t, "pew-format: 3\nBenchmarkWork-24 1000 100 ns/op\n")

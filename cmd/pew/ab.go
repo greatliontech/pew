@@ -243,6 +243,12 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 	if err != nil {
 		return err
 	}
+	if ac.worktreeDir != "" && !filepath.IsAbs(ac.worktreeDir) {
+		ac.worktreeDir, err = resolveWorkPath(ctx, ac.worktreeDir)
+		if err != nil {
+			return fmt.Errorf("ab: --worktree-dir: %w", err)
+		}
+	}
 	placement, err := abPlacement(repoRoot, ac.worktreeDir)
 	if err != nil {
 		return err

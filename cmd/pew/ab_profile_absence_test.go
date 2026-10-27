@@ -17,6 +17,7 @@ import (
 )
 
 func TestABMissingDiagnosticSidesRemainUnfulfilled(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("captures real nonempty profiles for distinct A/B populations")
 	}
@@ -37,10 +38,10 @@ func BenchmarkShared(b *testing.B) { for b.Loop() { sink = make([]byte, 2<<20) }
 	}
 	commitAll(t, repo, "reference population")
 	writeFile(t, path, strings.ReplaceAll(source, "BenchmarkBefore", "BenchmarkAfter"))
-	withWorkingDir(t, root)
+	baseCtx := withWorkingDir(t, root)
 	for _, mode := range []string{"text", "json", "failure", "interrupt", "temporary"} {
 		t.Run(mode, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(t.Context())
+			ctx, cancel := context.WithCancel(baseCtx)
 			defer cancel()
 			ac := abConfig{bench: ".", count: 1, benchtime: "1x", ref: "HEAD", profile: "alloc", profileBenchtime: "16x", jsonOut: mode != "text", out: filepath.Join(t.TempDir(), "ab.txt")}
 			if mode == "temporary" {

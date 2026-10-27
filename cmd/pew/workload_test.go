@@ -14,6 +14,7 @@ import (
 )
 
 func TestWorkloadKeepsSelectionEffortAndSamplePopulation(t *testing.T) {
+	t.Parallel()
 	want, err := requestedWorkload(run.Options{Bench: "^BenchmarkX$/^case-2$", Count: 2, Benchtime: "+01x"}, "BenchmarkX")
 	if err != nil {
 		t.Fatal(err)
@@ -52,6 +53,7 @@ func TestWorkloadKeepsSelectionEffortAndSamplePopulation(t *testing.T) {
 }
 
 func TestWorkloadAdmitsBothHarnessCPUSuffixRepresentations(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		row, selected string
 		ok            bool
@@ -78,6 +80,7 @@ func TestWorkloadAdmitsBothHarnessCPUSuffixRepresentations(t *testing.T) {
 }
 
 func TestWorkloadRecordRefusesMissingAndNoncanonicalAuthority(t *testing.T) {
+	t.Parallel()
 	w := workload{Version: 1, Count: 2, Budget: "1x", Selection: "^BenchmarkX$"}
 	encoded, err := encodeWorkload(w)
 	if err != nil {
@@ -123,7 +126,7 @@ func BenchmarkX(b *testing.B) {
 }
 `)
 			commitFixture(t, dir)
-			withWorkingDir(t, dir)
+			ctx := withWorkingDir(t, dir)
 			t.Setenv("GOMAXPROCS", width)
 			t.Setenv("GOFLAGS", "-v=0 -short")
 			measurements := 0
@@ -134,7 +137,7 @@ func BenchmarkX(b *testing.B) {
 			for attempt, pattern := range []string{"^BenchmarkX$/^case-2$", "^BenchmarkX$/^case-2$", "^BenchmarkX$/^case$"} {
 				rc.opts.Bench = pattern
 				var out, errout bytes.Buffer
-				if err := runRun(t.Context(), &out, &errout, rc, []string{"."}); err != nil {
+				if err := runRun(ctx, &out, &errout, rc, []string{"."}); err != nil {
 					t.Fatalf("attempt %d: %v\n%s\n%s", attempt, err, &out, &errout)
 				}
 				want := []int{1, 1, 2}[attempt]

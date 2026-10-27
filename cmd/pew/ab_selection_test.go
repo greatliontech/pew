@@ -15,6 +15,7 @@ import (
 )
 
 func TestABRejectsRowsOutsideItsRequestedInventoryBeforePublication(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("executes retained A/B binaries and interrupts an invalid pair")
 	}
@@ -31,7 +32,7 @@ func BenchmarkOther(b *testing.B) {}
 				t.Fatal(err)
 			}
 			commitAll(t, repo, "requested benchmark inventory")
-			withWorkingDir(t, root)
+			ctx := withWorkingDir(t, root)
 			for _, retained := range []bool{false, true} {
 				ac := abConfig{bench: "^BenchmarkWork$/^selected$|^BenchmarkGhost$", count: 2, benchtime: "1x", ref: "HEAD"}
 				if retained {
@@ -41,14 +42,14 @@ func BenchmarkOther(b *testing.B) {}
 				calls := 0
 				ac.execute = func(dir, pin string, values []string, binary string, args []string) ([]byte, error) {
 					calls++
-					data, err := run.ExecuteBinaryContext(t.Context(), dir, pin, testEnvironment(t, values), binary, args)
+					data, err := run.ExecuteBinaryContext(ctx, dir, pin, testEnvironment(t, values), binary, args)
 					if err == nil && calls%2 == 0 {
 						data = append(data, []byte(fmt.Sprintf("%s 1 5 ns/op\n", bad))...)
 					}
 					return data, err
 				}
 				var out bytes.Buffer
-				err = runAB(t.Context(), &out, io.Discard, ac, []string{"./p"})
+				err = runAB(ctx, &out, io.Discard, ac, []string{"./p"})
 				if err == nil || !strings.Contains(err.Error(), "outside requested") || calls != 2 {
 					t.Fatalf("retained=%t: foreign row became requested work: calls=%d error=%v", retained, calls, err)
 				}
@@ -97,6 +98,7 @@ func FuzzABStreamAdmissionUsesTheDeclaredSelection(f *testing.F) {
 }
 
 func TestABStreamReportsCorruptLineAndKeepsItsOwnSideHistory(t *testing.T) {
+	t.Parallel()
 	var warning bytes.Buffer
 	if _, err := admitABStream(&warning, []byte("header\nBenchmarkWork-2 broken\n"), "example.com/p", ".", []string{"BenchmarkWork"}); err == nil || !strings.Contains(warning.String(), "line 2:") || !strings.Contains(warning.String(), `"BenchmarkWork-2 broken"`) {
 		t.Fatalf("corrupt line lost its position: %v, %s", err, &warning)
@@ -148,6 +150,7 @@ func TestABStreamReportsCorruptLineAndKeepsItsOwnSideHistory(t *testing.T) {
 }
 
 func TestABUsesEachSidesOwnPackageIdentity(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("builds and executes ref-local modules with different names")
 	}
@@ -159,14 +162,14 @@ func TestABUsesEachSidesOwnPackageIdentity(t *testing.T) {
 	}
 	commitAll(t, repo, "profile-capable reference")
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/renamed\n\ngo 1.26.4\n")
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	for _, retained := range []bool{false, true} {
 		ac := abConfig{bench: "^BenchmarkWork$", count: 1, benchtime: "1x", ref: "HEAD"}
 		if retained {
 			ac.out = filepath.Join(t.TempDir(), "ab.txt")
 		}
 		var out bytes.Buffer
-		if err := runAB(t.Context(), &out, io.Discard, ac, []string{"./p"}); err != nil {
+		if err := runAB(ctx, &out, io.Discard, ac, []string{"./p"}); err != nil {
 			t.Fatalf("ref-local package identity refused: %v", err)
 		}
 		if !strings.Contains(out.String(), "example.com/renamed/p") || !strings.Contains(out.String(), "example.com/abfix/p") {
@@ -180,7 +183,7 @@ func TestABUsesEachSidesOwnPackageIdentity(t *testing.T) {
 		}
 	}
 	var out bytes.Buffer
-	err = runAB(t.Context(), &out, io.Discard, abConfig{bench: "^BenchmarkWork$", count: 1, benchtime: "1x", ref: "HEAD", profile: "alloc", profileBenchtime: "16x", jsonOut: true}, []string{"./p"})
+	err = runAB(ctx, &out, io.Discard, abConfig{bench: "^BenchmarkWork$", count: 1, benchtime: "1x", ref: "HEAD", profile: "alloc", profileBenchtime: "16x", jsonOut: true}, []string{"./p"})
 	if err == nil || exitCode(err) != 2 {
 		t.Fatalf("distinct subjects' diagnostic comparison = %v\n%s", err, &out)
 	}
@@ -191,6 +194,7 @@ func TestABUsesEachSidesOwnPackageIdentity(t *testing.T) {
 }
 
 func TestABArtifactHeadersKeepPreparedIdentityWithoutStreamHeaders(t *testing.T) {
+	t.Parallel()
 	a := &abArtifact{path: filepath.Join(t.TempDir(), "ab.txt")}
 	left := fixtureABStream(t, []byte("BenchmarkWork-2 1 1 ns/op\n"), "example.com/new", "BenchmarkWork")
 	right := fixtureABStream(t, []byte("BenchmarkWork-2 1 2 ns/op\n"), "example.com/old", "BenchmarkWork")
@@ -218,6 +222,7 @@ func TestABArtifactHeadersKeepPreparedIdentityWithoutStreamHeaders(t *testing.T)
 }
 
 func TestABNameInterpretationsCannotBorrowEachOthersScope(t *testing.T) {
+	t.Parallel()
 	_, err := admitABStream(io.Discard, []byte("BenchmarkWork-2 1 5 ns/op\n"), "example.com/p", "^BenchmarkWork$/^child$|^BenchmarkWork-2$", []string{"BenchmarkWork"})
 	if err == nil {
 		t.Fatal("one spelling supplied the declaration while another supplied the selected pattern")
@@ -240,36 +245,37 @@ func TestABUsesBuildSelectedReferenceDeclarationsBeforeBuilding(t *testing.T) {
 	}
 	commitAll(t, repo, "excluded reference declaration")
 	writeFile(t, filepath.Join(root, "p", "hidden_test.go"), "package p\nimport \"testing\"\nfunc BenchmarkWork(b *testing.B) {}\n")
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	t.Setenv("GOFLAGS", "")
 	builds := 0
 	ac := abConfig{bench: "^BenchmarkWork$", count: 1, benchtime: "1x", ref: "HEAD", build: func(string, []string, []string) error {
 		builds++
 		return fmt.Errorf("unexpected build before declaration refusal")
 	}}
-	err = runAB(t.Context(), io.Discard, io.Discard, ac, []string{"./p"})
+	err = runAB(ctx, io.Discard, io.Discard, ac, []string{"./p"})
 	if err == nil || !strings.Contains(err.Error(), "selects no benchmark on side B") || builds != 0 {
 		t.Fatalf("compiled-out reference declaration was requested: builds=%d error=%v", builds, err)
 	}
 }
 
 func TestABPreservesTheValidPairBeforeARejectedSide(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("executes a valid pair before rejecting a later side")
 	}
 	root := abFixtureRepo(t)
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	ac := abConfig{bench: "^BenchmarkWork$", count: 2, benchtime: "1x", ref: "HEAD", out: filepath.Join(t.TempDir(), "ab.txt")}
 	calls := 0
 	ac.execute = func(dir, pin string, values []string, binary string, args []string) ([]byte, error) {
 		calls++
-		data, err := run.ExecuteBinaryContext(t.Context(), dir, pin, testEnvironment(t, values), binary, args)
+		data, err := run.ExecuteBinaryContext(ctx, dir, pin, testEnvironment(t, values), binary, args)
 		if err == nil && calls == 3 {
 			data = append(data, []byte("BenchmarkOther-2 1 5 ns/op\n")...)
 		}
 		return data, err
 	}
-	err := runAB(t.Context(), io.Discard, io.Discard, ac, []string{"./p"})
+	err := runAB(ctx, io.Discard, io.Discard, ac, []string{"./p"})
 	if err == nil || !strings.Contains(err.Error(), "side A iteration 2") || !strings.Contains(err.Error(), "outside requested") || calls != 3 {
 		t.Fatalf("invalid side paid another execution or lost its attribution: calls=%d error=%v", calls, err)
 	}
@@ -280,6 +286,7 @@ func TestABPreservesTheValidPairBeforeARejectedSide(t *testing.T) {
 }
 
 func TestABAdmitsEachSidesDistinctSelectedPopulation(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("compares independently selected reference populations")
 	}
@@ -292,9 +299,9 @@ func TestABAdmitsEachSidesDistinctSelectedPopulation(t *testing.T) {
 	}
 	commitAll(t, repo, "reference-only benchmark")
 	writeFile(t, path, "package p\nimport \"testing\"\nfunc BenchmarkAfter(b *testing.B) { b.Run(\"new\", func(b *testing.B) { for b.Loop() {} }) }\n")
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	ac := abConfig{bench: "^Benchmark(Before|After)$", count: 1, benchtime: "1x", ref: "HEAD", out: filepath.Join(t.TempDir(), "ab.txt")}
-	if err := runAB(t.Context(), io.Discard, io.Discard, ac, []string{"./p"}); err != nil {
+	if err := runAB(ctx, io.Discard, io.Discard, ac, []string{"./p"}); err != nil {
 		t.Fatalf("valid asymmetric population refused: %v", err)
 	}
 	data, err := os.ReadFile(ac.out)

@@ -27,6 +27,7 @@ import (
 )
 
 func TestDiagnosticChildrenRefuseMissingCorruptAndNonfinite(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{"PASS\n", "BenchmarkOther-8 1 1 ns/op\n", "BenchmarkWork-8 1 NaN ns/op\n", "BenchmarkWork-8 1 +Inf ns/op\n", "BenchmarkWork-8 corrupt\n", "BenchmarkWork-8 1 1 ns/op\nBenchmarkWork-8 1 1 ns/op\n"} {
 		if _, err := diagnosticChildren([]byte(raw+"PASS\n"), "BenchmarkWork"); err == nil {
 			t.Fatalf("admitted %q", raw)
@@ -42,6 +43,7 @@ func TestDiagnosticChildrenRefuseMissingCorruptAndNonfinite(t *testing.T) {
 }
 
 func TestBrokenCompanionDoesNotRefuseMeasurement(t *testing.T) {
+	t.Parallel()
 	rows := recordingtest.Results("X", []float64{1, 2})
 	for _, r := range rows {
 		r.SetConfig(runpkg.KeyProfiles.Name, "broken")
@@ -64,6 +66,7 @@ func TestBrokenCompanionDoesNotRefuseMeasurement(t *testing.T) {
 }
 
 func TestProfileFlagsAreOptIn(t *testing.T) {
+	t.Parallel()
 	cmd := newRunCmd()
 	if cmd.Flags().Lookup("profile").DefValue != "" || cmd.Flags().Lookup("profile-benchtime").DefValue != "1s" {
 		t.Fatal("changed opt-in defaults")
@@ -77,6 +80,7 @@ func TestProfileFlagsAreOptIn(t *testing.T) {
 }
 
 func TestRealProfilesAreIndependentAndServeMeasurement(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("executes real CPU/allocation diagnostics and native source views")
 	}
@@ -98,11 +102,11 @@ func BenchmarkFirst(b *testing.B) {
 		t.Fatal(err)
 	}
 	commitAll(t, repo, "profile fixture")
-	withWorkingDir(t, root)
+	baseCtx := withWorkingDir(t, root)
 	st := store.New(filepath.Join(root, "benchmarks"))
 	rc := runConfig{benchDir: st.Root, opts: runpkg.Options{Bench: "^BenchmarkFirst$", Count: 2, Benchtime: "1x"}}
 	var stdout, stderr bytes.Buffer
-	if err := runRun(t.Context(), &stdout, &stderr, rc, []string{"."}); err != nil {
+	if err := runRun(baseCtx, &stdout, &stderr, rc, []string{"."}); err != nil {
 		t.Fatalf("measure: %v\n%s", err, &stderr)
 	}
 	before, err := st.Read("", "BenchmarkFirst", "")
@@ -131,11 +135,11 @@ func BenchmarkFirst(b *testing.B) {
 		if err != nil {
 			return nil, err
 		}
-		return runpkg.ExecuteContext(t.Context(), dir, pin, e, args)
+		return runpkg.ExecuteContext(baseCtx, dir, pin, e, args)
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if err := runRun(t.Context(), &stdout, &stderr, rc, []string{"."}); err != nil {
+	if err := runRun(baseCtx, &stdout, &stderr, rc, []string{"."}); err != nil {
 		t.Fatalf("profiles: %v\n%s\n%s", err, &stdout, &stderr)
 	}
 	if builds != 1 {
@@ -180,7 +184,7 @@ func BenchmarkFirst(b *testing.B) {
 		t.Fatal("unsupported model not reported")
 	}
 	stdout.Reset()
-	if err := runStatus(t.Context(), &stdout, st.Root, "", false, true, false, []string{"."}); err != nil {
+	if err := runStatus(baseCtx, &stdout, st.Root, "", false, true, false, []string{"."}); err != nil {
 		t.Fatalf("status: %v\n%s", err, &stdout)
 	}
 	if !strings.Contains(stdout.String(), "integrity=verified") || !strings.Contains(stdout.String(), "relation=unverified") || !strings.Contains(stdout.String(), "flat=") {
@@ -197,7 +201,7 @@ func BenchmarkFirst(b *testing.B) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithCancel(t.Context())
+			ctx, cancel := context.WithCancel(withWorkingDir(t, root))
 			defer cancel()
 			testRC := rc
 			testRC.profile = "cpu"
@@ -344,7 +348,7 @@ func BenchmarkFirst(b *testing.B) {
 		t.Fatal(err)
 	}
 	stdout.Reset()
-	if err := runStatus(t.Context(), &stdout, st.Root, "", false, false, true, []string{"."}); err == nil {
+	if err := runStatus(baseCtx, &stdout, st.Root, "", false, false, true, []string{"."}); err == nil {
 		t.Fatal("corruption reported success")
 	}
 	if !strings.Contains(stdout.String(), `"verdict":"valid"`) || !strings.Contains(stdout.String(), `"profiles"`) || !strings.Contains(stdout.String(), "integrity failure") {
@@ -353,6 +357,7 @@ func BenchmarkFirst(b *testing.B) {
 }
 
 func TestProfileRuntimeRelationRefusesKnownMovement(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	before := testEnvironment(t, []string{"PEW_PROFILE_INPUT=before"})
 	bracket, err := runtimeinput.CaptureBracket(t.Context(), root, []string{root})
@@ -374,12 +379,14 @@ func TestProfileRuntimeRelationRefusesKnownMovement(t *testing.T) {
 }
 
 func TestUnrequestedProfilesDoNoWork(t *testing.T) {
+	t.Parallel()
 	if err := runProfiles(context.Background(), io.Discard, io.Discard, runConfig{}, nil, nil, environments{}, runpkg.Conditions{}, nil, []string{"BenchmarkX"}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestProfileOnlyAfterInertGrowthPreservesProducingEvidence(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("executes a real allocation profile after native applicability extension")
 	}
@@ -396,11 +403,11 @@ func BenchmarkFirst(b *testing.B) { for i:=0;i<b.N;i++ { sink=make([]byte, Alloc
 		t.Fatal(err)
 	}
 	commitAll(t, repo, "measured source")
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	st := store.New(filepath.Join(root, "benchmarks"))
 	rc := runConfig{benchDir: st.Root, opts: runpkg.Options{Bench: "^BenchmarkFirst$", Count: 2, Benchtime: "1x"}}
 	var out, log bytes.Buffer
-	if err := runRun(t.Context(), &out, &log, rc, []string{"."}); err != nil {
+	if err := runRun(ctx, &out, &log, rc, []string{"."}); err != nil {
 		t.Fatalf("measure: %v\n%s", err, &log)
 	}
 	before, err := st.Read("", "BenchmarkFirst", "")
@@ -418,11 +425,11 @@ func BenchmarkFirst(b *testing.B) { for i:=0;i<b.N;i++ { sink=make([]byte, Alloc
 		if err != nil {
 			return nil, err
 		}
-		return runpkg.ExecuteContext(t.Context(), dir, pin, e, args)
+		return runpkg.ExecuteContext(ctx, dir, pin, e, args)
 	}
 	out.Reset()
 	log.Reset()
-	if err := runRun(t.Context(), &out, &log, rc, []string{"."}); err != nil {
+	if err := runRun(ctx, &out, &log, rc, []string{"."}); err != nil {
 		t.Fatalf("profile-only growth: %v\n%s\n%s", err, &out, &log)
 	}
 	after, err := st.Read("", "BenchmarkFirst", "")
@@ -463,19 +470,19 @@ func BenchmarkFirst(b *testing.B) { for i:=0;i<b.N;i++ { sink=make([]byte, Alloc
 		return nil, nil
 	}
 	out.Reset()
-	if err := runRun(t.Context(), &out, &log, rc, []string{"."}); err != nil || !strings.Contains(out.String(), "profile-served") {
+	if err := runRun(ctx, &out, &log, rc, []string{"."}); err != nil || !strings.Contains(out.String(), "profile-served") {
 		t.Fatalf("serve: %v\n%s", err, &out)
 	}
 	check := func(fp gofresh.Fingerprint, c profiles.Capture) error {
-		e, _, err := newEngineAt(t.Context(), root, root, false, testEnvironment(t, os.Environ()))
+		e, _, err := newEngineAt(ctx, root, root, false, testEnvironment(t, os.Environ()))
 		if err != nil {
 			t.Fatal(err)
 		}
-		v, err := e.bind(t.Context(), []gofresh.Subject{{Package: c.Package, Symbol: c.Benchmark}}, gofresh.Measurement)
+		v, err := e.bind(ctx, []gofresh.Subject{{Package: c.Package, Symbol: c.Benchmark}}, gofresh.Measurement)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return profiles.CheckedRelation(t.Context(), c, after, fp, v)
+		return profiles.CheckedRelation(ctx, c, after, fp, v)
 	}
 	if err := check(measured, capture); err != nil {
 		t.Fatal(err)
@@ -486,23 +493,23 @@ func BenchmarkFirst(b *testing.B) { for i:=0;i<b.N;i++ { sink=make([]byte, Alloc
 		t.Fatal("unknown strategy accessor conferred applicability")
 	}
 	// A same-span change cannot escape the checking view's validation.
-	e, _, err := newEngineAt(t.Context(), root, root, false, testEnvironment(t, os.Environ()))
+	e, _, err := newEngineAt(ctx, root, root, false, testEnvironment(t, os.Environ()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, err := e.bind(t.Context(), []gofresh.Subject{{Package: capture.Package, Symbol: capture.Benchmark}}, gofresh.Measurement)
+	v, err := e.bind(ctx, []gofresh.Subject{{Package: capture.Package, Symbol: capture.Benchmark}}, gofresh.Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// An operational proof failure belongs to the error channel, not pair mismatch.
-	cancelled, cancel := context.WithCancel(t.Context())
+	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
 	failed, err := inspectProfile(cancelled, st, capture, after, v)
 	if !errors.Is(err, context.Canceled) || failed.Error == "" || failed.Relation != "unverified" {
 		t.Fatalf("operational failure misclassified: %+v %v", failed, err)
 	}
 	writeFile(t, filepath.Join(root, "extra_test.go"), "package arms\nfunc UncalledExtra() int { return 2 }\n")
-	if err := profiles.CheckedRelation(t.Context(), capture, after, measured, v); err == nil {
+	if err := profiles.CheckedRelation(ctx, capture, after, measured, v); err == nil {
 		t.Fatal("moved checking view conferred applicability")
 	}
 	if err := check(measured, capture); err == nil {
@@ -525,7 +532,7 @@ func BenchmarkFirst(b *testing.B) { for i:=0;i<b.N;i++ { sink=make([]byte, Alloc
 	}
 	for _, jsonOut := range []bool{false, true} {
 		var status bytes.Buffer
-		if err := runStatus(t.Context(), &status, st.Root, "", false, !jsonOut, jsonOut, []string{"."}); err != nil {
+		if err := runStatus(ctx, &status, st.Root, "", false, !jsonOut, jsonOut, []string{"."}); err != nil {
 			t.Fatalf("ordinary stale profile failed status: %v\n%s", err, &status)
 		}
 		if jsonOut {

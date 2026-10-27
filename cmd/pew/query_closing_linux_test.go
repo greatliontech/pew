@@ -38,8 +38,7 @@ func TestClosingQueryExpiryKeepsThePublishedPrefix(t *testing.T) {
 	t.Setenv("PEW_QUERY_PID", pidFile)
 	t.Setenv("PATH", shim+string(os.PathListSeparator)+os.Getenv("PATH"))
 	dir := twoArmFixture(t)
-	withWorkingDir(t, dir)
-	ctx, stop := startReporter(t.Context(), &bytes.Buffer{}, 0)
+	ctx, stop := startReporter(withWorkingDir(t, dir), &bytes.Buffer{}, 0)
 	defer stop()
 	setPhaseHook(ctx, func(phase string) {
 		if phase == "publishing example.com/arms.BenchmarkSecond" {

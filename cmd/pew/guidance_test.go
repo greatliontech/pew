@@ -15,6 +15,7 @@ import (
 // panic every serving surface, so this is the loud build-time pin
 // (REQ-pew-guidance).
 func TestGuidanceDocumentParses(t *testing.T) {
+	t.Parallel()
 	if _, err := pew.GuidanceDocument(); err != nil {
 		t.Fatal(err)
 	}
@@ -26,6 +27,7 @@ func TestGuidanceDocumentParses(t *testing.T) {
 // Short/Long ARE the document's projections (REQ-pew-guidance).
 // Cobra's help/completion plumbing is surface plumbing, not verbs.
 func TestGuidanceCoversTheCLISurface(t *testing.T) {
+	t.Parallel()
 	doc, err := pew.GuidanceDocument()
 	if err != nil {
 		t.Fatal(err)
@@ -89,6 +91,7 @@ func TestGuidanceCoversTheCLISurface(t *testing.T) {
 // the decision map for no verb, and a teaching error for an unknown
 // one (REQ-pew-guidance).
 func TestGuidanceCommandServesTheDocument(t *testing.T) {
+	t.Parallel()
 	doc, err := pew.GuidanceDocument()
 	if err != nil {
 		t.Fatal(err)
@@ -129,6 +132,7 @@ func TestGuidanceCommandServesTheDocument(t *testing.T) {
 // default is non-zero — the library is the oracle, the named rows at
 // each type's cliff the belt (a string "0" prints, an int 0 does not).
 func TestZeroDefaultFollowsPflagsPrintingRule(t *testing.T) {
+	t.Parallel()
 	fs := pflag.NewFlagSet("t", pflag.ContinueOnError)
 	fs.String("s0", "", "")
 	fs.String("s1", "0", "")
@@ -167,6 +171,7 @@ func TestZeroDefaultFollowsPflagsPrintingRule(t *testing.T) {
 // silent — so every pew knob's registration is load-bearing exactly
 // where its prose would print a default twice.
 func TestCoverageJudgesTheRegisteredDefaultFact(t *testing.T) {
+	t.Parallel()
 	doc, err := guidance.Parse([]byte("# t — tool-resident guidance\n\n## verbs\n\n### v\n**surfaces:** cli\n**does:** does a thing.\n**knobs:**\n- `k` — how many, default 6 unless given.\n**when:** whenever.\n**example:** `t v`.\n\n## decision map\n- to do a thing: `v`.\n"))
 	if err != nil {
 		t.Fatal(err)
@@ -204,6 +209,7 @@ func registeredCLI(root *cobra.Command) map[string]guidance.Registered {
 // the coverage judgment is handed, over the real command tree: a flag
 // with a printed default registers true, one with a zero default false.
 func TestRegisteredCLICarriesEachFlagsDefaultFact(t *testing.T) {
+	t.Parallel()
 	registered := registeredCLI(newRootCmd())
 	for _, row := range []struct {
 		verb, flag string
@@ -222,6 +228,7 @@ func TestRegisteredCLICarriesEachFlagsDefaultFact(t *testing.T) {
 // (unquoted — the vouches file), and one whose derived default is
 // spelled in prose.
 func TestFlagUsageIsTheDocumentsProjection(t *testing.T) {
+	t.Parallel()
 	root := newRootCmd()
 	run, _, err := root.Find([]string{"run"})
 	if err != nil {

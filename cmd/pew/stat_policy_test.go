@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -21,13 +20,14 @@ import (
 )
 
 func TestStatPolicyFlagsRefuseBeforeListing(t *testing.T) {
-	withWorkingDir(t, t.TempDir())
+	t.Parallel()
+	ctx := withWorkingDir(t, t.TempDir())
 	for _, flag := range []string{"coverage", "freshness", "conditions"} {
 		cmd := newRootCmd()
 		cmd.SetArgs([]string{"stat", "--" + flag + "=invalid"})
 		cmd.SetOut(io.Discard)
 		cmd.SetErr(io.Discard)
-		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "--"+flag+" must be") {
+		if err := cmd.ExecuteContext(ctx); err == nil || !strings.Contains(err.Error(), "--"+flag+" must be") {
 			t.Fatalf("%s: %v", flag, err)
 		}
 	}
@@ -78,6 +78,7 @@ func decodedPolicyReport(t *testing.T, text string) ([]compare.Disposition, comp
 }
 
 func TestStatCLIPoliciesAndSemanticParity(t *testing.T) {
+	t.Parallel()
 	dir, repo, st := policyRepo(t)
 	writeStatRecording(t, st, "pkg", "BenchmarkGood", 100)
 	writeStatRecording(t, st, "pkg", "BenchmarkGone", 100)
@@ -90,7 +91,7 @@ func TestStatCLIPoliciesAndSemanticParity(t *testing.T) {
 	partial := commitAll(t, repo, "partial").String()
 	writeStatRecording(t, st, "pkg", "BenchmarkGood", 130)
 	regressed := commitAll(t, repo, "regressed").String()
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	for _, tc := range []struct {
 		name, ref string
 		flags     []string
@@ -116,7 +117,7 @@ func TestStatCLIPoliciesAndSemanticParity(t *testing.T) {
 				var out, errOut bytes.Buffer
 				cmd.SetOut(&out)
 				cmd.SetErr(&errOut)
-				err := cmd.Execute()
+				err := cmd.ExecuteContext(ctx)
 				code := 0
 				if err != nil {
 					code = exitCode(err)
@@ -143,18 +144,19 @@ func TestStatCLIPoliciesAndSemanticParity(t *testing.T) {
 }
 
 func TestStatDeclaredUnrecordedAndFreshnessEligibility(t *testing.T) {
+	t.Parallel()
 	dir, repo, st := policyRepo(t)
 	writeFile(t, filepath.Join(dir, "pkg", "pkg_test.go"), "package pkg\nimport \"testing\"\nfunc BenchmarkUnrecorded(b *testing.B) {}\n")
 	// The recorded benchmark has no declaration, so checking it is unavailable;
 	// the genuinely declared benchmark must remain in the requested universe.
 	writeStatRecording(t, st, "pkg", "BenchmarkStored", 100)
 	base := commitAll(t, repo, "base").String()
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	for _, p := range []compare.Policies{{}, {Coverage: "partial", Freshness: "report"}, {Coverage: "complete", Freshness: "report"}, {Coverage: "partial", Freshness: "require"}} {
 		o := compare.DefaultOptions()
 		o.Policies = p
 		var out, errOut bytes.Buffer
-		err := runStat(context.Background(), &out, &errOut, statConfig{opts: o, jsonOut: true, failOnRegression: true}, nil)
+		err := runStat(ctx, &out, &errOut, statConfig{opts: o, jsonOut: true, failOnRegression: true}, nil)
 		if p == (compare.Policies{Coverage: "partial", Freshness: "report"}) {
 			if err != nil {
 				t.Fatal(err)
@@ -183,12 +185,13 @@ func TestStatDeclaredUnrecordedAndFreshnessEligibility(t *testing.T) {
 	var out bytes.Buffer
 	o := compare.DefaultOptions()
 	o.Policies.Coverage = "complete"
-	if err := runStat(context.Background(), &out, io.Discard, statConfig{opts: o, failOnRegression: true}, []string{base, base}); err != nil {
+	if err := runStat(ctx, &out, io.Discard, statConfig{opts: o, failOnRegression: true}, []string{base, base}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestStatBlockedSidesRetainAllCausesAndChildIdentity(t *testing.T) {
+	t.Parallel()
 	dir, repo, st := policyRepo(t)
 	rows := recordingtest.Results("BenchmarkX", []float64{1, 1, 1, 1, 1, 1, 1, 1})
 	for _, r := range rows {
@@ -206,9 +209,9 @@ func TestStatBlockedSidesRetainAllCausesAndChildIdentity(t *testing.T) {
 	path, _ := st.Path("pkg", "BenchmarkX", "")
 	writeFile(t, path, "pew-format: 3\nBenchmarkX/child-8 1 1 sec/op\n")
 	newer := commitAll(t, repo, "bad format").String()
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out bytes.Buffer
-	if err := runStat(context.Background(), &out, io.Discard, statConfig{opts: compare.DefaultOptions(), jsonOut: true}, []string{base, newer}); err != nil {
+	if err := runStat(ctx, &out, io.Discard, statConfig{opts: compare.DefaultOptions(), jsonOut: true}, []string{base, newer}); err != nil {
 		t.Fatal(err)
 	}
 	ds, c, _ := decodedPolicyReport(t, out.String())
@@ -222,6 +225,7 @@ func TestStatBlockedSidesRetainAllCausesAndChildIdentity(t *testing.T) {
 }
 
 func TestStatConditionsAndNumericRefusalsThroughCLI(t *testing.T) {
+	t.Parallel()
 	dir, repo, st := policyRepo(t)
 	writeStatRecording(t, st, "pkg", "BenchmarkX", 100)
 	base := commitAll(t, repo, "base").String()
@@ -245,7 +249,7 @@ func TestStatConditionsAndNumericRefusalsThroughCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	invalid := commitAll(t, repo, "invalid sample").String()
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	for _, tc := range []struct {
 		ref, condition string
 		rows, exit     int
@@ -259,7 +263,7 @@ func TestStatConditionsAndNumericRefusalsThroughCLI(t *testing.T) {
 		var out bytes.Buffer
 		cmd.SetOut(&out)
 		cmd.SetErr(io.Discard)
-		err := cmd.Execute()
+		err := cmd.ExecuteContext(ctx)
 		code := 0
 		if err != nil {
 			code = exitCode(err)
@@ -271,6 +275,7 @@ func TestStatConditionsAndNumericRefusalsThroughCLI(t *testing.T) {
 }
 
 func TestStatSignalPrecedesIncompleteGate(t *testing.T) {
+	t.Parallel()
 	err := errors.Join(&nothingComparedError{reason: "incomplete"}, interrupted("stopped"))
 	if exitCode(err) != 130 {
 		t.Fatal("gate outranks interruption")
@@ -278,6 +283,7 @@ func TestStatSignalPrecedesIncompleteGate(t *testing.T) {
 }
 
 func TestStatRecordingIdentityDoesNotDependOnPkgMetadata(t *testing.T) {
+	t.Parallel()
 	dir, repo, st := policyRepo(t)
 	for _, pkg := range []string{"one", "two"} {
 		writeStatRecording(t, st, pkg, "BenchmarkSame", 100)
@@ -289,11 +295,11 @@ func TestStatRecordingIdentityDoesNotDependOnPkgMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	newer := commitAll(t, repo, "missing second package").String()
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	o := compare.DefaultOptions()
 	o.Policies.Coverage = "complete"
 	var out bytes.Buffer
-	err := runStat(context.Background(), &out, io.Discard, statConfig{opts: o, jsonOut: true, failOnRegression: true}, []string{base, newer})
+	err := runStat(ctx, &out, io.Discard, statConfig{opts: o, jsonOut: true, failOnRegression: true}, []string{base, newer})
 	var missing *nothingComparedError
 	if !errors.As(err, &missing) {
 		t.Fatalf("merged package evidence: %v\n%s", err, out.String())
@@ -308,17 +314,18 @@ func TestStatRecordingIdentityDoesNotDependOnPkgMetadata(t *testing.T) {
 }
 
 func TestStatUnknownCurrentInventoryCannotClaimComplete(t *testing.T) {
+	t.Parallel()
 	dir, repo, st := policyRepo(t)
 	writeStatRecording(t, st, "pkg", "BenchmarkStored", 100)
 	base := commitAll(t, repo, "base").String()
 	writeFile(t, filepath.Join(dir, "pkg", "broken_test.go"), "package pkg\nfunc BenchmarkBroken(\n")
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	for _, mode := range []string{"partial", "complete"} {
 		o := compare.DefaultOptions()
 		o.Policies.Coverage = mode
 		o.Policies.Freshness = "report"
 		var out bytes.Buffer
-		err := runStat(context.Background(), &out, io.Discard, statConfig{opts: o, jsonOut: true, failOnRegression: true}, nil)
+		err := runStat(ctx, &out, io.Discard, statConfig{opts: o, jsonOut: true, failOnRegression: true}, nil)
 		if mode == "partial" && err != nil {
 			t.Fatal(err)
 		}
@@ -335,12 +342,13 @@ func TestStatUnknownCurrentInventoryCannotClaimComplete(t *testing.T) {
 	}
 	o := compare.DefaultOptions()
 	o.Policies.Coverage = "complete"
-	if err := runStat(context.Background(), io.Discard, io.Discard, statConfig{opts: o, failOnRegression: true}, []string{base, base}); err != nil {
+	if err := runStat(ctx, io.Discard, io.Discard, statConfig{opts: o, failOnRegression: true}, []string{base, base}); err != nil {
 		t.Fatalf("current parse failure blocked historical scope: %v", err)
 	}
 }
 
 func TestStatCoverageRespectsLabelScope(t *testing.T) {
+	t.Parallel()
 	dir, repo, st := policyRepo(t)
 	rows := recordingtest.Results("BenchmarkX", []float64{1, 1, 1, 1, 1, 1, 1, 1})
 	if err := st.Write("pkg", "BenchmarkX", "fast", rows); err != nil {
@@ -353,11 +361,11 @@ func TestStatCoverageRespectsLabelScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	newer := commitAll(t, repo, "unselected removed").String()
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	o := compare.DefaultOptions()
 	o.Policies.Coverage = "complete"
 	var out bytes.Buffer
-	if err := runStat(context.Background(), &out, io.Discard, statConfig{opts: o, label: "fast", jsonOut: true, failOnRegression: true}, []string{base, newer}); err != nil {
+	if err := runStat(ctx, &out, io.Discard, statConfig{opts: o, label: "fast", jsonOut: true, failOnRegression: true}, []string{base, newer}); err != nil {
 		t.Fatal(err)
 	}
 	ds, c, _ := decodedPolicyReport(t, out.String())
@@ -367,6 +375,7 @@ func TestStatCoverageRespectsLabelScope(t *testing.T) {
 }
 
 func TestStatExecutableExitAndJSON(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("builds the real CLI executable")
 	}
@@ -412,11 +421,12 @@ func TestStatExecutableExitAndJSON(t *testing.T) {
 }
 
 func TestStatFreshnessPolicyUsesSharedValidAndStaleJudgments(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("records and judges a fixture through the shared engine")
 	}
 	dir := twoArmFixture(t)
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	source := "package arms\nimport \"testing\"\nfunc BenchmarkFirst(b *testing.B) {}\nfunc BenchmarkSecond(b *testing.B) {}\n"
 	writeFile(t, filepath.Join(dir, "bench_test.go"), source)
 	repo, err := gogit.PlainOpen(dir)
@@ -426,7 +436,7 @@ func TestStatFreshnessPolicyUsesSharedValidAndStaleJudgments(t *testing.T) {
 	commitAll(t, repo, "pure benchmarks")
 	rc := runConfig{opts: run.Options{Count: 1, Benchtime: "1x", Bench: "."}, binary: armExecution(nil)}
 	var recorded, diagnostics bytes.Buffer
-	if err := runRun(context.Background(), &recorded, &diagnostics, rc, []string{"."}); err != nil {
+	if err := runRun(ctx, &recorded, &diagnostics, rc, []string{"."}); err != nil {
 		t.Fatalf("record: %v\n%s\n%s", err, recorded.String(), diagnostics.String())
 	}
 	commitAll(t, repo, "recordings")
@@ -444,7 +454,7 @@ func TestStatFreshnessPolicyUsesSharedValidAndStaleJudgments(t *testing.T) {
 			var out, errOut bytes.Buffer
 			cmd.SetOut(&out)
 			cmd.SetErr(&errOut)
-			err := cmd.Execute()
+			err := cmd.ExecuteContext(ctx)
 			want := 0
 			if state == "stale" && (policy == "" || policy == "require") {
 				want = 2

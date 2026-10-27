@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	"sort"
 
 	"github.com/greatliontech/gofresh"
@@ -57,7 +56,7 @@ func captureABProfiles(ctx context.Context, w, errw io.Writer, ac abConfig, prep
 	gc := &gitStateCache{}
 	var objects *store.Store
 	if ac.out != "" {
-		out, err := filepath.Abs(ac.out)
+		out, err := resolveWorkPath(ctx, ac.out)
 		if err != nil {
 			return err
 		}

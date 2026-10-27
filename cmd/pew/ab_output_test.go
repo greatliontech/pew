@@ -18,6 +18,7 @@ import (
 )
 
 func TestABOutputOwnershipRefusesBeforeBuildOrMeasurement(t *testing.T) {
+	t.Parallel()
 	root := abFixtureRepo(t)
 	st := store.New(filepath.Join(root, "benchmarks"))
 	if err := st.Write("p", "BenchmarkWork", "", recordingtest.Results("Work", []float64{1, 2})); err != nil {
@@ -38,7 +39,7 @@ func TestABOutputOwnershipRefusesBeforeBuildOrMeasurement(t *testing.T) {
 	if err := os.Symlink(st.Root, profileOut+".profiles"); err != nil {
 		t.Fatal(err)
 	}
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	for _, tc := range []struct{ name, path, profile string }{
 		{"recording", record, ""}, {"lock", filepath.Join(st.Root, ".pew-lock"), ""}, {"source", filepath.Join(root, "p", "p.go"), ""}, {"module", filepath.Join(root, "go.mod"), ""},
 		{"symlink-file", fileLink, ""}, {"symlink-directory", filepath.Join(dirLink, "result.txt"), ""}, {"companion-store", profileOut, "cpu"},
@@ -54,7 +55,7 @@ func TestABOutputOwnershipRefusesBeforeBuildOrMeasurement(t *testing.T) {
 				runs++
 				return []byte("BenchmarkWork-8 1 1 ns/op\n"), nil
 			}
-			err := runAB(t.Context(), io.Discard, io.Discard, ac, []string{"./p"})
+			err := runAB(ctx, io.Discard, io.Discard, ac, []string{"./p"})
 			if err == nil || !strings.Contains(err.Error(), "output") || builds != 0 || runs != 0 {
 				t.Fatalf("preflight: err=%v builds=%d runs=%d", err, builds, runs)
 			}
@@ -69,6 +70,7 @@ func TestABOutputOwnershipRefusesBeforeBuildOrMeasurement(t *testing.T) {
 }
 
 func TestABOutputOwnsOnlySelectedSourcesAndStores(t *testing.T) {
+	t.Parallel()
 	root := abFixtureRepo(t)
 	dependency := filepath.Join(filepath.Dir(root), "dep")
 	writeFile(t, filepath.Join(dependency, "go.mod"), "module example.com/dep\ngo 1.24\n")
@@ -76,25 +78,26 @@ func TestABOutputOwnsOnlySelectedSourcesAndStores(t *testing.T) {
 	writeFile(t, input, "package dep\nfunc Value() int {return 1}\n")
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/abfix\ngo 1.24\nrequire example.com/dep v0.0.0\nreplace example.com/dep => ../dep\n")
 	writeFile(t, filepath.Join(root, "p", "p.go"), "package p\nimport \"example.com/dep\"\nfunc Work(n int) int {return dep.Value()+n}\n")
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	env := testEnvironment(t, nil)
-	pkgs, err := resolvePackages(t.Context(), env, []string{"./p"})
+	pkgs, err := resolvePackages(ctx, env, []string{"./p"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prepareABOutput(t.Context(), input, false, pkgs, env); err == nil || !strings.Contains(err.Error(), "source input") {
+	if _, err := prepareABOutput(ctx, input, false, pkgs, env); err == nil || !strings.Contains(err.Error(), "source input") {
 		t.Fatalf("selected external dependency not protected: %v", err)
 	}
 	for _, name := range []string{"unrelated.go", ".pew-lock"} {
 		out := filepath.Join(t.TempDir(), name)
 		writeFile(t, out, "unrelated output")
-		if _, err := prepareABOutput(t.Context(), out, false, pkgs, env); err != nil {
+		if _, err := prepareABOutput(ctx, out, false, pkgs, env); err != nil {
 			t.Fatalf("guessed ownership from %s: %v", name, err)
 		}
 	}
 }
 
 func TestABOutputRechecksTopologyBeforePublication(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	out := filepath.Join(dir, "out.txt")
 	owned := &abOutputOwnership{path: out}
@@ -128,7 +131,7 @@ func TestABOutputProtectsSelectedBuildConfiguration(t *testing.T) {
 	writeFile(t, pgo, "selected build input")
 	t.Setenv("GOWORK", workspace)
 	t.Setenv("GOFLAGS", "-pgo="+pgo)
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	var p pkgMeta
 	p.ImportPath = "example.com/abfix/p"
 	p.Dir = filepath.Join(root, "p")
@@ -136,13 +139,14 @@ func TestABOutputProtectsSelectedBuildConfiguration(t *testing.T) {
 	p.Module.Dir = root
 	p.Module.Path = "example.com/abfix"
 	for _, path := range []string{workspace, pgo} {
-		if _, err := prepareABOutput(t.Context(), path, false, []pkgMeta{p}, testEnvironment(t, nil)); err == nil || !strings.Contains(err.Error(), "source input") {
+		if _, err := prepareABOutput(ctx, path, false, []pkgMeta{p}, testEnvironment(t, nil)); err == nil || !strings.Contains(err.Error(), "source input") {
 			t.Fatalf("build input %s not protected: %v", path, err)
 		}
 	}
 }
 
 func TestABOutputProtectsReferenceOnlyExternalInputWithoutProfiles(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("warms a real external dependency build and inventories the materialized ref")
 	}
@@ -159,20 +163,20 @@ func TestABOutputProtectsReferenceOnlyExternalInputWithoutProfiles(t *testing.T)
 		t.Fatal(err)
 	}
 	commitAll(t, repo, "reference imports external input")
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	env := testEnvironment(t, nil)
 	// A warm compiled dependency must still contribute its selected source paths.
-	if err := run.BuildContext(t.Context(), root, env, []string{"test", "-c", "-o", filepath.Join(t.TempDir(), "warm.test"), "./p"}); err != nil {
+	if err := run.BuildContext(ctx, root, env, []string{"test", "-c", "-o", filepath.Join(t.TempDir(), "warm.test"), "./p"}); err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(root, "p", "p.go"), "package p\nfunc Work(n int) int {return n}\n")
-	pkgs, err := resolvePackages(t.Context(), env, []string{"./p"})
+	pkgs, err := resolvePackages(ctx, env, []string{"./p"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The target really is absent from A's selected input set. No filename-based
 	// exemption or protection can substitute for inventorying B's own tree.
-	if _, err := prepareABOutput(t.Context(), input, false, pkgs, env); err != nil {
+	if _, err := prepareABOutput(ctx, input, false, pkgs, env); err != nil {
 		t.Fatalf("fixture target is not B-only: %v", err)
 	}
 	ac := abConfigStub("")
@@ -183,7 +187,7 @@ func TestABOutputProtectsReferenceOnlyExternalInputWithoutProfiles(t *testing.T)
 		measured++
 		return []byte("BenchmarkWork-8 1 1 ns/op\n"), nil
 	}
-	err = runAB(t.Context(), io.Discard, io.Discard, ac, []string{"./p"})
+	err = runAB(ctx, io.Discard, io.Discard, ac, []string{"./p"})
 	if err == nil || !strings.Contains(err.Error(), "source input") || !strings.Contains(err.Error(), input) || builds != 0 || measured != 0 {
 		t.Errorf("B-only output preflight: err=%v builds=%d measurements=%d", err, builds, measured)
 	}
@@ -194,14 +198,15 @@ func TestABOutputProtectsReferenceOnlyExternalInputWithoutProfiles(t *testing.T)
 }
 
 func TestABOutputInventoryRetainsStandardSourcePaths(t *testing.T) {
+	t.Parallel()
 	root := abFixtureRepo(t)
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	env := testEnvironment(t, nil)
-	pkgs, err := resolvePackages(t.Context(), env, []string{"./p"})
+	pkgs, err := resolvePackages(ctx, env, []string{"./p"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	goroot, err := gotool.EnvValue(t.Context(), gotool.Reader(root, env, nil), "GOROOT")
+	goroot, err := gotool.EnvValue(ctx, gotool.Reader(root, env, nil), "GOROOT")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,12 +215,13 @@ func TestABOutputInventoryRetainsStandardSourcePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Admission only: this test never attempts to write a toolchain source file.
-	if _, err := prepareABOutput(t.Context(), input, false, pkgs, env); err == nil || !strings.Contains(err.Error(), "source input") {
+	if _, err := prepareABOutput(ctx, input, false, pkgs, env); err == nil || !strings.Contains(err.Error(), "source input") {
 		t.Fatalf("selected standard source omitted: %v", err)
 	}
 }
 
 func TestABOutputUsesSelectedTestVariantInputs(t *testing.T) {
+	t.Parallel()
 	root := abFixtureRepo(t)
 	dependency := t.TempDir()
 	writeFile(t, filepath.Join(dependency, "go.mod"), "module example.com/dep\ngo 1.24\n")
@@ -248,7 +254,7 @@ func TestExternal(t *testing.T) { if externalData=="" || dep.Value()==0 {t.Fatal
 		t.Fatal(err)
 	}
 	commitAll(t, repo, "selected dependency variants")
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	env := testEnvironment(t, nil)
 	for _, selection := range []struct {
 		name, pattern   string
@@ -256,7 +262,7 @@ func TestExternal(t *testing.T) { if externalData=="" || dep.Value()==0 {t.Fatal
 	}{
 		{"caller-only", "./p", false}, {"dependency-tested", "example.com/dep", true},
 	} {
-		pkgs, err := resolvePackages(t.Context(), env, []string{selection.pattern})
+		pkgs, err := resolvePackages(ctx, env, []string{selection.pattern})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -267,7 +273,7 @@ func TestExternal(t *testing.T) { if externalData=="" || dep.Value()==0 {t.Fatal
 			{"dep.go", true}, {"production.txt", true}, {"unrelated_test.go", false}, {"external_test.go", false}, {"testdata/internal.txt", false}, {"testdata/external.txt", false},
 		} {
 			t.Run(selection.name+"/"+file.name, func(t *testing.T) {
-				_, err := prepareABOutput(t.Context(), filepath.Join(dependency, file.name), false, pkgs, env)
+				_, err := prepareABOutput(ctx, filepath.Join(dependency, file.name), false, pkgs, env)
 				if file.production || selection.dependencyTests {
 					if err == nil || !strings.Contains(err.Error(), "source input") {
 						t.Fatalf("selected variant input %s not protected: %v", file.name, err)
@@ -285,7 +291,7 @@ func TestExternal(t *testing.T) { if externalData=="" || dep.Value()==0 {t.Fatal
 			t.Skip("builds and measures both native benchmark binaries")
 		}
 		ac := abConfig{bench: "^BenchmarkWork$", count: 1, benchtime: "1x", ref: "HEAD", out: filepath.Join(dependency, "unrelated_test.go")}
-		if err := runAB(t.Context(), io.Discard, io.Discard, ac, []string{"./p"}); err != nil {
+		if err := runAB(ctx, io.Discard, io.Discard, ac, []string{"./p"}); err != nil {
 			t.Fatalf("unselected dependency test output refused end-to-end: %v", err)
 		}
 		artifact, err := os.ReadFile(ac.out)
@@ -296,14 +302,15 @@ func TestExternal(t *testing.T) { if externalData=="" || dep.Value()==0 {t.Fatal
 }
 
 func TestABOutputDoesNotSelectStandardDependencyTests(t *testing.T) {
+	t.Parallel()
 	root := abFixtureRepo(t)
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	env := testEnvironment(t, nil)
-	pkgs, err := resolvePackages(t.Context(), env, []string{"./p"})
+	pkgs, err := resolvePackages(ctx, env, []string{"./p"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := gotool.List(t.Context(), root, env, "-json", "testing")
+	data, err := gotool.List(ctx, root, env, "-json", "testing")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +331,7 @@ func TestABOutputDoesNotSelectStandardDependencyTests(t *testing.T) {
 	}
 	// Admission only; never write into the toolchain. testing's production
 	// inputs are selected by our test binary, but testing's own tests are not.
-	if _, err := prepareABOutput(t.Context(), input, false, pkgs, env); err != nil {
+	if _, err := prepareABOutput(ctx, input, false, pkgs, env); err != nil {
 		t.Fatalf("unselected standard-library test refused: %v", err)
 	}
 }

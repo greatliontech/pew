@@ -55,11 +55,12 @@ func armExecution(between func(arm int)) func(context.Context, string, string, g
 // when HEAD moves during the second arm, the first arm's recording
 // stands and the second is refused (REQ-pew-unit-persistence).
 func TestRunPersistsEachArmAsItMeasures(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain with the execute seam stubbed")
 	}
 	dir := twoArmFixture(t)
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	benchDir := filepath.Join(dir, "benchmarks")
 	rc := runConfig{
 		benchDir: benchDir,
@@ -90,7 +91,7 @@ func TestRunPersistsEachArmAsItMeasures(t *testing.T) {
 		}),
 	}
 	var out bytes.Buffer
-	err := runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"."})
+	err := runRun(ctx, &out, &bytes.Buffer{}, rc, []string{"."})
 	// The second arm refuses on its own moved state bracket; a batch
 	// write at the end would have refused the whole package on HEAD, the
 	// first arm's measurement with it.
@@ -109,13 +110,13 @@ func TestRunPersistsEachArmAsItMeasures(t *testing.T) {
 // An interruption stops before the next arm: the arms recorded so far
 // stand and the report says what was kept (REQ-pew-interruption).
 func TestRunInterruptedKeepsRecordedArms(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain with the execute seam stubbed")
 	}
 	dir := twoArmFixture(t)
-	withWorkingDir(t, dir)
 	benchDir := filepath.Join(dir, "benchmarks")
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(withWorkingDir(t, dir))
 	defer cancel()
 	rc := runConfig{
 		benchDir: benchDir,
@@ -147,13 +148,13 @@ func TestRunInterruptedKeepsRecordedArms(t *testing.T) {
 // interrupted comparison keeps the iterations it finished
 // (REQ-pew-unit-persistence, REQ-pew-interruption).
 func TestABArtifactHoldsEachCompletedIteration(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads the fixture through the toolchain with the build and execute seams stubbed")
 	}
 	dir := abFixtureRepo(t)
-	withWorkingDir(t, dir)
 	out := filepath.Join(t.TempDir(), "ab.txt")
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(withWorkingDir(t, dir))
 	defer cancel()
 	runs := 0
 	ac := abConfig{
@@ -187,6 +188,7 @@ func TestABArtifactHoldsEachCompletedIteration(t *testing.T) {
 // gc reports each removal the moment it lands, through the store walk
 // itself, so an interrupted gc has reported everything it did.
 func TestGCReportsEachRemovalAsItLands(t *testing.T) {
+	t.Parallel()
 	st := store.New(t.TempDir())
 	writeRecording(t, st, "p", "BenchmarkGone", "")
 	var w bytes.Buffer
@@ -203,6 +205,7 @@ func TestGCReportsEachRemovalAsItLands(t *testing.T) {
 // elapsed time, and the engine's detail-free keep-alives name the
 // analysis stretch (REQ-pew-progress).
 func TestReporterNamesThePhaseOnTheCadence(t *testing.T) {
+	t.Parallel()
 	log := &lockedBuffer{}
 	ctx, stop := startReporter(t.Context(), log, 5*time.Millisecond)
 	reportPhase(ctx, "measuring example.com/p arm 1/2")
@@ -266,6 +269,7 @@ func (l *lockedBuffer) String() string {
 // refusing that arm alone with the earlier arm kept
 // (REQ-pew-unit-persistence).
 func TestRunPerArmGateRefusesTheArmAlone(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain with the execute seam stubbed")
 	}
@@ -297,7 +301,7 @@ func TestRunPerArmGateRefusesTheArmAlone(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := twoArmFixture(t)
-			withWorkingDir(t, dir)
+			ctx := withWorkingDir(t, dir)
 			benchDir := filepath.Join(dir, "benchmarks")
 			rc := runConfig{
 				benchDir: benchDir,
@@ -311,7 +315,7 @@ func TestRunPerArmGateRefusesTheArmAlone(t *testing.T) {
 				},
 			}
 			var out bytes.Buffer
-			err := runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"."})
+			err := runRun(ctx, &out, &bytes.Buffer{}, rc, []string{"."})
 			// The gate's own refusal names the moved evidence, never the
 			// bound's expiry: an operator re-runs for a timeout and looks
 			// at the tree for a moved one.
@@ -332,6 +336,7 @@ func TestRunPerArmGateRefusesTheArmAlone(t *testing.T) {
 // An arm that will not run pays none of its preparation: after an
 // interruption lands, the next arm is never entered.
 func TestRunInterruptedArmsAreNeverEntered(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain with the execute seam stubbed")
 	}
@@ -346,8 +351,7 @@ func TestRunInterruptedArmsAreNeverEntered(t *testing.T) {
 		}
 	}
 	commitFixture(t, dir)
-	withWorkingDir(t, dir)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(withWorkingDir(t, dir))
 	defer cancel()
 	// A leftover matching the scratch directive, planted by the first
 	// arm: the next arm's own preparation would sweep it, so its survival
@@ -404,6 +408,7 @@ func (c *cancelOnRecorded) Write(p []byte) (int, error) {
 // its next module with a report, never a silent hang through the
 // history scan and the per-key walk (REQ-pew-interruption).
 func TestStatInterruptedEndsWithAReport(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statstop\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -414,8 +419,7 @@ func TestStatInterruptedEndsWithAReport(t *testing.T) {
 	st := store.New(filepath.Join(dir, "benchmarks"))
 	writeStatRecording(t, st, "pkg", "BenchmarkStop", 100)
 	commitAll(t, repo, "base")
-	withWorkingDir(t, dir)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(withWorkingDir(t, dir))
 	cancel()
 	var out, errOut bytes.Buffer
 	err = runStat(ctx, &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, nil)

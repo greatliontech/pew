@@ -79,6 +79,7 @@ func (a *abArtifact) pair(pkg, ref string, pair int, sideA, sideB abStream) erro
 }
 
 func TestABMultiPackageInterruptedKeepsPairs(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("fixture package listing")
 	}
@@ -89,10 +90,10 @@ func TestABMultiPackageInterruptedKeepsPairs(t *testing.T) {
 		t.Fatal(err)
 	}
 	commitAll(t, repo, "two packages")
-	withWorkingDir(t, root)
+	baseCtx := withWorkingDir(t, root)
 	for _, interrupt := range []bool{false, true} {
 		t.Run(fmt.Sprint(interrupt), func(t *testing.T) {
-			ctx, cancel := context.WithCancel(t.Context())
+			ctx, cancel := context.WithCancel(baseCtx)
 			defer cancel()
 			ac := abConfigStub("")
 			ac.count = 3
@@ -145,6 +146,7 @@ func TestABMultiPackageInterruptedKeepsPairs(t *testing.T) {
 }
 
 func TestRealABProfilesHaveIndependentSourceEvidence(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("real two-side profile processes and typed source views")
 	}
@@ -167,10 +169,10 @@ func BenchmarkWork(b *testing.B) { for i:=0;i<b.N;i++ {sink=make([]byte,128<<10)
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(root, "p", "p.go"), strings.Replace(string(production), "return s", "return s+1", 1))
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	ac := abConfig{bench: "^BenchmarkWork$", count: 2, benchtime: "1x", ref: "HEAD", profile: "cpu,alloc", profileBenchtime: "300ms", jsonOut: true, out: filepath.Join(t.TempDir(), "ab.txt")}
 	var stdout, stderr bytes.Buffer
-	if err := runAB(t.Context(), &stdout, &stderr, ac, []string{"./p"}); err != nil {
+	if err := runAB(ctx, &stdout, &stderr, ac, []string{"./p"}); err != nil {
 		t.Fatalf("%v\n%s\n%s", err, &stdout, &stderr)
 	}
 	decoder := json.NewDecoder(&stdout)
@@ -255,7 +257,7 @@ func BenchmarkWork(b *testing.B) { for i:=0;i<b.N;i++ {sink=make([]byte,128<<10)
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if err := runAB(t.Context(), &stdout, &stderr, ac, []string{"./p"}); err == nil || exitCode(err) != 1 || !strings.Contains(err.Error(), "side B diagnostic failed") {
+	if err := runAB(ctx, &stdout, &stderr, ac, []string{"./p"}); err == nil || exitCode(err) != 1 || !strings.Contains(err.Error(), "side B diagnostic failed") {
 		t.Fatalf("failure hidden: %v", err)
 	}
 	retained, err := os.ReadFile(ac.out)
@@ -271,6 +273,7 @@ func BenchmarkWork(b *testing.B) { for i:=0;i<b.N;i++ {sink=make([]byte,128<<10)
 }
 
 func TestABCapturedIncompatibleChildrenAreUnfulfilled(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("real independently captured allocation profiles")
 	}
@@ -288,10 +291,10 @@ func BenchmarkWork(b *testing.B) { b.Run("base",func(b *testing.B){for i:=0;i<b.
 	}
 	commitAll(t, repo, "base child")
 	writeFile(t, filepath.Join(root, "p", "p_test.go"), strings.Replace(source, `"base"`, `"new"`, 1))
-	withWorkingDir(t, root)
+	baseCtx := withWorkingDir(t, root)
 	ac := abConfig{bench: "^BenchmarkWork$", count: 1, benchtime: "1x", ref: "HEAD", profile: "alloc", profileBenchtime: "30x", jsonOut: true, out: filepath.Join(t.TempDir(), "ab.txt")}
 	var out, diagnostics bytes.Buffer
-	err = runAB(t.Context(), &out, &diagnostics, ac, []string{"./p"})
+	err = runAB(baseCtx, &out, &diagnostics, ac, []string{"./p"})
 	if err == nil || exitCode(err) != 2 {
 		t.Fatalf("captured incompatible diagnostics: %v\n%s\n%s", err, &out, &diagnostics)
 	}
@@ -310,7 +313,7 @@ func BenchmarkWork(b *testing.B) { b.Run("base",func(b *testing.B){for i:=0;i<b.
 	if bytes.Count(artifact, []byte("pew-ab-section: profile\n")) != 2 || bytes.Count(artifact, []byte("pew-ab-section: measurement\n")) != 2 {
 		t.Fatalf("completed evidence lost: %s", artifact)
 	}
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithCancel(baseCtx)
 	defer cancel()
 	captures := 0
 	ac.diagnostic = func(c context.Context, dir, pin string, env gotool.Environment, bin string, args []string, diagnostics io.Writer) ([]byte, error) {

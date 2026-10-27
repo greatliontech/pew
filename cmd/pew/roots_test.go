@@ -31,12 +31,12 @@ func BenchmarkSecond(b *testing.B) { readRoot() }
 	if err := os.Remove(filepath.Join(dir, "bench_test.go")); err != nil {
 		t.Fatal(err)
 	}
-	withWorkingDir(t, dir)
 	invocation, arms := 0, 0
 	wantEnvironment := ""
 	t.Setenv("PEW_ADMITTED_ENVIRONMENT", "")
 	rootQueries := 0
 	ctx, deps := testDependencies(t)
+	ctx = withWorkDir(ctx, dir)
 	deps.prepare = func(cmd *exec.Cmd) {
 		if cmd.Dir == gotool.CommandDir(pkgdir) && slices.Equal(cmd.Args[1:], []string{"env", "-json"}) {
 			rootQueries++

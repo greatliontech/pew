@@ -15,6 +15,7 @@ import (
 )
 
 func TestABOutputCannotReplaceHeldRecordingLock(t *testing.T) {
+	t.Parallel()
 	root := abFixtureRepo(t)
 	st := store.New(filepath.Join(root, "benchmarks"))
 	if err := st.Write("p", "BenchmarkWork", "", recordingtest.Results("Work", []float64{1})); err != nil {
@@ -34,10 +35,10 @@ func TestABOutputCannotReplaceHeldRecordingLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	ac := abConfigStub("")
 	ac.out = path
-	if err := runAB(t.Context(), io.Discard, io.Discard, ac, []string{"./p"}); err == nil {
+	if err := runAB(ctx, io.Discard, io.Discard, ac, []string{"./p"}); err == nil {
 		t.Fatal("lock destination admitted")
 	}
 	after, err := os.Stat(path)

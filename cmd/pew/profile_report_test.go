@@ -93,6 +93,7 @@ func decodeProfileReport(t *testing.T, data []byte) (reports []profileComparison
 }
 
 func TestProfileFailureClassesKeepStatisticalReports(t *testing.T) {
+	t.Parallel()
 	for _, damage := range []string{"missing", "bytes", "native", "index"} {
 		t.Run(damage, func(t *testing.T) {
 			root := abFixtureRepo(t)
@@ -103,10 +104,10 @@ func TestProfileFailureClassesKeepStatisticalReports(t *testing.T) {
 				t.Fatal(err)
 			}
 			ref := commitAll(t, repo, "profile evidence").String()
-			withWorkingDir(t, root)
+			ctx := withWorkingDir(t, root)
 			for _, jsonOut := range []bool{false, true} {
 				var out, diagnostics bytes.Buffer
-				err := runStat(t.Context(), &out, &diagnostics, statConfig{profile: "cpu", jsonOut: jsonOut, opts: compare.DefaultOptions()}, []string{ref, ref})
+				err := runStat(ctx, &out, &diagnostics, statConfig{profile: "cpu", jsonOut: jsonOut, opts: compare.DefaultOptions()}, []string{ref, ref})
 				want := 1
 				if damage == "missing" {
 					want = 2
@@ -134,6 +135,7 @@ func TestProfileFailureClassesKeepStatisticalReports(t *testing.T) {
 }
 
 func TestProfileRefLocalRootAndRenamedModuleContexts(t *testing.T) {
+	t.Parallel()
 	root := abFixtureRepo(t)
 	st := store.New(filepath.Join(root, "benchmarks"))
 	repo, err := git.PlainOpen(root)
@@ -147,7 +149,7 @@ func TestProfileRefLocalRootAndRenamedModuleContexts(t *testing.T) {
 	writeComparisonProfile(t, st, "", "example.com/new", "Work", "")
 	newer := commitAll(t, repo, "renamed module").String()
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/today\ngo 1.24\n")
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	for _, rename := range []bool{false, true} {
 		for _, jsonOut := range []bool{false, true} {
 			ref := base
@@ -155,7 +157,7 @@ func TestProfileRefLocalRootAndRenamedModuleContexts(t *testing.T) {
 				ref = newer
 			}
 			var out bytes.Buffer
-			err := runStat(t.Context(), &out, io.Discard, statConfig{profile: "cpu", jsonOut: jsonOut, opts: compare.DefaultOptions()}, []string{base, ref})
+			err := runStat(ctx, &out, io.Discard, statConfig{profile: "cpu", jsonOut: jsonOut, opts: compare.DefaultOptions()}, []string{base, ref})
 			if rename {
 				if err == nil || exitCode(err) != 2 {
 					t.Fatalf("renamed subject comparison: %v", err)
@@ -192,6 +194,7 @@ func TestProfileRefLocalRootAndRenamedModuleContexts(t *testing.T) {
 }
 
 func TestProfileReadAndCheckingFailuresBothRemainVisible(t *testing.T) {
+	t.Parallel()
 	root := abFixtureRepo(t)
 	st := store.New(filepath.Join(root, "benchmarks"))
 	writeComparisonProfile(t, st, "p", "example.com/abfix/p", "Work", "")
@@ -212,12 +215,12 @@ func TestProfileReadAndCheckingFailuresBothRemainVisible(t *testing.T) {
 	if err := os.WriteFile(path, []byte("corrupt"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	withWorkingDir(t, root)
-	deps := dependencies(t.Context())
+	baseCtx := withWorkingDir(t, root)
+	deps := dependencies(baseCtx)
 	deps.view = func(*analysisSession, context.Context, []gofresh.Subject, string, gofresh.Kind) (*gofresh.RuntimeBinding, error) {
 		return nil, errors.New("checking unavailable")
 	}
-	ctx := withDependencies(t.Context(), deps)
+	ctx := withDependencies(baseCtx, deps)
 	var out bytes.Buffer
 	err = runStat(ctx, &out, io.Discard, statConfig{profile: "cpu", jsonOut: true, opts: compare.DefaultOptions()}, nil)
 	if err == nil || exitCode(err) != 1 {
@@ -230,6 +233,7 @@ func TestProfileReadAndCheckingFailuresBothRemainVisible(t *testing.T) {
 }
 
 func TestStatProfilesSharePackageFactsWithIndependentChecks(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("native package source analysis")
 	}
@@ -243,8 +247,8 @@ func TestStatProfilesSharePackageFactsWithIndependentChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	commitAll(t, repo, "two profiles")
-	withWorkingDir(t, root)
-	deps := dependencies(t.Context())
+	baseCtx := withWorkingDir(t, root)
+	deps := dependencies(baseCtx)
 	loads := 0
 	deps.view = func(e *analysisSession, ctx context.Context, subjects []gofresh.Subject, dir string, kind gofresh.Kind) (*gofresh.RuntimeBinding, error) {
 		loads++
@@ -253,7 +257,7 @@ func TestStatProfilesSharePackageFactsWithIndependentChecks(t *testing.T) {
 		}
 		return e.bind(ctx, subjects, kind)
 	}
-	ctx := withDependencies(t.Context(), deps)
+	ctx := withDependencies(baseCtx, deps)
 	var out bytes.Buffer
 	if err := runStat(ctx, &out, io.Discard, statConfig{profile: "cpu", jsonOut: true, opts: compare.DefaultOptions()}, nil); err != nil {
 		t.Fatalf("%v\n%s", err, &out)

@@ -20,6 +20,7 @@ import (
 )
 
 func TestHistoricalProfilesUseOnlyTheirRefObjects(t *testing.T) {
+	t.Parallel()
 	root := abFixtureRepo(t)
 	repo, err := git.PlainOpen(root)
 	if err != nil {
@@ -111,9 +112,9 @@ func TestHistoricalProfilesUseOnlyTheirRefObjects(t *testing.T) {
 	if got := check(missing); got.Compared || !strings.Contains(got.New.Error, "absent at") {
 		t.Fatalf("working-tree object substituted: %+v", got)
 	}
-	withWorkingDir(t, root)
+	ctx := withWorkingDir(t, root)
 	var out, errout bytes.Buffer
-	err = runStat(t.Context(), &out, &errout, statConfig{profile: "cpu", jsonOut: true, opts: compare.DefaultOptions()}, []string{base, missing})
+	err = runStat(ctx, &out, &errout, statConfig{profile: "cpu", jsonOut: true, opts: compare.DefaultOptions()}, []string{base, missing})
 	if exitCode(err) != 2 {
 		t.Fatalf("missing requested diagnostic exit: %v\n%s", err, &out)
 	}
@@ -135,7 +136,7 @@ func TestHistoricalProfilesUseOnlyTheirRefObjects(t *testing.T) {
 		t.Fatal("no typed profile disposition")
 	}
 	out.Reset()
-	err = runStat(t.Context(), &out, &errout, statConfig{profile: "cpu", jsonOut: true, failOnRegression: true, opts: compare.DefaultOptions()}, []string{base, missing})
+	err = runStat(ctx, &out, &errout, statConfig{profile: "cpu", jsonOut: true, failOnRegression: true, opts: compare.DefaultOptions()}, []string{base, missing})
 	if exitCode(err) != 1 || err == nil || !strings.Contains(err.Error(), "regression detected") {
 		t.Fatalf("profile refusal hid statistical regression: %v\n%s", err, &out)
 	}

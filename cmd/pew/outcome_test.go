@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -20,6 +19,7 @@ import (
 )
 
 func TestRunRecordsPerArmOutcomeSupport(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("executes benchmark processes and prepares outcome proofs")
 	}
@@ -30,10 +30,10 @@ func TestRunRecordsPerArmOutcomeSupport(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/arms\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "bench_test.go"), "package arms\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc BenchmarkFirst(b *testing.B) { _ = os.Getenv(\"PEW_OUTCOME_SUPPORT\") }\nfunc BenchmarkSecond(b *testing.B) { _ = os.Getenv(\"PEW_OUTCOME_SUPPORT\") }\n")
 	commitFixture(t, dir)
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	benchDir := filepath.Join(t.TempDir(), "benchmarks")
 	var out, errout bytes.Buffer
-	if err := runRun(context.Background(), &out, &errout, runConfig{all: true, benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}, []string{"."}); err != nil {
+	if err := runRun(ctx, &out, &errout, runConfig{all: true, benchDir: benchDir, opts: runpkg.Options{Count: 1, Benchtime: "1x", Bench: "."}}, []string{"."}); err != nil {
 		t.Fatalf("run: %v\n%s", err, &errout)
 	}
 	var previous string
@@ -72,32 +72,33 @@ func TestRunRecordsPerArmOutcomeSupport(t *testing.T) {
 }
 
 func TestArmWriteGateRequiresOutcomeValidation(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("constructs an observed producer transaction")
 	}
 	dir := twoArmFixture(t)
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	p := pkgMeta{ImportPath: "example.com/arms", Name: "arms", Dir: dir, TestGoFiles: []string{"bench_test.go"}}
 	p.Module.Path, p.Module.Dir = "example.com/arms", dir
 	env := testEnvironment(t, os.Environ())
-	engine, _, err := newEngineForPkg(context.Background(), p, env)
+	engine, _, err := newEngineForPkg(ctx, p, env)
 	if err != nil {
 		t.Fatal(err)
 	}
 	subject := gofresh.Subject{Package: p.ImportPath, Symbol: "BenchmarkFirst"}
-	parent, err := engine.bind(context.Background(), []gofresh.Subject{subject}, gofresh.Measurement)
+	parent, err := engine.bind(ctx, []gofresh.Subject{subject}, gofresh.Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, binding := fixtureArtifact(t, t.Context(), parent.Snapshot(), p.ImportPath)
+	_, binding := fixtureArtifact(t, ctx, parent.Snapshot(), p.ImportPath)
 	unit, err := parent.Begin(subject)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := unit.Register(t.Context(), binding, gofresh.ProcessDescription{Identity: "unsettled", Capture: filepath.Join(t.TempDir(), "testlog")}); err != nil {
+	if _, err := unit.Register(ctx, binding, gofresh.ProcessDescription{Identity: "unsettled", Capture: filepath.Join(t.TempDir(), "testlog")}); err != nil {
 		t.Fatal(err)
 	}
-	if result, err := unit.Close(t.Context()); !errors.Is(err, gofresh.ErrUnitIncomplete) || result.Fingerprint.MaximalClosure != "" {
+	if result, err := unit.Close(ctx); !errors.Is(err, gofresh.ErrUnitIncomplete) || result.Fingerprint.MaximalClosure != "" {
 		t.Fatalf("missing terminal/capture became final evidence: %v", err)
 	}
 	st := store.New(filepath.Join(t.TempDir(), "benchmarks"))
@@ -115,7 +116,7 @@ func TestArmWriteGateRequiresOutcomeValidation(t *testing.T) {
 		}
 	}}
 	var output bytes.Buffer
-	if err := runRun(t.Context(), &output, io.Discard, rc, []string{"."}); err == nil || !strings.Contains(output.String(), "analysis view changed") {
+	if err := runRun(ctx, &output, io.Discard, rc, []string{"."}); err == nil || !strings.Contains(output.String(), "analysis view changed") {
 		t.Fatalf("failed closing escaped publication: %v\n%s", err, &output)
 	}
 	after, err := st.ReadBytes(key)

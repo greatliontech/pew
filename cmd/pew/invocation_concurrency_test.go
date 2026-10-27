@@ -19,6 +19,7 @@ import (
 )
 
 func TestConcurrentInvocationsKeepEvidenceIsolated(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
 	// Both invocations address the same module. Only their owned environment,

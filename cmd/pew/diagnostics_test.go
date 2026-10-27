@@ -16,6 +16,7 @@ import (
 // stretch instead); the class of defect being a consumer that
 // discards diagnostics by signature or renders them by hand.
 func TestEngineDiagnosticsDeliverDetailEvents(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	ctx := context.WithValue(t.Context(), invocationKey{}, &invocation{diagnostics: gofresh.DiagnosticsTo(&buf)})
 	emitEngineDiagnostic(ctx, gofresh.Progress{Phase: "observe", Package: "example.com/x"})

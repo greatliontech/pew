@@ -28,6 +28,7 @@ import (
 )
 
 func TestBaselineFor(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		refs              []string
 		wantBase, wantNew string
@@ -54,6 +55,7 @@ func TestBaselineFor(t *testing.T) {
 }
 
 func TestParseGateUnits(t *testing.T) {
+	t.Parallel()
 	ok := []struct {
 		in   string
 		want []string
@@ -87,6 +89,7 @@ func TestParseGateUnits(t *testing.T) {
 }
 
 func TestValidateOptions(t *testing.T) {
+	t.Parallel()
 	base := compare.DefaultOptions()
 	if err := validateOptions(base); err != nil {
 		t.Errorf("defaults rejected: %v", err)
@@ -112,6 +115,7 @@ func TestValidateOptions(t *testing.T) {
 }
 
 func TestStatRejectsNonFiniteOptions(t *testing.T) {
+	t.Parallel()
 	for _, flag := range []string{"alpha", "confidence", "threshold"} {
 		for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
 			t.Run(fmt.Sprintf("%s/%v", flag, value), func(t *testing.T) {
@@ -140,6 +144,7 @@ func TestStatRejectsNonFiniteOptions(t *testing.T) {
 }
 
 func TestStatABIncludesHistoricalOnlyRecording(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statinv\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -155,17 +160,10 @@ func TestStatABIncludesHistoricalOnlyRecording(t *testing.T) {
 	writeStatRecording(t, st, "pkg", "BenchmarkOld", 120)
 	newer := commitAll(t, repo, "newer")
 
-	oldWD, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+	ctx := withWorkingDir(t, dir)
 
 	var out, errOut bytes.Buffer
-	err = runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	err = runStat(ctx, &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -181,6 +179,7 @@ func TestStatABIncludesHistoricalOnlyRecording(t *testing.T) {
 // "working-tree recording is stale (dynamic-state strategy)" for a
 // file that does not exist.
 func TestStatBaseOnlyKeyIsOneSidedNotStrategyStale(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statoneside\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -200,9 +199,9 @@ func TestStatBaseOnlyKeyIsOneSidedNotStrategyStale(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	if err := runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, nil); err != nil {
+	if err := runStat(ctx, &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, nil); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if strings.Contains(errOut.String(), "dynamic-state strategy") {
@@ -220,6 +219,7 @@ func TestStatBaseOnlyKeyIsOneSidedNotStrategyStale(t *testing.T) {
 // note, never as the verdict-computing paths' skip. A strategy bump must
 // not brick historical A/B.
 func TestStatABComparesAcrossStrategies(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statabstrategy\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -234,9 +234,9 @@ func TestStatABComparesAcrossStrategies(t *testing.T) {
 	writeStatRecordingStrategy(t, st, "pkg", "BenchmarkOld", 120, "gofresh/dynamic-state@legacy-b")
 	newer := commitAll(t, repo, "newer")
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	err = runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	err = runStat(ctx, &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -252,6 +252,7 @@ func TestStatABComparesAcrossStrategies(t *testing.T) {
 }
 
 func TestStatABFallsBackToModuleWithoutCurrentPackages(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statnopkg\n\ngo 1.26.4\n")
 
@@ -265,9 +266,9 @@ func TestStatABFallsBackToModuleWithoutCurrentPackages(t *testing.T) {
 	writeStatRecording(t, st, "pkg", "BenchmarkOld", 120)
 	newer := commitAll(t, repo, "newer")
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	err = runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	err = runStat(ctx, &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -277,6 +278,7 @@ func TestStatABFallsBackToModuleWithoutCurrentPackages(t *testing.T) {
 }
 
 func TestStatPinnedIncludesWorkingTreeOnlyRecordingWithoutCurrentBenchmark(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statpinnedworktree\n\ngo 1.26.4\n")
 
@@ -288,9 +290,9 @@ func TestStatPinnedIncludesWorkingTreeOnlyRecordingWithoutCurrentBenchmark(t *te
 	st := store.New(filepath.Join(dir, "benchmarks"))
 	writeStatRecording(t, st, "pkg", "BenchmarkNew", 120)
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	err = runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String()})
+	err = runStat(ctx, &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -303,6 +305,7 @@ func TestStatPinnedIncludesWorkingTreeOnlyRecordingWithoutCurrentBenchmark(t *te
 }
 
 func TestStatABDiscoversHistoricalModuleAbsentFromCurrentPackages(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/current\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "oldmod", "go.mod"), "module example.com/oldmod\n\ngo 1.26.4\n")
@@ -320,9 +323,9 @@ func TestStatABDiscoversHistoricalModuleAbsentFromCurrentPackages(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	err = runStat(context.Background(), &out, &errOut, statConfig{opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	err = runStat(ctx, &out, &errOut, statConfig{opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -332,6 +335,7 @@ func TestStatABDiscoversHistoricalModuleAbsentFromCurrentPackages(t *testing.T) 
 }
 
 func TestStatABDoesNotDiscoverSiblingModuleOutsideCurrentScope(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "modA", "go.mod"), "module example.com/modA\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "modB", "go.mod"), "module example.com/modB\n\ngo 1.26.4\n")
@@ -346,9 +350,9 @@ func TestStatABDoesNotDiscoverSiblingModuleOutsideCurrentScope(t *testing.T) {
 	writeStatRecording(t, st, "pkg", "BenchmarkSibling", 120)
 	newer := commitAll(t, repo, "newer")
 
-	withWorkingDir(t, filepath.Join(dir, "modA"))
+	ctx := withWorkingDir(t, filepath.Join(dir, "modA"))
 	var out, errOut bytes.Buffer
-	err = runStat(context.Background(), &out, &errOut, statConfig{opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	err = runStat(ctx, &out, &errOut, statConfig{opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -358,6 +362,7 @@ func TestStatABDoesNotDiscoverSiblingModuleOutsideCurrentScope(t *testing.T) {
 }
 
 func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
@@ -370,8 +375,8 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	withWorkingDir(t, dir)
-	e, _, err := newEngineAt(context.Background(), dir, dir, false, testEnvironment(t, os.Environ()))
+	ctx := withWorkingDir(t, dir)
+	e, _, err := newEngineAt(ctx, dir, dir, false, testEnvironment(t, os.Environ()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +398,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 	commitAll(t, repo, "recording")
 
 	var out, errOut bytes.Buffer
-	if err := runStat(context.Background(), &out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
+	if err := runStat(ctx, &out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
 		t.Fatalf("runStat valid: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if strings.Contains(errOut.String(), "is unverifiable") || strings.Contains(errOut.String(), "is stale") {
@@ -416,7 +421,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if err := runStat(context.Background(), &out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
+	if err := runStat(ctx, &out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
 		t.Fatalf("runStat unversioned: %v", err)
 	}
 	if !strings.Contains(errOut.String(), "stale (format)") {
@@ -431,7 +436,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "lib.go"), "package statdirective\n\nfunc fixturePath() string { name := \"fixture.txt\"; return name }\n")
 	out.Reset()
 	errOut.Reset()
-	if err := runStat(context.Background(), &out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
+	if err := runStat(ctx, &out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
 		t.Fatalf("runStat stale: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if !strings.Contains(errOut.String(), "is stale (closure)") {
@@ -445,6 +450,7 @@ func TestStatWorkingTreeStalenessHonorsDirective(t *testing.T) {
 // strategy)"), never compared as a baseline, because its verdicts were
 // not this engine's (spec §5's pew-dynamic-state comparison clause).
 func TestStatRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
@@ -455,8 +461,8 @@ func TestStatRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	withWorkingDir(t, dir)
-	e, _, err := newEngineAt(context.Background(), dir, dir, false, testEnvironment(t, os.Environ()))
+	ctx := withWorkingDir(t, dir)
+	e, _, err := newEngineAt(ctx, dir, dir, false, testEnvironment(t, os.Environ()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,7 +498,7 @@ func TestStatRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
-	if err := runStat(context.Background(), &out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
+	if err := runStat(ctx, &out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
 		t.Fatalf("runStat predating: %v", err)
 	}
 	// The "; skipping" form is the per-side skip chain's own warning —
@@ -522,7 +528,7 @@ func TestStatRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if err := runStat(context.Background(), &out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
+	if err := runStat(ctx, &out, &errOut, statConfig{opts: compare.DefaultOptions()}, nil); err != nil {
 		t.Fatalf("runStat base-predating: %v", err)
 	}
 	if strings.Contains(errOut.String(), "dynamic-state strategy); skipping") {
@@ -543,6 +549,7 @@ func TestStatRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 // strategy bump never bricks archived baselines (spec §5's strategy
 // row).
 func TestStatPinnedComparesStrategyStaleBaseline(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statpinstrategy\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -556,9 +563,9 @@ func TestStatPinnedComparesStrategyStaleBaseline(t *testing.T) {
 	base := commitAll(t, repo, "base")
 	writeStatRecording(t, st, "pkg", "BenchmarkOld", 120)
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	err = runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String()})
+	err = runStat(ctx, &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -574,6 +581,7 @@ func TestStatPinnedComparesStrategyStaleBaseline(t *testing.T) {
 }
 
 func TestStatSideCacheServesHistoricalParse(t *testing.T) {
+	t.Parallel()
 	key := statSideKey{ref: "HEAD", pkgRel: "p", bench: "BenchmarkX"}
 	want := []*benchfmt.Result{{Name: benchfmt.Name("X")}}
 	m := &statModule{sides: map[statSideKey]statSide{key: {recs: want, ok: true}}}
@@ -584,6 +592,7 @@ func TestStatSideCacheServesHistoricalParse(t *testing.T) {
 }
 
 func TestDedupeStatModulesMergesSharedBenchDir(t *testing.T) {
+	t.Parallel()
 	shared := filepath.Join(t.TempDir(), "benchmarks")
 	key := statKey{pkgRel: "pkg", bench: "BenchmarkShared"}
 	mods := []*statModule{
@@ -600,6 +609,7 @@ func TestDedupeStatModulesMergesSharedBenchDir(t *testing.T) {
 }
 
 func TestStatABRejectsFormatValidNonPewOppositeSide(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statghost\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -629,9 +639,9 @@ func TestStatABRejectsFormatValidNonPewOppositeSide(t *testing.T) {
 		t.Fatalf("valid base recording missing from inventory: %v", sortedStatKeys(m.keys))
 	}
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	err = runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	err = runStat(ctx, &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -644,6 +654,7 @@ func TestStatABRejectsFormatValidNonPewOppositeSide(t *testing.T) {
 }
 
 func TestReadSideRetainsStaleFormatBlobForReporting(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statghostside\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -676,6 +687,7 @@ func TestReadSideRetainsStaleFormatBlobForReporting(t *testing.T) {
 }
 
 func TestAddRefInventoryReportsMalformedHistoricalRecording(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statbad\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -732,6 +744,7 @@ func stripRecordingKey(t *testing.T, path, key string) {
 // empty comparison names the stale-format tally and the per-side warning
 // fires — never reported as "no recordings on either side".
 func TestStatSurfacesOldShapeRecordingsAutoMode(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statoldshape\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -752,10 +765,10 @@ func TestStatSurfacesOldShapeRecordingsAutoMode(t *testing.T) {
 	}
 	stripRecordingKey(t, oldPath, "pew-runconditions")
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}
-	if err := runStat(context.Background(), &out, &errOut, sc, nil); err != nil {
+	if err := runStat(ctx, &out, &errOut, sc, nil); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if strings.Contains(out.String(), "no recordings on either side") {
@@ -772,6 +785,7 @@ func TestStatSurfacesOldShapeRecordingsAutoMode(t *testing.T) {
 // TestStatSurfacesOldShapeRecordingsABMode is the same visibility contract in
 // A/B mode: both refs hold only old-shape recordings.
 func TestStatSurfacesOldShapeRecordingsABMode(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statoldab\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -791,10 +805,10 @@ func TestStatSurfacesOldShapeRecordingsABMode(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n\n// changed\n")
 	refB := commitAll(t, repo, "b")
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}
-	if err := runStat(context.Background(), &out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
+	if err := runStat(ctx, &out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if strings.Contains(out.String(), "no recordings on either side") {
@@ -814,6 +828,7 @@ func TestStatSurfacesOldShapeRecordingsABMode(t *testing.T) {
 // dirty baselines: an A/B where both refs resolve to dirty recordings warns
 // each side and tallies each file — "dirty recording: 2", neither side silent.
 func TestStatCountsBothDirtySides(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statdirtyab\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -837,10 +852,10 @@ func TestStatCountsBothDirtySides(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n\n// changed\n")
 	refB := commitAll(t, repo, "b")
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}
-	if err := runStat(context.Background(), &out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
+	if err := runStat(ctx, &out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if !strings.Contains(out.String(), "dirty recording: 2") {
@@ -856,6 +871,7 @@ func TestStatCountsBothDirtySides(t *testing.T) {
 // never inventories a comparison key, so an otherwise-empty store still
 // reports "no recordings on either side" with no stale-format warning.
 func TestStatIgnoresForeignLayoutFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statforeign\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -872,10 +888,10 @@ func TestStatIgnoresForeignLayoutFiles(t *testing.T) {
 	writeFile(t, foreignPath, "goos: linux\nBenchmarkForeign-8 1 100 sec/op\n")
 	commitAll(t, repo, "foreign")
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}
-	if err := runStat(context.Background(), &out, &errOut, sc, nil); err != nil {
+	if err := runStat(ctx, &out, &errOut, sc, nil); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if !strings.Contains(out.String(), "no recordings on either side") {
@@ -886,16 +902,9 @@ func TestStatIgnoresForeignLayoutFiles(t *testing.T) {
 	}
 }
 
-func withWorkingDir(t *testing.T, dir string) {
+func withWorkingDir(t *testing.T, dir string) context.Context {
 	t.Helper()
-	oldWD, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+	return withWorkDir(t.Context(), dir)
 }
 
 func writeFile(t *testing.T, path, content string) {
@@ -969,6 +978,7 @@ func commitAll(t *testing.T, repo *gogit.Repository, msg string) plumbing.Hash {
 }
 
 func TestIsDirty(t *testing.T) {
+	t.Parallel()
 	dirty := []*benchfmt.Result{{Config: []benchfmt.Config{{Key: "dirty", Value: []byte("true"), File: true}}}}
 	clean := []*benchfmt.Result{{Config: []benchfmt.Config{{Key: "dirty", Value: []byte("false"), File: true}}}}
 	none := []*benchfmt.Result{{}}
@@ -987,6 +997,7 @@ func TestIsDirty(t *testing.T) {
 }
 
 func TestNonValidUsesLabel(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
@@ -1037,6 +1048,7 @@ func TestNonValidUsesLabel(t *testing.T) {
 // recordings identical except for their recorded run conditions get the same
 // verdict — run conditions are provenance, never a staleness guard (§8, §9).
 func TestRunConditionsDoNotAffectValidity(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
@@ -1081,6 +1093,7 @@ func TestRunConditionsDoNotAffectValidity(t *testing.T) {
 // two committed recordings differing in run conditions are compared (table
 // printed) with a differing-conditions note.
 func TestStatABNotesDifferingRunConditions(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statconds\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -1095,9 +1108,9 @@ func TestStatABNotesDifferingRunConditions(t *testing.T) {
 	writeStatRecordingConditions(t, st, "pkg", "BenchmarkConds", 120, "governor=powersave turbo=on load1=6.41 throttled=false battery=false")
 	newer := commitAll(t, repo, "newer")
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
-	err = runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
+	err = runStat(ctx, &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions()}, []string{base.String(), newer.String()})
 	if err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
@@ -1113,7 +1126,7 @@ func TestStatABNotesDifferingRunConditions(t *testing.T) {
 	// numerical comparison and note; explicit --conditions=report overrides it.
 	out.Reset()
 	errOut.Reset()
-	err = runStat(context.Background(), &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), failOnRegression: true}, []string{base.String(), newer.String()})
+	err = runStat(ctx, &out, &errOut, statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), failOnRegression: true}, []string{base.String(), newer.String()})
 	var empty *nothingComparedError
 	if !errors.As(err, &empty) || exitCode(err) != 2 {
 		t.Fatalf("enforcing default conditions did not refuse differing conditions: %v", err)
@@ -1128,6 +1141,7 @@ func TestStatABNotesDifferingRunConditions(t *testing.T) {
 // the current machine is stale, which only a Measurement-kind check catches (a
 // code-result check ignores the machine guard).
 func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
@@ -1165,6 +1179,7 @@ func TestCheckOneAppliesMeasurementGuards(t *testing.T) {
 // exit clean (the gate would pass precisely when it measured nothing), while
 // the flagless invocation stays informational and names why nothing compared.
 func TestStatFailOnRegressionEmptyStoreFailsClosed(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statempty\n\ngo 1.26.4\n")
 	repo, err := gogit.PlainInit(dir, false)
@@ -1172,11 +1187,11 @@ func TestStatFailOnRegressionEmptyStoreFailsClosed(t *testing.T) {
 		t.Fatalf("git init: %v", err)
 	}
 	commitAll(t, repo, "base")
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 
 	var out, errOut bytes.Buffer
 	sc := statConfig{opts: compare.DefaultOptions(), failOnRegression: true}
-	err = runStat(context.Background(), &out, &errOut, sc, nil)
+	err = runStat(ctx, &out, &errOut, sc, nil)
 	if err == nil {
 		t.Fatalf("empty comparison under --fail-on-regression exited clean\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
 	}
@@ -1193,7 +1208,7 @@ func TestStatFailOnRegressionEmptyStoreFailsClosed(t *testing.T) {
 	out.Reset()
 	errOut.Reset()
 	sc.failOnRegression = false
-	if err := runStat(context.Background(), &out, &errOut, sc, nil); err != nil {
+	if err := runStat(ctx, &out, &errOut, sc, nil); err != nil {
 		t.Fatalf("informational empty comparison errored: %v", err)
 	}
 	if !strings.Contains(out.String(), "no recorded benchmarks to compare: no recordings on either side") {
@@ -1206,6 +1221,7 @@ func TestStatFailOnRegressionEmptyStoreFailsClosed(t *testing.T) {
 // statistically compared — the gate fails with the per-cause tally rather than
 // passing vacuously (spec §10.1).
 func TestStatFailOnRegressionAllSkippedFailsClosed(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statskipgate\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -1224,10 +1240,10 @@ func TestStatFailOnRegressionAllSkippedFailsClosed(t *testing.T) {
 	writeFile(t, ghostPath, "machine: m1\ntoolchain: go-test\nbuildconfig: b1\nBenchmarkGhost-8 1 120 sec/op\n")
 	newer := commitAll(t, repo, "newer")
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), failOnRegression: true}
-	err = runStat(context.Background(), &out, &errOut, sc, []string{base.String(), newer.String()})
+	err = runStat(ctx, &out, &errOut, sc, []string{base.String(), newer.String()})
 	var empty *nothingComparedError
 	if !errors.As(err, &empty) {
 		t.Fatalf("all-skipped comparison under --fail-on-regression: err = %v (%T), want *nothingComparedError\nstderr:\n%s", err, err, errOut.String())
@@ -1244,6 +1260,7 @@ func TestStatFailOnRegressionAllSkippedFailsClosed(t *testing.T) {
 // regressing compared row fails as a regression (exit 1) ahead of incomplete
 // coverage (spec §10.1, REQ-pew-regression-gate).
 func TestStatFailOnRegressionPartialSkipGovernedByComparedSubset(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statpartial\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -1266,11 +1283,11 @@ func TestStatFailOnRegressionPartialSkipGovernedByComparedSubset(t *testing.T) {
 	writeStatRecording(t, st, "pkg", "BenchmarkGood", 130) // ~30% worse: regression
 	regressed := commitAll(t, repo, "regressed")
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), failOnRegression: true}
 
 	var out, errOut bytes.Buffer
-	err = runStat(context.Background(), &out, &errOut, sc, []string{base.String(), clean.String()})
+	err = runStat(ctx, &out, &errOut, sc, []string{base.String(), clean.String()})
 	var empty *nothingComparedError
 	if !errors.As(err, &empty) || !empty.incomplete || exitCode(err) != 2 {
 		t.Fatalf("partial skip under default enforcing policy: err = %v, want incomplete exit 2\nstderr:\n%s", err, errOut.String())
@@ -1283,7 +1300,7 @@ func TestStatFailOnRegressionPartialSkipGovernedByComparedSubset(t *testing.T) {
 	errOut.Reset()
 	partialSC := sc
 	partialSC.opts.Policies.Coverage = "partial"
-	if err := runStat(context.Background(), &out, &errOut, partialSC, []string{base.String(), clean.String()}); err != nil {
+	if err := runStat(ctx, &out, &errOut, partialSC, []string{base.String(), clean.String()}); err != nil {
 		t.Fatalf("clean compared subset under explicit partial coverage did not govern the exit: %v\nstderr:\n%s", err, errOut.String())
 	}
 	if !strings.Contains(out.String(), "coverage=partial") {
@@ -1292,7 +1309,7 @@ func TestStatFailOnRegressionPartialSkipGovernedByComparedSubset(t *testing.T) {
 
 	out.Reset()
 	errOut.Reset()
-	err = runStat(context.Background(), &out, &errOut, sc, []string{base.String(), regressed.String()})
+	err = runStat(ctx, &out, &errOut, sc, []string{base.String(), regressed.String()})
 	if err == nil || err.Error() != "regression detected" {
 		t.Fatalf("regressing compared subset: err = %v, want regression detected", err)
 	}
@@ -1302,6 +1319,7 @@ func TestStatFailOnRegressionPartialSkipGovernedByComparedSubset(t *testing.T) {
 }
 
 func TestStatConfidenceDerivedFromAlphaAndIndependentDiagnosticInterval(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statconf\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -1314,7 +1332,7 @@ func TestStatConfidenceDerivedFromAlphaAndIndependentDiagnosticInterval(t *testi
 	base := commitAll(t, repo, "base").String()
 	writeStatRecording(t, st, "pkg", "BenchmarkConf", 102) // +2% (significant, below 3% floor)
 	slight := commitAll(t, repo, "slight").String()
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 
 	runCLI := func(extra ...string) (string, int) {
 		t.Helper()
@@ -1323,7 +1341,7 @@ func TestStatConfidenceDerivedFromAlphaAndIndependentDiagnosticInterval(t *testi
 		var out, errOut bytes.Buffer
 		cmd.SetOut(&out)
 		cmd.SetErr(&errOut)
-		err := cmd.Execute()
+		err := cmd.ExecuteContext(ctx)
 		code := 0
 		if err != nil {
 			code = exitCode(err)
@@ -1349,10 +1367,12 @@ func TestStatConfidenceDerivedFromAlphaAndIndependentDiagnosticInterval(t *testi
 }
 
 func TestStatZeroBaselineRegressionGate(t *testing.T) {
+	t.Parallel()
 	testStatNullDeltaRegression(t, 0, 1, "allocs/op")
 }
 
 func TestStatFiniteDeltaOverflowJSON(t *testing.T) {
+	t.Parallel()
 	testStatNullDeltaRegression(t, 1e-300, 1e100, "sec/op")
 }
 
@@ -1383,12 +1403,12 @@ func testStatNullDeltaRegression(t *testing.T, baseline, current float64, unit s
 	base := commitAll(t, repo, "baseline")
 	write(current)
 	newer := commitAll(t, repo, "increased cost")
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	opts := compare.DefaultOptions()
 	opts.GateUnits = map[string]bool{unit: true}
 	sc := statConfig{benchDir: st.Root, opts: opts, failOnRegression: true, jsonOut: true}
 	var out, errOut bytes.Buffer
-	err = runStat(context.Background(), &out, &errOut, sc, []string{base.String(), newer.String()})
+	err = runStat(ctx, &out, &errOut, sc, []string{base.String(), newer.String()})
 	if err == nil || err.Error() != "regression detected" || exitCode(err) != 1 {
 		t.Fatalf("undefined-percentage gate: %v\nstdout: %s\nstderr: %s", err, out.String(), errOut.String())
 	}
@@ -1419,6 +1439,7 @@ func testStatNullDeltaRegression(t *testing.T, baseline, current float64, unit s
 // — including "regression detected" — except the empty-comparison gate
 // failure, which exits 2 so CI can tell "regressed" from "measured nothing".
 func TestExitCode(t *testing.T) {
+	t.Parallel()
 	if got := exitCode(errors.New("regression detected")); got != 1 {
 		t.Errorf("exitCode(regression) = %d, want 1", got)
 	}
@@ -1437,6 +1458,7 @@ func TestExitCode(t *testing.T) {
 // whose sides disagree on a guard prints the recorded values side by side,
 // naming the moving guard behind the one-word mismatch note.
 func TestStatExplainShowsSideBySideGuards(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statexplain\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -1482,10 +1504,10 @@ func TestStatExplainShowsSideBySideGuards(t *testing.T) {
 	}
 	refB := commitAll(t, repo, "b")
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), explain: true}
-	if err := runStat(context.Background(), &out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
+	if err := runStat(ctx, &out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	got := errOut.String()
@@ -1501,6 +1523,7 @@ func TestStatExplainShowsSideBySideGuards(t *testing.T) {
 // working-tree recording warned non-valid prints the recorded-vs-current
 // explanation below the warning.
 func TestStatExplainWorkingTreeStaleness(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain (go list, the engine)")
 	}
@@ -1518,10 +1541,10 @@ func TestStatExplainWorkingTreeStaleness(t *testing.T) {
 	writeStatRecording(t, st, "pkg", "BenchmarkWT", 100)
 	commitAll(t, repo, "base")
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), explain: true}
-	if err := runStat(context.Background(), &out, &errOut, sc, nil); err != nil {
+	if err := runStat(ctx, &out, &errOut, sc, nil); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	got := errOut.String()
@@ -1537,6 +1560,7 @@ func TestStatExplainWorkingTreeStaleness(t *testing.T) {
 // as {"kind":"row",...} with summaries and the gating verdict, and an empty
 // comparison as one {"kind":"empty"} object naming the cause.
 func TestStatJSONRowsAndEmpty(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statjson\n\ngo 1.26.4\n")
 	writeFile(t, filepath.Join(dir, "pkg", "pkg.go"), "package pkg\n")
@@ -1564,10 +1588,10 @@ func TestStatJSONRowsAndEmpty(t *testing.T) {
 	}
 	refB := commitAll(t, repo, "b")
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), jsonOut: true}
-	if err := runStat(context.Background(), &out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
+	if err := runStat(ctx, &out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	var rows, notes int
@@ -1624,10 +1648,10 @@ func TestStatJSONRowsAndEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	commitAll(t, repo2, "empty")
-	withWorkingDir(t, empty)
+	ctxEmpty := withWorkingDir(t, empty)
 	out.Reset()
 	errOut.Reset()
-	if err := runStat(context.Background(), &out, &errOut, statConfig{opts: compare.DefaultOptions(), jsonOut: true}, nil); err != nil {
+	if err := runStat(ctxEmpty, &out, &errOut, statConfig{opts: compare.DefaultOptions(), jsonOut: true}, nil); err != nil {
 		t.Fatalf("runStat empty: %v", err)
 	}
 	var e struct {
@@ -1647,6 +1671,7 @@ func TestStatJSONRowsAndEmpty(t *testing.T) {
 // cannot carry Inf) with the cause riding warnings, and the run still renders
 // every row rather than erroring mid-stream.
 func TestStatJSONNullBoundsOnDegenerateSamples(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/statjsoninf\n\ngo 1.26.4\n")
 	repo, err := gogit.PlainInit(dir, false)
@@ -1659,10 +1684,10 @@ func TestStatJSONNullBoundsOnDegenerateSamples(t *testing.T) {
 	writeStatRecordingSamples(t, st, "pkg", "BenchmarkTiny", 120, 1)
 	refB := commitAll(t, repo, "b")
 
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	var out, errOut bytes.Buffer
 	sc := statConfig{benchDir: st.Root, opts: compare.DefaultOptions(), jsonOut: true}
-	if err := runStat(context.Background(), &out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
+	if err := runStat(ctx, &out, &errOut, sc, []string{refA.String(), refB.String()}); err != nil {
 		t.Fatalf("runStat: %v\nstderr:\n%s", err, errOut.String())
 	}
 	var sawNull bool
@@ -1698,6 +1723,7 @@ func TestStatJSONNullBoundsOnDegenerateSamples(t *testing.T) {
 // TestJSONExplainMutuallyExclusive pins §12's flag exclusion at the command
 // surface for both commands.
 func TestJSONExplainMutuallyExclusive(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"status", "--json", "--explain"},
 		{"stat", "--json", "--explain"},

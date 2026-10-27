@@ -13,6 +13,7 @@ import (
 
 // TestFingerprintFromConfig pins native fingerprint admission through the envelope.
 func TestFingerprintFromConfig(t *testing.T) {
+	t.Parallel()
 	cfg := recordingtest.Config(recordingtest.Set(runpkg.KeyToolchain, "tc"), recordingtest.Set(runpkg.KeyMachine, "m"), recordingtest.Set(runpkg.KeyBuildConfig, "bc"), recordingtest.Set(runpkg.KeyRuntimeConfig, "rc"), recordingtest.Set(runpkg.KeyClosure, "cl"), recordingtest.Set(runpkg.KeyTestVariants, "tv"), recordingtest.Set(runpkg.KeyTestVariantLedger, "ledger-encoded"), recordingtest.Set(runpkg.KeyRuntime, "rd"), recordingtest.Set(runpkg.KeyRuntimeInputs, "manifest"), recordingtest.Set(runpkg.KeyPurity, "source directive"))
 	fp, recordedLedger, ok := fingerprintFromConfig(cfg)
 	if !ok {
@@ -49,6 +50,7 @@ func TestFingerprintFromConfig(t *testing.T) {
 }
 
 func TestUnversionedRecordingIsStale(t *testing.T) {
+	t.Parallel()
 	st := store.New(t.TempDir())
 	recs := []*benchfmt.Result{{Name: benchfmt.Name("NoIO"), Iters: 1, Values: []benchfmt.Value{{Value: 1, Unit: "sec/op"}}, Config: []benchfmt.Config{{Key: "pew-runtime", Value: []byte("old")}}}}
 	if err := st.Write("", "BenchmarkNoIO", "", recs); err != nil {

@@ -31,14 +31,14 @@ func replaceFixtureExecutable(t *testing.T, path string) {
 }
 
 func TestABSuccessfulPairOwnsItsClosingDisposition(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("executes real pair completion and closing failures")
 	}
 	for _, mode := range []string{"cancel-completed", "expiry", "cancel-expiry", "changed-artifact", "changed-side-A", "before-side-B"} {
 		t.Run(mode, func(t *testing.T) {
 			root := abFixtureRepo(t)
-			withWorkingDir(t, root)
-			ctx, cancel := context.WithCancel(t.Context())
+			ctx, cancel := context.WithCancel(withWorkingDir(t, root))
 			defer cancel()
 			path := filepath.Join(t.TempDir(), "ab.txt")
 			writeFile(t, path, "prior artifact\n")
@@ -98,6 +98,7 @@ func TestABSuccessfulPairOwnsItsClosingDisposition(t *testing.T) {
 }
 
 func TestABChecksSideABeforeTheFirstExecution(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("prepares real retained executables")
 	}
@@ -128,6 +129,7 @@ func TestABChecksSideABeforeTheFirstExecution(t *testing.T) {
 }
 
 func TestABZeroExitDoesNotSupplyHarnessCompletion(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("executes a test binary which skips its harness")
 	}
@@ -148,10 +150,10 @@ func TestABZeroExitDoesNotSupplyHarnessCompletion(t *testing.T) {
 				commitAll(t, repo, "uncompleted reference harness")
 				writeFile(t, file, string(original))
 			}
-			withWorkingDir(t, root)
+			ctx := withWorkingDir(t, root)
 			path := filepath.Join(t.TempDir(), "ab.txt")
 			writeFile(t, path, "prior artifact\n")
-			err = runAB(t.Context(), io.Discard, io.Discard, abConfig{bench: "^BenchmarkWork$", count: 1, benchtime: "1x", ref: "HEAD", out: path}, []string{"./p"})
+			err = runAB(ctx, io.Discard, io.Discard, abConfig{bench: "^BenchmarkWork$", count: 1, benchtime: "1x", ref: "HEAD", out: path}, []string{"./p"})
 			data, readErr := os.ReadFile(path)
 			if err == nil || !strings.Contains(err.Error(), "side "+side) || !strings.Contains(err.Error(), "benchmark harness completion missing") || readErr != nil || !bytes.Equal(data, []byte("prior artifact\n")) {
 				t.Fatalf("zero exit became a completed pair: %v\n%s", err, data)
@@ -175,6 +177,7 @@ func (c *countedPairContext) Err() error {
 }
 
 func TestABNonretainedPairHonorsCancellationDuringChildValidation(t *testing.T) {
+	t.Parallel()
 	var raw strings.Builder
 	for i := 0; i < 64; i++ {
 		fmt.Fprintf(&raw, "BenchmarkWork/child%d-2 1 1 ns/op\n", i)
@@ -203,6 +206,7 @@ func (c manualPairDeadline) Err() error {
 }
 
 func TestABPairPublicationUsesItsExistingClosingGate(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("executes real pairs with deterministic publication expiry")
 	}

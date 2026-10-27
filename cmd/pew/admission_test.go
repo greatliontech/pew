@@ -25,6 +25,7 @@ func admissionRow(cfg []benchfmt.Config) *benchfmt.Result {
 // note — and the strategy rung applies to a working-tree side alone: a
 // ref-resolved side compares under any strategy.
 func TestAdmitRecordingClimbsOneLadderOverTheWholeRecording(t *testing.T) {
+	t.Parallel()
 	current := admissionConfig(gofresh.DynamicStateStrategy)
 	if adm := admitRecording([]*benchfmt.Result{admissionRow(current)}, true); !adm.ok || adm.fp.MaximalClosure != "cl1" || adm.ledger != "ledger1" {
 		t.Fatalf("current recording refused: %+v", adm)

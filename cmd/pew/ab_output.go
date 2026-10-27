@@ -28,7 +28,7 @@ func prepareABOutput(ctx context.Context, out string, profiling bool, pkgs []pkg
 	if out == "" {
 		return nil, nil
 	}
-	abs, err := filepath.Abs(out)
+	abs, err := resolveWorkPath(ctx, out)
 	if err != nil {
 		return nil, err
 	}

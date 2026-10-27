@@ -23,6 +23,7 @@ import (
 // purity flags are gone — the source directives are the one channel
 // (§7.5).
 func TestKnobSurfaceIsDerived(t *testing.T) {
+	t.Parallel()
 	runFlags, abFlags := newRunCmd().Flags(), newABCmd().Flags()
 	if f := runFlags.Lookup("pin"); f == nil || f.Value.Type() != "bool" {
 		t.Errorf("run --pin = %v, want a bool switch", f)
@@ -93,15 +94,9 @@ func TestPinSwitchReportsItsDerivation(t *testing.T) {
 // ab always passes -test.benchmem to both sides (spec §9: allocation
 // metrics ride every pew measurement).
 func TestABAlwaysCapturesAllocations(t *testing.T) {
+	t.Parallel()
 	dir := abFixtureRepo(t)
-	prior, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(filepath.Join(dir, "p")); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(prior)
+	ctx := withWorkingDir(t, filepath.Join(dir, "p"))
 	var withBenchmem, runs int
 	ac := abConfig{
 		bench: ".", count: 1, ref: "HEAD",
@@ -118,7 +113,7 @@ func TestABAlwaysCapturesAllocations(t *testing.T) {
 		},
 	}
 	var out, errOut bytes.Buffer
-	if err := runAB(context.Background(), &out, &errOut, ac, []string{"."}); err != nil {
+	if err := runAB(ctx, &out, &errOut, ac, []string{"."}); err != nil {
 		t.Fatalf("runAB: %v\nstderr: %s", err, errOut.String())
 	}
 	if runs != 2 || withBenchmem != 2 {
@@ -132,6 +127,7 @@ func TestABAlwaysCapturesAllocations(t *testing.T) {
 // count bounded by this process's own default, and an unpinned
 // environment is untouched.
 func TestPinEnvironmentStatesTheWidth(t *testing.T) {
+	t.Parallel()
 	two := run.Pin{CPUs: []int{3, 15}}
 	for name, tc := range map[string]struct {
 		env  []string
@@ -183,7 +179,7 @@ func TestPinnedRunGuardsItsPin(t *testing.T) {
 		}
 	}
 	commitFixture(t, dir)
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	// An empty GOMAXPROCS in the operator's environment is no
 	// configuration: the width is still stated.
 	t.Setenv("GOMAXPROCS", "")
@@ -215,7 +211,7 @@ func TestPinnedRunGuardsItsPin(t *testing.T) {
 		},
 	}
 	var out bytes.Buffer
-	if err := runRun(context.Background(), &out, &bytes.Buffer{}, rc, []string{"./..."}); err != nil {
+	if err := runRun(ctx, &out, &bytes.Buffer{}, rc, []string{"./..."}); err != nil {
 		t.Fatalf("runRun: %v\n%s", err, out.String())
 	}
 	if strings.Join(pins, " ") != "3,15" || strings.Join(maxprocs, " ") != "GOMAXPROCS=2" {
@@ -254,6 +250,7 @@ func TestPinnedRunGuardsItsPin(t *testing.T) {
 // precedes the listing's failure (REQ-pew-pin-derivation,
 // REQ-pew-preparation).
 func TestPinIsDerivedBeforeTheListing(t *testing.T) {
+	t.Parallel()
 	hostErr := hostPinRefusal()
 	for _, verb := range []struct {
 		name string
@@ -287,6 +284,7 @@ func TestPinIsDerivedBeforeTheListing(t *testing.T) {
 // through the worktree's common directory (spec §6.1; the field failure
 // was a whole-package "worktree status: object not found").
 func TestRunRecordsFromALinkedWorktree(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads a fixture package through the toolchain with the execute seam stubbed")
 	}
@@ -312,14 +310,14 @@ func TestRunRecordsFromALinkedWorktree(t *testing.T) {
 	if out, err := exec.Command("git", "-C", dir, "worktree", "add", "-q", "--detach", linked).CombinedOutput(); err != nil {
 		t.Fatalf("git worktree add: %v: %s", err, out)
 	}
-	withWorkingDir(t, linked)
+	ctx := withWorkingDir(t, linked)
 	rc := runConfig{
 		benchDir: filepath.Join(linked, "benchmarks"),
 		opts:     run.Options{Count: 1, Benchtime: "1x", Bench: "."},
 		throttle: func() run.ThrottleSnapshot { return run.ThrottleSnapshot{"c0": 1} },
 	}
 	var out, errw bytes.Buffer
-	if err := runRun(context.Background(), &out, &errw, rc, []string{"./..."}); err != nil {
+	if err := runRun(ctx, &out, &errw, rc, []string{"./..."}); err != nil {
 		t.Fatalf("run in a linked worktree: %v\n%s%s", err, out.String(), errw.String())
 	}
 	if !strings.Contains(out.String(), "recorded     example.com/linked/a.BenchmarkA") || strings.Contains(out.String(), "object not found") {

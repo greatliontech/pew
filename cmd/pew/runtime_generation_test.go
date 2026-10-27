@@ -17,14 +17,15 @@ import (
 )
 
 func TestRunRegeneratesHistoricalRuntimeEvidence(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("records, checks and regenerates a benchmark")
 	}
 	dir := twoArmFixture(t)
-	withWorkingDir(t, dir)
+	ctx := withWorkingDir(t, dir)
 	st := store.New(filepath.Join(dir, "benchmarks"))
 	rc := runConfig{benchDir: st.Root, opts: run.Options{Count: 1, Benchtime: "1x", Bench: "^BenchmarkFirst$"}}
-	if err := runRun(t.Context(), io.Discard, io.Discard, rc, []string{"."}); err != nil {
+	if err := runRun(ctx, io.Discard, io.Discard, rc, []string{"."}); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := st.Read("", "BenchmarkFirst", "")
@@ -45,7 +46,7 @@ func TestRunRegeneratesHistoricalRuntimeEvidence(t *testing.T) {
 		executions++
 		return run.ExecuteBinaryContext(ctx, dir, pin, env, bin, args)
 	}
-	if err := runRun(t.Context(), io.Discard, io.Discard, rc, []string{"."}); err != nil || executions != 0 {
+	if err := runRun(ctx, io.Discard, io.Discard, rc, []string{"."}); err != nil || executions != 0 {
 		t.Fatalf("current control not served: executions=%d error=%v", executions, err)
 	}
 	old := a.fp
@@ -72,7 +73,7 @@ func TestRunRegeneratesHistoricalRuntimeEvidence(t *testing.T) {
 		t.Fatalf("historical fixture did not land: admission=%+v want=%+v err=%v", admitRecording(planted, true), old, err)
 	}
 	var status bytes.Buffer
-	if err := runStatus(t.Context(), &status, st.Root, "", false, false, true, []string{"."}); err != nil {
+	if err := runStatus(ctx, &status, st.Root, "", false, false, true, []string{"."}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(status.String(), `"benchmark":"BenchmarkFirst","verdict":"stale"`) {
@@ -82,7 +83,7 @@ func TestRunRegeneratesHistoricalRuntimeEvidence(t *testing.T) {
 	if err != nil || admitRecording(back, true).fp != old {
 		t.Fatalf("inspection rewrote history: %v", err)
 	}
-	if err := runRun(t.Context(), io.Discard, io.Discard, rc, []string{"."}); err != nil || executions != 1 {
+	if err := runRun(ctx, io.Discard, io.Discard, rc, []string{"."}); err != nil || executions != 1 {
 		t.Fatalf("history served or lost: executions=%d error=%v", executions, err)
 	}
 	back, err = st.Read("", "BenchmarkFirst", "")

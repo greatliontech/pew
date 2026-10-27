@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -107,6 +108,12 @@ func newEngineAt(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, en
 }
 
 func newEngineAtProducer(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env gotool.Environment, producerEnv *gotool.Environment) (*analysisSession, string, error) {
+	if moduleDir != "" && !filepath.IsAbs(moduleDir) {
+		moduleDir = filepath.Join(invocationWorkDir(ctx), moduleDir)
+	}
+	if pkgDir != "" && !filepath.IsAbs(pkgDir) {
+		pkgDir = filepath.Join(invocationWorkDir(ctx), pkgDir)
+	}
 	reader, err := preparationReader(ctx, moduleDir, env)
 	if err != nil {
 		return nil, "", err
@@ -166,6 +173,12 @@ func (s *analysisSession) bind(ctx context.Context, subjects []gofresh.Subject, 
 }
 
 func buildEngine(ctx context.Context, moduleDir, pkgDir string, env gotool.Environment, producerEnv *gotool.Environment, pgo string) (*analysisSession, error) {
+	if moduleDir != "" && !filepath.IsAbs(moduleDir) {
+		moduleDir = filepath.Join(invocationWorkDir(ctx), moduleDir)
+	}
+	if pkgDir != "" && !filepath.IsAbs(pkgDir) {
+		pkgDir = filepath.Join(invocationWorkDir(ctx), pkgDir)
+	}
 	// Every pew engine attests single-subject execution: `pew run`
 	// measures each benchmark in a process of its own (spec §9), and
 	// status/stat must judge recordings under the same premise they
@@ -196,10 +209,10 @@ func buildEngine(ctx context.Context, moduleDir, pkgDir string, env gotool.Envir
 	var session *gofresh.Session
 	inv := currentInvocation(ctx)
 	var key sessionKey
-	canonPkgDir := gotool.CommandDir(pkgDir)
+	canonPkgDir := resolveCommandDir(ctx, pkgDir)
 	if inv != nil && inv.vouches != nil {
 		key = sessionKey{
-			moduleDir: gotool.CommandDir(moduleDir),
+			moduleDir: resolveCommandDir(ctx, moduleDir),
 			env:       strings.Join(env.Values(), "\x00"),
 			pgo:       pgo,
 			vouches:   strings.Join(vouches, "\x00"),
@@ -649,7 +662,7 @@ func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, 
 }
 
 func resolvePackages(ctx context.Context, env gotool.Environment, patterns []string) ([]pkgMeta, error) {
-	out, err := gotool.List(ctx, "", env, append([]string{"-json"}, patterns...)...)
+	out, err := gotool.List(ctx, invocationWorkDir(ctx), env, append([]string{"-json"}, patterns...)...)
 	if err != nil {
 		return nil, err
 	}

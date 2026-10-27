@@ -36,7 +36,7 @@ func BenchmarkWork(b *testing.B) {
 				t.Fatal(err)
 			}
 			commitAll(t, repo, "conditional diagnostic workload")
-			withWorkingDir(t, root)
+			ctx := withWorkingDir(t, root)
 			t.Setenv("GOFLAGS", "-short -v=0 -parallel=0x2")
 			ac := abConfig{bench: "^BenchmarkWork$", count: 1, benchtime: "1x", ref: "HEAD", profile: "alloc", profileBenchtime: "32x", out: filepath.Join(t.TempDir(), "ab.txt")}
 			timed, diagnostics := 0, 0
@@ -51,7 +51,7 @@ func BenchmarkWork(b *testing.B) {
 			ac.execute = func(dir, pin string, values []string, binary string, args []string) ([]byte, error) {
 				timed++
 				check(args)
-				return run.ExecuteBinaryContext(t.Context(), dir, pin, testEnvironment(t, values), binary, args)
+				return run.ExecuteBinaryContext(ctx, dir, pin, testEnvironment(t, values), binary, args)
 			}
 			ac.diagnostic = func(ctx context.Context, dir, pin string, env testEnvironmentValue, binary string, args []string, errw io.Writer) ([]byte, error) {
 				diagnostics++
@@ -66,7 +66,7 @@ func BenchmarkWork(b *testing.B) {
 				return g, err
 			}
 			var out, errout bytes.Buffer
-			err = runAB(t.Context(), &out, &errout, ac, []string{"./p"})
+			err = runAB(ctx, &out, &errout, ac, []string{"./p"})
 			if timed != 2 || diagnostics != 2 {
 				t.Fatalf("execution population timed=%d diagnostics=%d, error=%v", timed, diagnostics, err)
 			}
