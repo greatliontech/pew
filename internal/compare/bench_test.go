@@ -7,6 +7,7 @@ import (
 	"golang.org/x/perf/benchfmt"
 )
 
+//gofresh:pure
 func BenchmarkCompare(b *testing.B) {
 	opts := DefaultOptions()
 	var base, newer []*benchfmt.Result

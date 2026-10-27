@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+//gofresh:pure
 func BenchmarkParseRecording(b *testing.B) {
 	raw := []byte(sample)
 	b.ReportAllocs()

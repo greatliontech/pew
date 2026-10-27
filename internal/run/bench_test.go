@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+//gofresh:pure
 func BenchmarkParseStream(b *testing.B) {
 	var sb strings.Builder
 	sb.WriteString("goos: linux\ngoarch: amd64\npkg: example.com/pkg\ncpu: BenchmarkCPU\n")
