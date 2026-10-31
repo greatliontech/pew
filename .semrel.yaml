@@ -2,3 +2,7 @@
 version: v0
 prefix: v
 development: true
+patchTypes:
+  - fix
+  - perf
+  - build
