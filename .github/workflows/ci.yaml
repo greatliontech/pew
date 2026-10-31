@@ -22,4 +22,4 @@ jobs:
       test-job-minutes: 30
       race: false
       records: true
-      stipulator-version: v0.66.1
+      stipulator-version: v0.76.0
