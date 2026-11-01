@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	git "github.com/go-git/go-git/v5"
-	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/pew/internal/run"
 )
 
@@ -58,7 +58,7 @@ func BenchmarkWork(b *testing.B) {
 				check(args)
 				return run.ExecuteDiagnostic(ctx, dir, pin, env, binary, args, errw)
 			}
-			ac.guards = func(ctx context.Context, moduleDir, pkgDir string, main bool, values []string) (guard.Guards, error) {
+			ac.guards = func(ctx context.Context, moduleDir, pkgDir string, main bool, values []string) (gofresh.Guards, error) {
 				g, err := (abConfig{}).sideGuards(ctx, moduleDir, pkgDir, main, testEnvironment(t, values))
 				if moved && diagnostics == 2 {
 					g.BuildConfig += "changed-at-diagnostic-close"

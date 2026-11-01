@@ -14,7 +14,6 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/pew/internal/compare"
 	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/run"
@@ -168,8 +167,8 @@ func TestABArtifactHoldsEachCompletedIteration(t *testing.T) {
 			}
 			return []byte("goos: linux\ngoarch: amd64\npkg: example.com/abfix/p\ncpu: T\nBenchmarkWork-8 1 5 ns/op\nPASS\n"), nil
 		},
-		guards: func(context.Context, string, string, bool, []string) (guard.Guards, error) {
-			return guard.Guards{Toolchain: "go1", BuildConfig: "b", Machine: "m", RuntimeConfig: "r"}, nil
+		guards: func(context.Context, string, string, bool, []string) (gofresh.Guards, error) {
+			return gofresh.Guards{Toolchain: "go1", BuildConfig: "b", Machine: "m", RuntimeConfig: "r"}, nil
 		},
 	}
 	err := runAB(ctx, &bytes.Buffer{}, &bytes.Buffer{}, ac, []string{"./p"})

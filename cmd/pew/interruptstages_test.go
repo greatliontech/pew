@@ -17,7 +17,6 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/compare"
 	"github.com/greatliontech/pew/internal/recordingtest"
@@ -228,9 +227,9 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	ac := abConfig{
 		bench: ".", count: 1, benchtime: "1x", ref: "HEAD",
 		build: fixtureABBuild,
-		guards: func(ctx context.Context, _, _ string, _ bool, _ []string) (guard.Guards, error) {
+		guards: func(ctx context.Context, _, _ string, _ bool, _ []string) (gofresh.Guards, error) {
 			cancel() // the operator interrupts while the guards are captured
-			return guard.Guards{}, ctx.Err()
+			return gofresh.Guards{}, ctx.Err()
 		},
 	}
 	assertInterrupted("ab", runAB(ctx, &w, &ew, ac, []string{"./..."}), "ab: interrupted while preparing")
@@ -394,8 +393,8 @@ func TestVerbsEndByAnInterruptionReceivedAfterTheLastUnit(t *testing.T) {
 			}
 			return []byte("goos: linux\ngoarch: amd64\npkg: example.com/abfix/p\ncpu: T\nBenchmarkWork-8 1 5 ns/op\nPASS\n"), nil
 		},
-		guards: func(context.Context, string, string, bool, []string) (guard.Guards, error) {
-			return guard.Guards{Toolchain: "go1", BuildConfig: "b", Machine: "m", RuntimeConfig: "r"}, nil
+		guards: func(context.Context, string, string, bool, []string) (gofresh.Guards, error) {
+			return gofresh.Guards{Toolchain: "go1", BuildConfig: "b", Machine: "m", RuntimeConfig: "r"}, nil
 		},
 	}
 	assertInterrupted("ab", runAB(ctx, &w, &ew, ac, []string{"./p"}), "ab: interrupted after the last package")
@@ -452,8 +451,8 @@ func TestMeasurementStagesReportTheirCancellationAsInterruption(t *testing.T) {
 				}
 				return []byte("goos: linux\ngoarch: amd64\npkg: example.com/abfix/p\ncpu: T\nBenchmarkWork-8 1 5 ns/op\nPASS\n"), nil
 			},
-			guards: func(context.Context, string, string, bool, []string) (guard.Guards, error) {
-				return guard.Guards{Toolchain: "go1", BuildConfig: "b", Machine: "m", RuntimeConfig: "r"}, nil
+			guards: func(context.Context, string, string, bool, []string) (gofresh.Guards, error) {
+				return gofresh.Guards{Toolchain: "go1", BuildConfig: "b", Machine: "m", RuntimeConfig: "r"}, nil
 			},
 		}
 		assertInterrupted(fmt.Sprintf("ab (side %d killed)", killed), runAB(ctx, &w, &ew, ac, []string{"./p"}), "interrupted after 1 of 2 iterations (the artifact holds them)")

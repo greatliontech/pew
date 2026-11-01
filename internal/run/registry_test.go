@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh"
 	"golang.org/x/perf/benchfmt"
 )
 
@@ -302,7 +302,7 @@ func TestVerifyToolchainConfigCoversEveryToolchainKey(t *testing.T) {
 // the precedence §5 states for an A/B refusal, pinned at its source
 // (a literal expectation over a fully populated Guards).
 func TestGuardConfigFollowsTheGuardRows(t *testing.T) {
-	cfgs := GuardConfig(guard.Guards{Toolchain: "t", Machine: "m", BuildConfig: "b", RuntimeConfig: "r"})
+	cfgs := GuardConfig(gofresh.Guards{Toolchain: "t", Machine: "m", BuildConfig: "b", RuntimeConfig: "r"})
 	if len(cfgs) != len(GuardRecordingKeys) || len(cfgs) != 4 {
 		t.Fatalf("GuardConfig emitted %d lines for %d guard rows", len(cfgs), len(GuardRecordingKeys))
 	}

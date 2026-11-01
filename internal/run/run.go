@@ -20,7 +20,6 @@ import (
 
 	gofresh "github.com/greatliontech/gofresh"
 	gofreshtool "github.com/greatliontech/gofresh/gotool"
-	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/metric"
 	"golang.org/x/perf/benchfmt"
@@ -530,8 +529,8 @@ func ProvenanceConfig(commit string, dirty bool, conditions Conditions) []benchf
 // recording path's full §5 provenance (commit and dirty are per-side facts
 // the A/B report already names, and a store-shaped record here would
 // contradict the never-a-stat-baseline contract).
-func GuardConfig(g guard.Guards) []benchfmt.Config {
-	// The field mapping is by hand (guard.Guards is gofresh's struct);
+func GuardConfig(g gofresh.Guards) []benchfmt.Config {
+	// The field mapping is by hand (gofresh.Guards is gofresh's struct);
 	// the order is the guard rows' — table order, never a literal here.
 	values := map[string]string{
 		KeyToolchain.Name:     g.Toolchain,

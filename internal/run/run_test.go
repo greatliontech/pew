@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/pew/internal/gotool"
 	"golang.org/x/perf/benchfmt"
 )
@@ -372,7 +371,7 @@ func TestRecordingConfigKeySetIsClosed(t *testing.T) {
 	fp := gofresh.Fingerprint{
 		ResultKind: gofresh.Measurement, RuntimeDigest: "rt", RuntimeInputs: "manifest",
 		MaximalClosure: "cl", ClosureStrategy: "cs", DynamicStateStrategy: "ds", TestVariantClosure: "tv",
-		Guards:          guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"},
+		Guards:          gofresh.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"},
 		PurityAssertion: "d", DynamicStateVouches: "v", SingleSubjectDischarges: "s", PackageProcessDischarges: "p",
 	}
 	fpcfg, err := FingerprintConfigs(fp, "lg")

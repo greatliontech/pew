@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 
 	"github.com/greatliontech/pew/internal/recordingtest"
 	runpkg "github.com/greatliontech/pew/internal/run"
@@ -47,7 +46,7 @@ func TestRecordingBuilderIsTheWritersShape(t *testing.T) {
 	}
 	want := gofresh.Fingerprint{
 		MaximalClosure: "closure-x", ClosureStrategy: "strategy-x", TestVariantClosure: "variant-x",
-		Guards:          guard.Guards{Toolchain: "tc-x", Machine: "m-x", BuildConfig: "b-x", RuntimeConfig: "r-x"},
+		Guards:          gofresh.Guards{Toolchain: "tc-x", Machine: "m-x", BuildConfig: "b-x", RuntimeConfig: "r-x"},
 		PurityAssertion: "purity-x", DynamicStateVouches: "v-x", SingleSubjectDischarges: "s-x", PackageProcessDischarges: "p-x",
 		DynamicStateStrategy: "dyn-x", RuntimeInputs: "manifest-x", RuntimeDigest: "digest-x", ResultKind: gofresh.Measurement,
 	}

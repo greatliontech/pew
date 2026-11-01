@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	"github.com/spf13/cobra"
 
 	"github.com/greatliontech/pew/internal/compare"
@@ -47,7 +46,7 @@ type abConfig struct {
 	throttle    func() run.ThrottleSnapshot
 	execute         func(dir, pin string, env []string, bin string, args []string) ([]byte, error)
 	build           func(dir string, env []string, args []string) error
-	guards          func(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error)
+	guards          func(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (gofresh.Guards, error)
 	harnessByModule map[string][]string
 }
 
@@ -58,7 +57,7 @@ type abConfig struct {
 // machine and runtime-config guards are process facts the two sides share by
 // construction. The PGO profile rides in as a content digest exactly as the
 // recording path's engine takes it.
-func (ac abConfig) sideGuards(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env gotool.Environment) (guard.Guards, error) {
+func (ac abConfig) sideGuards(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env gotool.Environment) (gofresh.Guards, error) {
 	if ac.guards != nil {
 		return ac.guards(ctx, moduleDir, pkgDir, mainPkg, env.Values())
 	}
@@ -67,11 +66,11 @@ func (ac abConfig) sideGuards(ctx context.Context, moduleDir, pkgDir string, mai
 	reader := gotool.Reader(moduleDir, env, dependencies(ctx).prepare)
 	goflags, err := run.EffectiveGoflags(ctx, reader)
 	if err != nil {
-		return guard.Guards{}, err
+		return gofresh.Guards{}, err
 	}
 	pgo, err := run.PGOInput(moduleDir, pkgDir, mainPkg, goflags)
 	if err != nil {
-		return guard.Guards{}, err
+		return gofresh.Guards{}, err
 	}
 	var buildInputs []string
 	if pgo != "" {
@@ -79,7 +78,7 @@ func (ac abConfig) sideGuards(ctx context.Context, moduleDir, pkgDir string, mai
 	}
 	// Build readers use the analysis environment; runtime guards describe the
 	// actual measured environment, including the selected pin's GOMAXPROCS.
-	return guard.Capture(ctx, reader, newEnvironments(env, ac.pin).measured().Values(), guard.Measurement, buildInputs...)
+	return gofresh.CaptureGuards(ctx, reader, newEnvironments(env, ac.pin).measured().Values(), gofresh.Measurement, buildInputs...)
 }
 
 func abPackageMetadata(ctx context.Context, dir string, env gotool.Environment) (pkgMeta, error) {
@@ -361,7 +360,7 @@ type abPreparation struct {
 	reference        pkgMeta
 	tmp              string
 	executables      [2]retainedExecutable
-	guardsA, guardsB guard.Guards
+	guardsA, guardsB gofresh.Guards
 	harnessArgs      [2][]string
 	selected         [2][]string
 }
@@ -586,7 +585,7 @@ func abPatternSelects(a, b pkgMeta, ac abConfig) ([2][]string, error) {
 // share the machine and runtime-configuration guards by construction;
 // the toolchain directive and the PGO bytes are the ones a ref can
 // change.
-func abGuardsAgree(importPath, ref string, a, b guard.Guards) error {
+func abGuardsAgree(importPath, ref string, a, b gofresh.Guards) error {
 	sideA, sideB := run.GuardConfig(a), run.GuardConfig(b)
 	for i := range sideA {
 		if va, vb := string(sideA[i].Value), string(sideB[i].Value); va != vb {

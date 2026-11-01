@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/pprof/profile"
-	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh"
 )
 
 func distribution(t testing.TB, alloc, reorder bool, symbol string, values []byte) []byte {
@@ -147,18 +147,18 @@ func TestLiveComparisonKeepsNativeEvidenceApartFromComparisonGuards(t *testing.T
 	if _, err := Compare(a, b, raw, raw); err == nil {
 		t.Fatal("historical comparison invented a live comparison domain")
 	}
-	ordinary := guard.Guards{Toolchain: "tc", BuildConfig: "flags-and-inputs", Machine: "machine", RuntimeConfig: "runtime"}
+	ordinary := gofresh.Guards{Toolchain: "tc", BuildConfig: "flags-and-inputs", Machine: "machine", RuntimeConfig: "runtime"}
 	if _, err := CompareWithGuards(a, b, raw, raw, ordinary, ordinary); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(a.Fingerprint, beforeA) || !reflect.DeepEqual(b.Fingerprint, beforeB) {
 		t.Fatal("comparison rewrote producing evidence")
 	}
-	for _, change := range []func(*guard.Guards){
-		func(g *guard.Guards) { g.Toolchain = "" },
-		func(g *guard.Guards) { g.BuildConfig += "changed" },
-		func(g *guard.Guards) { g.Machine += "changed" },
-		func(g *guard.Guards) { g.RuntimeConfig += "changed" },
+	for _, change := range []func(*gofresh.Guards){
+		func(g *gofresh.Guards) { g.Toolchain = "" },
+		func(g *gofresh.Guards) { g.BuildConfig += "changed" },
+		func(g *gofresh.Guards) { g.Machine += "changed" },
+		func(g *gofresh.Guards) { g.RuntimeConfig += "changed" },
 	} {
 		changed := ordinary
 		change(&changed)

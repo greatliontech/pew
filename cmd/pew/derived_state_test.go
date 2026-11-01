@@ -11,7 +11,6 @@ import (
 
 	gogit "github.com/go-git/go-git/v5"
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/recordingtest"
 	"github.com/greatliontech/pew/internal/store"
@@ -46,8 +45,8 @@ func TestDerivedStateColdWarmDiscardedCacheAndDependencyEquivalence(t *testing.T
 	commitAll(t, repo, "initial")
 	ctx := withWorkingDir(t, dirA)
 
-	closure.PruneMemos(0)
-	t.Cleanup(func() { closure.PruneMemos(0) })
+	gofresh.PruneMemos(0)
+	t.Cleanup(func() { gofresh.PruneMemos(0) })
 
 	const pkg = "example.com/derivedstate"
 	const bench = "BenchmarkCompute"
@@ -92,10 +91,10 @@ func TestDerivedStateColdWarmDiscardedCacheAndDependencyEquivalence(t *testing.T
 	}
 
 	// 1. Cold, warm, and discarded-cache recomputation agree on verdict and semantic facts.
-	closure.PruneMemos(0)
+	gofresh.PruneMemos(0)
 	vCold, rCold, curCold := check(dirA, stA)
 	vWarm, rWarm, curWarm := check(dirA, stA)
-	closure.PruneMemos(0)
+	gofresh.PruneMemos(0)
 	vRecomp, rRecomp, curRecomp := check(dirA, stA)
 	if vCold != verdictValid || vWarm != verdictValid || vRecomp != verdictValid || rCold != "" || rWarm != "" || rRecomp != "" {
 		t.Fatalf("cold/warm/recompute verdicts = (%s,%q) (%s,%q) (%s,%q), want all valid", vCold, rCold, vWarm, rWarm, vRecomp, rRecomp)
@@ -117,7 +116,7 @@ func TestDerivedStateColdWarmDiscardedCacheAndDependencyEquivalence(t *testing.T
 	if v, reason, _ := check(dirA, stA); v != verdictStale || reason != "closure" {
 		t.Fatalf("same-version selected dependency content edit was not stale (closure): %s (%s)", v, reason)
 	}
-	closure.PruneMemos(0)
+	gofresh.PruneMemos(0)
 	if v, reason, _ := check(dirA, stA); v != verdictStale || reason != "closure" {
 		t.Fatalf("discarded-cache check after dependency edit = %s (%s), want stale (closure)", v, reason)
 	}

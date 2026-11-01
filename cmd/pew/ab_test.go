@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 	"golang.org/x/perf/benchfmt"
@@ -165,10 +165,10 @@ func TestABStampsGuardProvenance(t *testing.T) {
 		buildArgs = append(buildArgs, args)
 		return fixtureABBuild(buildDir, env, args)
 	}
-	shared.guards = func(_ context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
+	shared.guards = func(_ context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (gofresh.Guards, error) {
 		events = append(events, "guards")
 		sharedDirs = append(sharedDirs, moduleDir)
-		return guard.Guards{Toolchain: "go1", BuildConfig: "b1", Machine: "m1", RuntimeConfig: "r1"}, nil
+		return gofresh.Guards{Toolchain: "go1", BuildConfig: "b1", Machine: "m1", RuntimeConfig: "r1"}, nil
 	}
 	shared.execute = func(execDir, pin string, env []string, bin string, args []string) ([]byte, error) {
 		events = append(events, "run")
@@ -233,8 +233,8 @@ func TestABStampsGuardProvenance(t *testing.T) {
 		iterations++
 		return shared.execute(dir, pin, env, bin, args)
 	}
-	split.guards = func(_ context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
-		g := guard.Guards{Toolchain: "go1", BuildConfig: "b1", Machine: "m1", RuntimeConfig: "r1"}
+	split.guards = func(_ context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (gofresh.Guards, error) {
+		g := gofresh.Guards{Toolchain: "go1", BuildConfig: "b1", Machine: "m1", RuntimeConfig: "r1"}
 		seenInSharedRun := false
 		for _, d := range sharedDirs {
 			if d == moduleDir {
@@ -258,8 +258,8 @@ func TestABStampsGuardProvenance(t *testing.T) {
 	// The PGO bytes are the other build identity a ref can change: a
 	// buildconfig-only difference refuses the same way.
 	pgo := split
-	pgo.guards = func(_ context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
-		g := guard.Guards{Toolchain: "go1", BuildConfig: "b1", Machine: "m1", RuntimeConfig: "r1"}
+	pgo.guards = func(_ context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (gofresh.Guards, error) {
+		g := gofresh.Guards{Toolchain: "go1", BuildConfig: "b1", Machine: "m1", RuntimeConfig: "r1"}
 		for _, d := range sharedDirs {
 			if d == moduleDir {
 				return g, nil
@@ -277,7 +277,7 @@ func TestABStampsGuardProvenance(t *testing.T) {
 	// An earlier guard empty on both sides never shadows a later
 	// difference: two live captures compare by value, guard by guard.
 	shadow := pgo
-	shadow.guards = func(_ context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
+	shadow.guards = func(_ context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (gofresh.Guards, error) {
 		g, _ := pgo.guards(ctx, moduleDir, pkgDir, mainPkg, env)
 		g.Toolchain = ""
 		return g, nil
@@ -337,9 +337,9 @@ func TestABSideBPackageKindFromRef(t *testing.T) {
 		execute: func(execDir, pin string, env []string, bin string, args []string) ([]byte, error) {
 			return []byte("BenchmarkWork-8 1000 100 ns/op\nPASS\n"), nil
 		},
-		guards: func(_ context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (guard.Guards, error) {
+		guards: func(_ context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (gofresh.Guards, error) {
 			kinds[moduleDir] = mainPkg
-			return guard.Guards{Toolchain: "go1", BuildConfig: "b1", Machine: "m1", RuntimeConfig: "r1"}, nil
+			return gofresh.Guards{Toolchain: "go1", BuildConfig: "b1", Machine: "m1", RuntimeConfig: "r1"}, nil
 		},
 	}
 	var out, errOut bytes.Buffer

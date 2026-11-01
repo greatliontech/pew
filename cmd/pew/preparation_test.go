@@ -13,7 +13,6 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 )
@@ -240,8 +239,8 @@ func TestABPreparesEveryPackageBeforeAnyIteration(t *testing.T) {
 			iterations++
 			return nil, nil
 		},
-		guards: func(context.Context, string, string, bool, []string) (guard.Guards, error) {
-			return guard.Guards{Toolchain: "go1", BuildConfig: "b", Machine: "m", RuntimeConfig: "r"}, nil
+		guards: func(context.Context, string, string, bool, []string) (gofresh.Guards, error) {
+			return gofresh.Guards{Toolchain: "go1", BuildConfig: "b", Machine: "m", RuntimeConfig: "r"}, nil
 		},
 	}
 	err := runAB(ctx, &bytes.Buffer{}, &bytes.Buffer{}, ac, []string{"./p", "./zlate"})

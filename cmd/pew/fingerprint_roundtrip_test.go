@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	runpkg "github.com/greatliontech/pew/internal/run"
 )
 
@@ -17,7 +16,7 @@ func TestFingerprintConfigRoundTrip(t *testing.T) {
 		TestVariantClosure: "variant-hash",
 		ToolchainContent:   "toolchain-content",
 		AdmissionPolicy:    "admission-policy",
-		Guards: guard.Guards{
+		Guards: gofresh.Guards{
 			Toolchain:     "go-toolchain",
 			Machine:       "machine-fp",
 			BuildConfig:   "build-digest",

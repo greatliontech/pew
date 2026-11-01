@@ -5,7 +5,7 @@ import (
 	"sort"
 
 	"github.com/google/pprof/profile"
-	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/pew/internal/run"
 )
 
@@ -43,7 +43,7 @@ func Compare(a, b Capture, rawA, rawB []byte) ([]Difference, error) {
 // side's producing build through closing; equal values alone establish no such
 // binding. Native fingerprints are retained unchanged and confer no additional
 // freshness or outcome authority through this comparison.
-func CompareWithGuards(a, b Capture, rawA, rawB []byte, guardsA, guardsB guard.Guards) ([]Difference, error) {
+func CompareWithGuards(a, b Capture, rawA, rawB []byte, guardsA, guardsB gofresh.Guards) ([]Difference, error) {
 	if a.Kind != b.Kind || a.Package != b.Package || a.Benchmark != b.Benchmark || a.Selection != b.Selection || a.Budget != b.Budget || a.Protocol != b.Protocol || a.Scope != b.Scope || a.Sampling != b.Sampling {
 		return nil, fmt.Errorf("profile: incompatible workload or capture protocol")
 	}

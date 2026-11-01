@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/pew/internal/run"
 	"golang.org/x/perf/benchfmt"
 )
@@ -49,7 +48,7 @@ func Defaults() Recording {
 			ClosureStrategy:      gofresh.ClosureStrategy,
 			DynamicStateStrategy: gofresh.DynamicStateStrategy,
 			TestVariantClosure:   "tv1",
-			Guards:               guard.Guards{Toolchain: "go-test", Machine: "m1", BuildConfig: "b1", RuntimeConfig: "r1"},
+			Guards:               gofresh.Guards{Toolchain: "go-test", Machine: "m1", BuildConfig: "b1", RuntimeConfig: "r1"},
 			RuntimeDigest:        "rt1",
 			RuntimeInputs:        "manifest1",
 		},

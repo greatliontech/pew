@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/gotool"
 	runpkg "github.com/greatliontech/pew/internal/run"
@@ -77,7 +76,7 @@ func writeExplainRows(w io.Writer, aLabel, bLabel string, rows []explainRow) err
 	return nil
 }
 
-func guardRows(a, b guard.Guards) []explainRow {
+func guardRows(a, b gofresh.Guards) []explainRow {
 	return []explainRow{
 		{name: runpkg.KeyToolchain.Display, a: a.Toolchain, b: b.Toolchain},
 		{name: runpkg.KeyMachine.Display, a: a.Machine, b: b.Machine},
