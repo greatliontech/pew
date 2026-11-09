@@ -1,6 +1,6 @@
 # Memoize `sideGuards` / `abPackageMetadata` in `cmd/pew/ab.go` and Deduplicate CLI Helpers
 
-**Lands:** Chunk 6 in `gofresh/docs/plans/plan.md` (`Redesign Snapshot / Sibling Observability Sharing, Downstream Efficiency & go-x-tools Fixes`).
+**Lands:** Chunk 8 in `gofresh/docs/plans/plan.md` (`Downstream Fleet Refactoring, Batching & Startup Purity`).
 
 ## Context & Concrete Findings
 
@@ -22,7 +22,7 @@
 
 ## Resolution
 
-During Chunk 6:
+During Chunk 8:
 1. Switch `sideGuards` (`cmd/pew/ab.go:66`) to `preparationReader(ctx, moduleDir, env)` and reuse `guardsA` / `guardsB` across `prepareABPackage` (`ab.go:434-515`).
 2. Memoize or thread `abPackageMetadata` in `cmd/pew/ab.go` so `go list -json .` runs at most once per `(dir, env)`.
 3. Replace the open-coded `"PASS"` loop in `cmd/pew/profiles.go` with `run.HarnessCompleted(out)` and reuse `resolveExistingPrefix` in `moduleBenchDir`.
