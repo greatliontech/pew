@@ -11,11 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/pew/internal/gotool"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
+	"github.com/greatliontech/pew/internal/trace"
 	"github.com/spf13/cobra"
 	"golang.org/x/perf/benchfmt"
 )
@@ -294,6 +296,7 @@ func prepareHarnessArgs(ctx context.Context, moduleDir string, env gotool.Enviro
 }
 
 func runStatus(ctx context.Context, w io.Writer, benchDir, label string, staleOnly, explain, jsonOut bool, patterns []string) error {
+	trace.Refresh(os.Getenv(trace.EnvTrace), os.Getenv(trace.EnvTraceFile))
 	inv := currentInvocation(ctx)
 	if inv == nil || inv.vouches == nil {
 		var err error
@@ -562,6 +565,7 @@ type benchVerdict struct {
 // are identical under any subject grouping. Every per-recording gate
 // is unchanged.
 func checkPackage(ctx context.Context, st *store.Store, buildView func([]gofresh.Subject) (*gofresh.RuntimeBinding, error), pkgPath, pkgRel, moduleDir string, benches []string, label string, view *gofresh.RuntimeBinding) (map[string]*benchVerdict, error) {
+	chkStart := time.Now()
 	out := map[string]*benchVerdict{}
 	for _, b := range benches {
 		raw, err := st.ReadBytes(store.Key{PkgRel: pkgRel, Bench: b, Label: label})
@@ -592,7 +596,29 @@ func checkPackage(ctx context.Context, st *store.Store, buildView func([]gofresh
 			continue
 		}
 	}
-	return judgeRecordings(ctx, buildView, pkgPath, benches, out, view)
+	res, err := judgeRecordings(ctx, buildView, pkgPath, benches, out, view)
+	var validCount, staleCount, unrecordedCount int
+	for _, b := range benches {
+		if bv := res[b]; bv != nil {
+			switch bv.v {
+			case verdictValid:
+				validCount++
+			case verdictUnrecorded:
+				unrecordedCount++
+			default:
+				staleCount++
+			}
+		}
+	}
+	trace.Emit(ctx, trace.DomainSelect, "check_package", pkgPath,
+		trace.Int("benches", len(benches)),
+		trace.Int("valid", validCount),
+		trace.Int("stale", staleCount),
+		trace.Int("unrecorded", unrecordedCount),
+		trace.Int64("duration_ms", time.Since(chkStart).Milliseconds()),
+		trace.Err(err),
+	)
+	return res, err
 }
 
 // judgeRecordings is the current-tree verdict path for store and ref-paired
@@ -745,8 +771,13 @@ func fingerprintFromConfig(cfg []benchfmt.Config) (gofresh.Fingerprint, string, 
 }
 
 func resolvePackages(ctx context.Context, env gotool.Environment, patterns []string) ([]pkgMeta, error) {
+	listStart := time.Now()
 	out, err := gotool.List(ctx, invocationWorkDir(ctx), env, append([]string{"-json"}, patterns...)...)
 	if err != nil {
+		trace.Emit(ctx, trace.DomainSelect, "resolve_packages", strings.Join(patterns, ","),
+			trace.Int64("duration_ms", time.Since(listStart).Milliseconds()),
+			trace.Err(err),
+		)
 		return nil, err
 	}
 	dec := json.NewDecoder(bytes.NewReader(out))
@@ -758,5 +789,9 @@ func resolvePackages(ctx context.Context, env gotool.Environment, patterns []str
 		}
 		pkgs = append(pkgs, p)
 	}
+	trace.Emit(ctx, trace.DomainSelect, "resolve_packages", strings.Join(patterns, ","),
+		trace.Int("packages", len(pkgs)),
+		trace.Int64("duration_ms", time.Since(listStart).Milliseconds()),
+	)
 	return pkgs, nil
 }

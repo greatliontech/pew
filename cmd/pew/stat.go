@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/pew/internal/compare"
@@ -20,6 +22,7 @@ import (
 	"github.com/greatliontech/pew/internal/profiles"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
+	"github.com/greatliontech/pew/internal/trace"
 	"github.com/spf13/cobra"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/perf/benchfmt"
@@ -227,7 +230,15 @@ func (b baseline) historicalRefs() []string {
 	return refs
 }
 
-func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []string) error {
+func runStat(ctx context.Context, w, errw io.Writer, sc statConfig, refs []string) (retErr error) {
+	trace.Refresh(os.Getenv(trace.EnvTrace), os.Getenv(trace.EnvTraceFile))
+	statStart := time.Now()
+	defer func() {
+		trace.Emit(ctx, trace.DomainCompare, "stat_done", strings.Join(refs, ".."),
+			trace.Int64("duration_ms", time.Since(statStart).Milliseconds()),
+			trace.Err(retErr),
+		)
+	}()
 	if sc.opts.Confidence == 0 && !math.IsNaN(sc.opts.Alpha) && sc.opts.Alpha > 0 && sc.opts.Alpha < 1 {
 		sc.opts.Confidence = 1 - sc.opts.Alpha
 	}

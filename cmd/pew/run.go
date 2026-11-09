@@ -19,6 +19,7 @@ import (
 	"github.com/greatliontech/pew/internal/profiles"
 	"github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
+	"github.com/greatliontech/pew/internal/trace"
 	"github.com/spf13/cobra"
 	"golang.org/x/perf/benchfmt"
 )
@@ -132,6 +133,7 @@ func newRunCmd() *cobra.Command {
 }
 
 func runRun(ctx context.Context, w, errw io.Writer, rc runConfig, patterns []string) error {
+	trace.Refresh(os.Getenv(trace.EnvTrace), os.Getenv(trace.EnvTraceFile))
 	// Internal callers may leave the duration unset; command entry has
 	// already distinguished an explicit empty flag from its 1s default.
 	if rc.opts.Benchtime == "" {
@@ -720,12 +722,21 @@ func runPreparedPackage(ctx context.Context, w, errw io.Writer, gc *gitStateCach
 		// valid, the source inputs' dirtiness, the PGO input unchanged,
 		// HEAD unmoved — is re-derived for this arm's own span, so a
 		// later arm's failure or an interruption never costs it.
+		persistStart := time.Now()
 		if err := func() error {
 			defer m.cancel()
 			return persistArm(m.closing, w, errw, rc, gc, p, prep, view.Snapshot(), commit, initialDirty, encodedLedger, name, m, env)
 		}(); err != nil {
+			trace.Emit(ctx, trace.DomainStore, "persist_arm", p.ImportPath+"."+name,
+				trace.Int64("duration_ms", time.Since(persistStart).Milliseconds()),
+				trace.Err(err),
+			)
 			return fmt.Errorf("%s: %w (%d recorded)", name, err, len(written))
 		}
+		trace.Emit(ctx, trace.DomainStore, "persist_arm", p.ImportPath+"."+name,
+			trace.Int("samples", len(m.recs)),
+			trace.Int64("duration_ms", time.Since(persistStart).Milliseconds()),
+		)
 		written = append(written, name)
 	}
 	if stoppedAt >= 0 {
@@ -910,7 +921,18 @@ type armMeasurement struct {
 // surfaces as a crash and as a moved bracket, neither masking the other. In
 // every case only this arm's recording is discarded, its prior recording
 // untouched.
-func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, env gotool.Environment, opts run.Options, pkgRel, name string, truth run.ToolchainTruth, scratch []string, base run.Conditions, parent *gofresh.RuntimeBinding, artifact *builtBinary, harnessArgs []string, index, total int) (armMeasurement, []string, error) {
+func measureBench(ctx context.Context, errw io.Writer, rc runConfig, gc *gitStateCache, p pkgMeta, env gotool.Environment, opts run.Options, pkgRel, name string, truth run.ToolchainTruth, scratch []string, base run.Conditions, parent *gofresh.RuntimeBinding, artifact *builtBinary, harnessArgs []string, index, total int) (m armMeasurement, refused []string, retErr error) {
+	measStart := time.Now()
+	defer func() {
+		trace.Emit(ctx, trace.DomainExecute, "measure_bench", p.ImportPath+"."+name,
+			trace.Int("index", index),
+			trace.Int("total", total),
+			trace.Int("samples", len(m.recs)),
+			trace.Int("refused", len(refused)),
+			trace.Int64("duration_ms", time.Since(measStart).Milliseconds()),
+			trace.Err(retErr),
+		)
+	}()
 	pattern, err := restrictBenchmarkPattern(opts.Bench, []string{name})
 	if err != nil {
 		return armMeasurement{}, nil, err

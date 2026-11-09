@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/greatliontech/pew/internal/trace"
 	"github.com/spf13/cobra"
 )
 
 func main() {
+	trace.Refresh(os.Getenv(trace.EnvTrace), os.Getenv(trace.EnvTraceFile))
 	// Every verb reports the stretch in flight on the one cadence (spec
 	// REQ-pew-progress); the reporter stops before the error prints,
 	// on every path — cobra runs no post-run hook for a failing verb.
