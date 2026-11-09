@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/guidance"
 	pew "github.com/greatliontech/pew"
+	"github.com/greatliontech/pew/internal/guidance"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )

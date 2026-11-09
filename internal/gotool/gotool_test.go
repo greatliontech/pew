@@ -12,8 +12,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	gofreshtool "github.com/greatliontech/gofresh/gotool"
 )
 
 // One environment policy for every go invocation (spec §9): the working
@@ -166,7 +164,7 @@ func TestListRefusesUndrainedOutput(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	out, err := List(ctx, t.TempDir(), testEnvironment(t, nil), "-json", ".")
-	if !errors.Is(err, gofreshtool.ErrListingRefused) || len(out) != 0 || gofreshtool.Salvaged(ctx, err) {
+	if !errors.Is(err, ErrListingRefused) || len(out) != 0 || Salvaged(ctx, err) {
 		t.Fatalf("undrained listing: output %q, error %v; want refusal without salvage", out, err)
 	}
 	_, err = NewEnvironment([]string{"A=1", "A=2"})

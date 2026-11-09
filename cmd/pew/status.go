@@ -143,17 +143,55 @@ func newEngineAtProducer(ctx context.Context, moduleDir, pkgDir string, mainPkg 
 // unlisted release surfaces only as scattered stale/unverifiable
 // verdicts with nothing naming the walk needed.
 func emitEngineDiagnostic(ctx context.Context, p gofresh.Progress) {
-	if _, diagnostic := p.Diagnostic(); diagnostic {
+	if _, diagnostic := progressDiagnostic(p); diagnostic {
 		if i := currentInvocation(ctx); i != nil && i.diagnostics != nil {
 			i.diagnostics(p)
 		} else {
-			gofresh.DiagnosticsTo(os.Stderr)(p)
+			diagnosticsTo(os.Stderr)(p)
 		}
 		return
 	}
-	if p.IsUnit() {
+	if progressIsUnit(p) {
 		reportPhase(ctx, strings.TrimSpace("analysis "+p.Phase+" "+p.Package))
 	}
+}
+
+func progressDiagnostic(p gofresh.Progress) (string, bool) {
+	detail := strings.ReplaceAll(strings.TrimSpace(p.Detail), "\n", "; ")
+	if detail == "" {
+		return "", false
+	}
+	if p.Phase == "unlisted-toolchain" {
+		return "gofresh: " + detail + "\n", true
+	}
+	if p.Package != "" {
+		return "gofresh: " + p.Phase + " " + p.Package + " — " + detail + "\n", true
+	}
+	return "gofresh: " + p.Phase + " — " + detail + "\n", true
+}
+
+func diagnosticsTo(w io.Writer) func(gofresh.Progress) {
+	var mu sync.Mutex
+	return func(p gofresh.Progress) {
+		line, ok := progressDiagnostic(p)
+		if !ok {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		_, _ = io.WriteString(w, line)
+	}
+}
+
+func progressIsUnit(p gofresh.Progress) bool {
+	if p.Detail != "" {
+		return false
+	}
+	switch p.Phase {
+	case "load", "ssa", "closure", "runtime", "observe":
+		return true
+	}
+	return false
 }
 
 // analysisSession retains the package's runtime selection beside its build-only
@@ -223,11 +261,10 @@ func buildEngine(ctx context.Context, moduleDir, pkgDir string, env gotool.Envir
 		}
 	}
 	if session == nil {
-		runner := gotool.Runner(dependencies(ctx).prepare)
 		session, err = gofresh.NewSession(ctx,
 			gofresh.BuildDescription{Directory: moduleDir, Environment: env.Values(), Inputs: inputs},
 			gofresh.SessionPolicy{Vouches: vouches, Execution: gofresh.SingleSubjectExecution,
-				Runner: runner, Progress: func(p gofresh.Progress) { emitEngineDiagnostic(ctx, p) }})
+				PrepareCommand: gotool.NewRunner(dependencies(ctx).prepare).PrepareCommand, Progress: func(p gofresh.Progress) { emitEngineDiagnostic(ctx, p) }})
 		if err != nil {
 			return nil, err
 		}
@@ -611,7 +648,7 @@ func judgeRecordings(ctx context.Context, buildView func([]gofresh.Subject) (*go
 		}
 		view = built
 	}
-	batchVerdicts, err := view.CheckBatchWithLedgers(ctx, candidates, ledgers)
+	batchVerdicts, err := checkBatchWithInertGrowth(ctx, view, subjects, candidates, ledgers)
 	if err != nil {
 		return unjudged(err)
 	}
@@ -640,6 +677,52 @@ func judgeRecordings(ctx context.Context, buildView func([]gofresh.Subject) (*go
 		}
 	}
 	return out, nil
+}
+
+// checkBatchWithInertGrowth checks all candidates in one CheckingUnit and, for
+// any candidate that fails with ReasonTestVariants and carries a decoded prior
+// ledger, runs ExtendInertBatch in the same unit so the extension's verdict
+// replaces the compartment-only verdict (spec §7.9).
+func checkBatchWithInertGrowth(ctx context.Context, view *gofresh.RuntimeBinding, subjects []gofresh.Subject, candidates []gofresh.Candidate, ledgers map[int]gofresh.TestVariantLedger) ([]gofresh.CheckedCandidate, error) {
+	u, err := view.BeginCheck(subjects)
+	if err != nil {
+		return nil, err
+	}
+	defer u.Abort()
+	provisional, err := u.CheckBatch(ctx, candidates)
+	if err != nil {
+		return nil, err
+	}
+	var requests []gofresh.InertRequest
+	var requestCandidate []int
+	for i, p := range provisional {
+		if p.Verdict.Status == gofresh.Stale && p.Verdict.Reason == gofresh.ReasonTestVariants {
+			if prior, ok := ledgers[i]; ok {
+				requests = append(requests, gofresh.InertRequest{Index: i, PriorLedger: prior})
+				requestCandidate = append(requestCandidate, i)
+			}
+		}
+	}
+	if len(requests) > 0 {
+		if _, err := u.ExtendInertBatch(ctx, requests); err != nil {
+			return nil, err
+		}
+	}
+	closed, err := u.Close(ctx)
+	if err != nil {
+		return nil, err
+	}
+	results := append([]gofresh.CheckedCandidate(nil), closed[:len(candidates)]...)
+	for k, candIdx := range requestCandidate {
+		ext := closed[len(candidates)+k]
+		results[candIdx] = gofresh.CheckedCandidate{
+			Index:     candIdx,
+			Subject:   candidates[candIdx].Subject,
+			Verdict:   ext.Verdict,
+			Extension: ext.Extension,
+		}
+	}
+	return results, nil
 }
 
 // fingerprintFromConfig reads the native payload after the format rung and

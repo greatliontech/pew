@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/gotool"
 	runpkg "github.com/greatliontech/pew/internal/run"
 )
@@ -111,7 +110,7 @@ func explainCapturedRecord(ctx context.Context, w io.Writer, moduleDir string, f
 		if _, err := fmt.Fprintln(w, "    runtime inputs: diagnostic re-observation of the recorded identities (values are not disclosed)"); err != nil {
 			return explanationWriteError(err)
 		}
-		if st, err := runtimeinput.Current(ctx, fp.RuntimeInputs, moduleDir, env); err != nil {
+		if st, err := gofresh.CurrentRuntimeInputs(ctx, fp.RuntimeInputs, moduleDir, env); err != nil {
 			analysisErr = err
 			rows = append(rows, explainRow{name: runpkg.KeyRuntime.Display, a: fp.RuntimeDigest, b: "(uncomputable: " + err.Error() + ")"})
 		} else {
@@ -125,7 +124,7 @@ func explainCapturedRecord(ctx context.Context, w io.Writer, moduleDir string, f
 	if fp.RuntimeInputs == "" {
 		return nil
 	}
-	d, err := runtimeinput.Describe(fp.RuntimeInputs, moduleDir)
+	d, err := gofresh.DescribeRuntimeInputs(fp.RuntimeInputs, moduleDir)
 	if err != nil {
 		_, writeErr := fmt.Fprintf(w, "    watched inputs: undecodable manifest: %v\n", err)
 		return errors.Join(analysisErr, err, explanationWriteError(writeErr))
@@ -162,7 +161,7 @@ func explainCapturedRecord(ctx context.Context, w io.Writer, moduleDir string, f
 // digest mismatch, best-effort: an attribution error or an empty result
 // yields no line, and the digest row stays the whole story.
 func movedInputsLine(ctx context.Context, manifest, moduleDir string, env []string) string {
-	moved, err := runtimeinput.MovedInputs(ctx, manifest, moduleDir, env)
+	moved, err := gofresh.MovedRuntimeInputs(ctx, manifest, moduleDir, env)
 	if err != nil || len(moved) == 0 {
 		return ""
 	}

@@ -1597,11 +1597,10 @@ not swept. Historical recording, profile and source reads remain go-git reads.
 Five commands — `ab`, `run`, `status`, `stat`, `gc` — plus
 `guidance`; names follow the `go test` / benchstat idiom. Verb-level
 served prose (what a verb does, what a knob controls, when to use
-which) lives in the guidance document (`docs/guidance.md`, the fleet
-format gofresh's guidance spec defines) and is served from the tool
-itself per REQ-pew-guidance (§13); this section states the surface's
-wire and exit contracts, which the guidance document narrates but
-never overrides.
+which) lives in the guidance document (`docs/guidance.md`) and is
+served from the tool itself per REQ-pew-guidance (§13); this section
+states the surface's wire and exit contracts, which the guidance
+document narrates but never overrides.
 
 Behavioral contracts the commands hold: `ab` materializes side B in
 a disposable detached worktree beside the repository, or in the
@@ -1768,8 +1767,8 @@ failures with their benchmark; ordinary stale, unrecorded and unverifiable
 verdicts remain successful reporting, and interruption takes precedence.
 
 **REQ-pew-guidance** (behavior): Tool-level served prose MUST be the
-embedded guidance document's projections (`docs/guidance.md`, in the
-fleet format gofresh's guidance spec defines): every command Short
+embedded guidance document's projections (`docs/guidance.md`, parsed by
+`internal/guidance`): every command Short
 and Long is the document's rendering for the cli surface (the Long
 the knobless help rendering — cobra renders its own flag list — and,
 for a knobbed verb, the registration's prose pointer to `pew guidance <verb>`), and
@@ -1781,7 +1780,7 @@ local flag documented exactly, both directions — cobra's help and
 completion plumbing is surface plumbing outside the judgment. The
 document's knob prose is the authoritative superset, and every flag
 usage string is the document's usage projection for the cli surface
-(gofresh's [guidance rendering contract](https://github.com/greatliontech/gofresh/blob/main/docs/specs/guidance.md): the knob's first clause in pflag's
+(the knob's first clause in pflag's
 grammar, rendered over the built command tree) — no flag carries a
 second spelling of its usage; a default the flag's own registration
 does not print (a derived one, registered zero) is spelled in the

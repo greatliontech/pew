@@ -41,7 +41,7 @@ func compilePackageArtifact(ctx context.Context, rc runConfig, snapshot *gofresh
 		_ = os.Remove(warmupPath)
 		return nil, "", err
 	}
-	if _, err := rc.executeGo(ctx, build.Directory, "", buildEnv, build.TestCompileArgs(warmupPath)); err != nil {
+	if _, err := rc.executeGo(ctx, build.Directory, "", buildEnv, testCompileArgs(build, warmupPath)); err != nil {
 		_ = os.Remove(warmupPath)
 		return nil, "", err
 	}
@@ -51,6 +51,15 @@ func compilePackageArtifact(ctx context.Context, rc runConfig, snapshot *gofresh
 		return nil, "", err
 	}
 	return artifact, warmupPath, nil
+}
+
+func testCompileArgs(d gofresh.BuildDescription, outputPath string, extraFlags ...string) []string {
+	args := make([]string, 0, len(d.Flags)+len(extraFlags)+5)
+	args = append(args, "test", "-c")
+	args = append(args, d.Flags...)
+	args = append(args, extraFlags...)
+	args = append(args, "-o", outputPath, d.Package)
+	return args
 }
 
 func bindBinary(ctx context.Context, snapshot *gofresh.Snapshot, pkg, path string) (*builtBinary, error) {

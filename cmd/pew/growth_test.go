@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 
 	"github.com/greatliontech/pew/internal/recordingtest"
 	runpkg "github.com/greatliontech/pew/internal/run"
@@ -65,7 +64,7 @@ func TestCheckOneServesInertTestSuiteGrowth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt, err := runtimeinput.Incomplete(tmp, "package-test-binary:grow", "testlog lacks operation outcome evidence", os.Environ())
+	rt, err := gofresh.IncompleteRuntimeObservation(tmp, "package-test-binary:grow", "testlog lacks operation outcome evidence", os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}

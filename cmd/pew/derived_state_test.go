@@ -11,7 +11,6 @@ import (
 
 	gogit "github.com/go-git/go-git/v5"
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/recordingtest"
 	"github.com/greatliontech/pew/internal/store"
 )
@@ -61,7 +60,7 @@ func TestDerivedStateColdWarmDiscardedCacheAndDependencyEquivalence(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt, err := runtimeinput.Incomplete(dirA, "package-test-binary:derivedstate", "testlog lacks operation outcome evidence", os.Environ())
+	rt, err := gofresh.IncompleteRuntimeObservation(dirA, "package-test-binary:derivedstate", "testlog lacks operation outcome evidence", os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,22 +2,21 @@
 // docs/guidance.md is the single home of verb-level served prose
 // (what a verb does, what a knob controls, when to use which),
 // embedded here because the binary travels while the repository
-// stays home, and parsed once for the CLI to project from (gofresh
-// docs/specs/guidance.md is the format contract; this module's
-// serving contract is REQ-pew-guidance in docs/specs/spec.md).
+// stays home, and parsed once for the CLI to project from
+// (REQ-pew-guidance in docs/specs/spec.md).
 package pew
 
 import (
 	_ "embed"
 
-	"github.com/greatliontech/gofresh/guidance"
+	"github.com/greatliontech/pew/internal/guidance"
 )
 
 //go:embed docs/guidance.md
 var guidanceSrc []byte
 
 // embeddedGuidance is the source parsed once for every surface to
-// project from (gofresh's Embedded); Document answers the parse error,
+// project from (internal/guidance.Embedded); Document answers the parse error,
 // which GuidanceDocument forwards for cmd/pew to refuse loudly.
 var embeddedGuidance = guidance.Embed("pew", guidanceSrc)
 
@@ -27,9 +26,8 @@ var embeddedGuidance = guidance.Embed("pew", guidanceSrc)
 func GuidanceDocument() (*guidance.Document, error) { return embeddedGuidance.Document() }
 
 // GuidanceRegistration is a verb's served registration on a surface —
-// its description, knobless help, and whole section (gofresh's
-// projection); a verb the document lacks is a build-time defect and
-// panics at command construction.
+// its description, knobless help, and whole section; a verb the
+// document lacks is a build-time defect and panics at command construction.
 func GuidanceRegistration(surface, verb string) guidance.Registration {
 	return embeddedGuidance.MustRegistration(surface, verb)
 }

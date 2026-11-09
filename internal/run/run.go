@@ -19,7 +19,6 @@ import (
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
-	gofreshtool "github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/metric"
 	"golang.org/x/perf/benchfmt"
@@ -122,10 +121,10 @@ func runCommand(ctx context.Context, dir string, env gotool.Environment, name st
 }
 
 func runCommandDiagnostic(ctx context.Context, dir string, env gotool.Environment, name string, full []string, diagnostics io.Writer) ([]byte, error) {
-	runner := gotool.Runner(nil)
+	runner := gotool.NewRunner(nil)
 	// Quit is intentionally absent: SIGQUIT would write goroutine stacks into
 	// the measured stream, contaminating its sample-completeness evidence.
-	runner.Containment = &gofreshtool.Containment{WaitDelay: killGrace}
+	runner.Containment = &gotool.Containment{WaitDelay: killGrace}
 	cmd, err := runner.Program(ctx, gotool.CommandDir(dir), env.Values(), name, full...)
 	if err != nil {
 		return nil, fmt.Errorf("run: %w", err)
@@ -142,7 +141,7 @@ func runCommandDiagnostic(ctx context.Context, dir string, env gotool.Environmen
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if gofreshtool.Salvaged(ctx, err) {
+		if gotool.Salvaged(ctx, err) {
 			// A successful driver can still lose a whole trailing sub-benchmark
 			// when its pipe is cut. Counts of the rows retained cannot prove
 			// that no row disappeared, so measurement output has no salvage.
@@ -425,7 +424,7 @@ func BenchName(resultName string) string {
 // misses the env file. The read is the pass's one snapshot: a pass that also
 // captures guards hands the same reader to the capture, so one pass pays one
 // env exec and both read one document.
-func EffectiveGoflags(ctx context.Context, reader *gofreshtool.EnvReader) (string, error) {
+func EffectiveGoflags(ctx context.Context, reader *gotool.EnvReader) (string, error) {
 	goflags, err := gotool.EnvValue(ctx, reader, "GOFLAGS")
 	if err != nil {
 		return "", fmt.Errorf("run: %w", err)

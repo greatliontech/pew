@@ -17,7 +17,6 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/compare"
 	"github.com/greatliontech/pew/internal/recordingtest"
 	"github.com/greatliontech/pew/internal/run"
@@ -158,7 +157,7 @@ func TestVerbsReportACancelledEngineBuildAsInterruption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt, err := runtimeinput.Incomplete(twoDir, "fixture", "fixture has no producing observation", env.Values())
+	rt, err := gofresh.IncompleteRuntimeObservation(twoDir, "fixture", "fixture has no producing observation", env.Values())
 	if err != nil {
 		t.Fatal(err)
 	}

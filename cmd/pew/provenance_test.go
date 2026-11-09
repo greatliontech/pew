@@ -13,7 +13,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/pew/internal/gotool"
 	runpkg "github.com/greatliontech/pew/internal/run"
 )
@@ -84,7 +83,7 @@ func TestToolchainProvenanceRequiresSampler(t *testing.T) {
 	ctx, deps := testDependencies(t)
 	deps.sample = nil
 	_, err := checkToolchainProvenance(ctx, t.TempDir(), testEnvironment(t, os.Environ()))
-	if !errors.Is(err, gofresh.ErrNoSampler) {
+	if !errors.Is(err, errNoSampler) {
 		t.Fatalf("missing sampler = %v, want construction refusal", err)
 	}
 	var provenanceErr *toolchainProvenanceError
@@ -173,8 +172,7 @@ func TestGoVersionSampleRunsUnderTheEnvironmentPolicy(t *testing.T) {
 	_, err = gotool.NewEnvironment(dup)
 	var envErr *gotool.EnvironmentError
 	var pe *toolchainProvenanceError
-	var composite *gofresh.ToolchainProvenanceError
-	if !errors.As(err, &envErr) || errors.As(err, &pe) || errors.As(err, &composite) || strings.Contains(err.Error(), "toolchain provenance") {
+	if !errors.As(err, &envErr) || errors.As(err, &pe) || strings.Contains(err.Error(), "toolchain provenance") {
 		t.Fatalf("a duplicated key reported as %v; want the environment's own class alone, unwrapped from the composite's refusal", err)
 	}
 }

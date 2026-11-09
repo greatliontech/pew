@@ -18,7 +18,7 @@ import (
 func TestEngineDiagnosticsDeliverDetailEvents(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	ctx := context.WithValue(t.Context(), invocationKey{}, &invocation{diagnostics: gofresh.DiagnosticsTo(&buf)})
+	ctx := context.WithValue(t.Context(), invocationKey{}, &invocation{diagnostics: diagnosticsTo(&buf)})
 	emitEngineDiagnostic(ctx, gofresh.Progress{Phase: "observe", Package: "example.com/x"})
 	if buf.Len() != 0 {
 		t.Fatalf("keep-alive wrote %q, want silence", buf.String())

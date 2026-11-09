@@ -14,7 +14,6 @@ import (
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/gitblob"
 	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/profiles"
@@ -1134,13 +1133,13 @@ func closingFailure(ctx context.Context, bound time.Duration, err error) error {
 	return &armClosingError{cause: err}
 }
 
-func observationNamespaces(pkgRel string, patterns []string) []runtimeinput.ScratchNamespace {
-	var namespaces []runtimeinput.ScratchNamespace
+func observationNamespaces(pkgRel string, patterns []string) []gofresh.ScratchNamespace {
+	var namespaces []gofresh.ScratchNamespace
 	if pkgRel == "" {
 		pkgRel = "."
 	}
 	for _, pattern := range patterns {
-		namespaces = append(namespaces, runtimeinput.ScratchNamespace{Dir: pkgRel, Pattern: pattern})
+		namespaces = append(namespaces, gofresh.ScratchNamespace{Dir: pkgRel, Pattern: pattern})
 	}
 	return namespaces
 }

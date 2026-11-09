@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 )
 
 func TestIngestObservationSharesRootsWithinInvocation(t *testing.T) {
@@ -36,8 +36,8 @@ func TestIngestObservationSharesRootsWithinInvocation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	frame := CaptureObservationFrame(ctx, t.TempDir(), ".")
-	roots := &runtimeinput.Roots{}
-	for i, memo := range []*runtimeinput.Roots{roots, roots, {}} {
+	roots := &gofresh.InputRoots{}
+	for i, memo := range []*gofresh.InputRoots{roots, roots, {}} {
 		state, err := IngestObservation(ctx, frame, log, "package-test-binary:probe", memo, testEnvironment(t, os.Environ()))
 		if err != nil || state.Unverifiable {
 			t.Fatalf("observation %d: state %+v, error %v", i, state, err)
@@ -195,7 +195,7 @@ func TestIngestObservationAppliesScratchNamespaces(t *testing.T) {
 	if state.Unverifiable {
 		t.Fatalf("scratch-declared ingest sealed: %+v", state)
 	}
-	paths, err := runtimeinput.Paths(state.Manifest, dir)
+	paths, err := gofresh.RuntimeInputPaths(state.Manifest, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestIngestObservationAppliesScratchNamespaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	paths, err = runtimeinput.Paths(state.Manifest, dir)
+	paths, err = gofresh.RuntimeInputPaths(state.Manifest, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestIngestObservationDeclaresEphemeralTempRoot(t *testing.T) {
 	if state.Unverifiable {
 		t.Fatalf("temp-root stat sealed under the declaration: %+v", state)
 	}
-	paths, err := runtimeinput.Paths(state.Manifest, dir)
+	paths, err := gofresh.RuntimeInputPaths(state.Manifest, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func TestIngestObservationRunsUnderThePackageDirectory(t *testing.T) {
 	if state.Unverifiable {
 		t.Fatalf("a non-root package's observation did not complete: %+v", state)
 	}
-	paths, err := runtimeinput.Paths(state.Manifest, root)
+	paths, err := gofresh.RuntimeInputPaths(state.Manifest, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +362,7 @@ func TestIngestObservationRunsUnderThePackageDirectory(t *testing.T) {
 	if state.Unverifiable {
 		t.Fatalf("scratch-declared non-root ingest sealed: %+v", state)
 	}
-	if paths, err = runtimeinput.Paths(state.Manifest, root); err != nil || len(paths) != 0 {
+	if paths, err = gofresh.RuntimeInputPaths(state.Manifest, root); err != nil || len(paths) != 0 {
 		t.Fatalf("declared scratch read in a non-root package recorded: %v, %v", paths, err)
 	}
 }

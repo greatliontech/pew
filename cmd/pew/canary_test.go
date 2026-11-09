@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/shapecorpus"
+	"github.com/greatliontech/pew/internal/shapecorpus"
 )
 
-// TestLanguageShapeCanaries runs the fleet's shared shape corpus
-// (gofresh/shapecorpus) through pew's measurement capture: each
+// TestLanguageShapeCanaries runs the language shape corpus
+// (internal/shapecorpus) through pew's measurement capture: each
 // entry's benchmark closure captures and checks without an
 // analysis-class failure. Runs under the CI matrix's next-rc leg like
 // every test, so a new Go release's shape breakage fails HERE as a

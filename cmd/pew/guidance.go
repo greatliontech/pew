@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	guidancepkg "github.com/greatliontech/gofresh/guidance"
 	pew "github.com/greatliontech/pew"
+	guidancepkg "github.com/greatliontech/pew/internal/guidance"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -54,8 +54,8 @@ func visitLeafVerbs(root *cobra.Command, visit func(name string, c *cobra.Comman
 }
 
 // renderKnobUsage sets every visible leaf verb's local flag usage to
-// the document's usage projection for the cli surface (gofresh's
-// Knob.Usage: the knob's first clause in pflag's grammar) and renders
+// the document's usage projection for the cli surface (Knob.Usage:
+// the knob's first clause in pflag's grammar) and renders
 // a knobbed verb's long help as the registration's long help (the
 // knobless help, a blank line, its prose pointer), so no flag or verb
 // carries a second spelling of its prose (REQ-pew-guidance). Local

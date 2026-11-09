@@ -123,8 +123,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-guidance"
-  content_hash: "ab917f1c2b9319c5d595f9a13c9310887ce7b48758d78d02980b775dcc4f6bd5"
-  source_hash: "5ada2fcb5e134d2cee1511dc0f1bd07fba57c322ac094bc9edb91b05a5e2bd85"
+  content_hash: "091f36c568f8464db3542c043fe5059396879ff9105550b21fe05d023ddfac33"
+  source_hash: "4aee9221a44ff6dc8d2ca4ab6d2669d2f2c88db29f9af6093460a7838cae6012"
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.TestGuidanceCoversTheCLISurface"
   role: BINDING_ROLE_TESTS
@@ -133,8 +133,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-guidance"
-  content_hash: "ab917f1c2b9319c5d595f9a13c9310887ce7b48758d78d02980b775dcc4f6bd5"
-  source_hash: "5ada2fcb5e134d2cee1511dc0f1bd07fba57c322ac094bc9edb91b05a5e2bd85"
+  content_hash: "091f36c568f8464db3542c043fe5059396879ff9105550b21fe05d023ddfac33"
+  source_hash: "4aee9221a44ff6dc8d2ca4ab6d2669d2f2c88db29f9af6093460a7838cae6012"
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.TestGuidanceCommandServesTheDocument"
   role: BINDING_ROLE_TESTS
@@ -143,8 +143,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-pew-guidance"
-  content_hash: "ab917f1c2b9319c5d595f9a13c9310887ce7b48758d78d02980b775dcc4f6bd5"
-  source_hash: "5ada2fcb5e134d2cee1511dc0f1bd07fba57c322ac094bc9edb91b05a5e2bd85"
+  content_hash: "091f36c568f8464db3542c043fe5059396879ff9105550b21fe05d023ddfac33"
+  source_hash: "4aee9221a44ff6dc8d2ca4ab6d2669d2f2c88db29f9af6093460a7838cae6012"
   backend: "go"
   symbol: "github.com/greatliontech/pew/cmd/pew.TestGuidanceDocumentParses"
   role: BINDING_ROLE_TESTS

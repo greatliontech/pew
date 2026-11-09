@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/pew/internal/gotool"
 )
 
 func TestVersionWorksWithoutAProject(t *testing.T) {

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/greatliontech/gofresh"
-	gofreshtool "github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/pew/internal/gotool"
 )
 
@@ -20,7 +19,7 @@ type invocation struct {
 	diagnostics func(gofresh.Progress)
 	errw        io.Writer
 	sessions    map[sessionKey]*sessionEntry
-	readers     *gofreshtool.RunMemo[*gofreshtool.EnvReader]
+	readers     *gotool.RunMemo[*gotool.EnvReader]
 	deps        *executionDependencies
 }
 
@@ -140,9 +139,9 @@ func beginInvocation(ctx context.Context, storeDir string, entries []string, err
 		workDir:     workDir,
 		env:         env,
 		vouches:     vouches,
-		diagnostics: gofresh.DiagnosticsTo(errw),
+		diagnostics: diagnosticsTo(errw),
 		errw:        errw,
-		readers:     &gofreshtool.RunMemo[*gofreshtool.EnvReader]{},
+		readers:     &gotool.RunMemo[*gotool.EnvReader]{},
 		deps:        deps,
 	}
 	return context.WithValue(ctx, invocationKey{}, i), i, nil

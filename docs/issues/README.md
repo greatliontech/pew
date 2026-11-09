@@ -4,7 +4,9 @@ Tracked deferrals carrying a `Lands:` trigger. On resolution, the load-bearing r
 inline to the spec / a test, and the doc is deleted (git holds history) — per the Issue triage
 close-out convention.
 
-No open issues.
+| issue | summary | Lands |
+|---|---|---|
+| [shared-cli-mcp-process-utilities](shared-cli-mcp-process-utilities.md) | `internal/guidance`, `internal/toolversion`, `internal/gotool`, `internal/shortgates`, and `internal/shapecorpus` are internalized across `pew`, `stipulator`, and `gomutant` after `gofresh` single-package purification; extract into a dedicated shared CLI/MCP/process support module when triggered. | User-authorized deferral until triggered during cross-tool CLI/MCP substrate consolidation |
 
 ## In-spec upgrade paths (tracked inline, not here)
 

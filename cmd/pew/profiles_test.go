@@ -18,7 +18,6 @@ import (
 	git "github.com/go-git/go-git/v5"
 	pprof "github.com/google/pprof/profile"
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/profiles"
 	"github.com/greatliontech/pew/internal/recordingtest"
@@ -360,11 +359,11 @@ func TestProfileRuntimeRelationRefusesKnownMovement(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	before := testEnvironment(t, []string{"PEW_PROFILE_INPUT=before"})
-	bracket, err := runtimeinput.CaptureBracket(t.Context(), root, []string{root})
+	bracket, err := gofresh.CaptureBracket(t.Context(), root, []string{root})
 	if err != nil {
 		t.Fatal(err)
 	}
-	obs, err := runtimeinput.FromTestLog([]byte("# test log\ngetenv PEW_PROFILE_INPUT\n"), root, root, before.Values(), runtimeinput.WithCompletedProcess("fixture"), runtimeinput.WithBracket(bracket))
+	obs, err := gofresh.FromTestLog([]byte("# test log\ngetenv PEW_PROFILE_INPUT\n"), root, root, before.Values(), gofresh.WithCompletedProcess("fixture"), gofresh.WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
 	}

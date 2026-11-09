@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/recordingtest"
 	runpkg "github.com/greatliontech/pew/internal/run"
@@ -36,7 +35,7 @@ func TestStatusPackageUsesLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	rt, err := runtimeinput.Incomplete(".", "package-test-binary:status-label", "testlog lacks operation outcome evidence", os.Environ())
+	rt, err := gofresh.IncompleteRuntimeObservation(".", "package-test-binary:status-label", "testlog lacks operation outcome evidence", os.Environ())
 	if err != nil {
 		t.Fatalf("runtime inputs: %v", err)
 	}
@@ -102,7 +101,7 @@ func TestStatusHonorsExternalDirective(t *testing.T) {
 	if fp.PurityAssertion != "" {
 		t.Fatalf("purity assertion on an external benchmark = %q, want none", fp.PurityAssertion)
 	}
-	rt, err := runtimeinput.Incomplete(dir, "package-test-binary:external-status", "testlog lacks operation outcome evidence", os.Environ())
+	rt, err := gofresh.IncompleteRuntimeObservation(dir, "package-test-binary:external-status", "testlog lacks operation outcome evidence", os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +146,7 @@ func TestStatusExplainNamesTheMovingGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt, err := runtimeinput.Incomplete(".", "package-test-binary:explain", "testlog lacks operation outcome evidence", os.Environ())
+	rt, err := gofresh.IncompleteRuntimeObservation(".", "package-test-binary:explain", "testlog lacks operation outcome evidence", os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +355,7 @@ func TestStatusWarnsOnForeignConfigKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	rt, err := runtimeinput.Incomplete(".", "package-test-binary:status-foreign", "testlog lacks operation outcome evidence", os.Environ())
+	rt, err := gofresh.IncompleteRuntimeObservation(".", "package-test-binary:status-foreign", "testlog lacks operation outcome evidence", os.Environ())
 	if err != nil {
 		t.Fatalf("runtime inputs: %v", err)
 	}
@@ -398,7 +397,7 @@ func TestStatusRecordingPredatingDynamicStateKeyIsStale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	rt, err := runtimeinput.Incomplete(".", "package-test-binary:predate", "testlog lacks operation outcome evidence", os.Environ())
+	rt, err := gofresh.IncompleteRuntimeObservation(".", "package-test-binary:predate", "testlog lacks operation outcome evidence", os.Environ())
 	if err != nil {
 		t.Fatalf("runtime inputs: %v", err)
 	}

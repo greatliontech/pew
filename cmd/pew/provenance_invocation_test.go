@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	gofreshtool "github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/pew/internal/compare"
+	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
 )
@@ -93,7 +93,7 @@ func TestJudgedVerbsShareSamplesOnlyWithinInvocation(t *testing.T) {
 			ctx, deps := testDependencies(t)
 			ctx = withWorkDir(ctx, dir)
 			checks := 0
-			readers := map[*gofreshtool.EnvReader]int{}
+			readers := map[*gotool.EnvReader]int{}
 			deps.sample = func(ctx context.Context, dir string, env testEnvironmentValue) (string, error) {
 				checks++
 				reader, err := preparationReader(ctx, dir, env)

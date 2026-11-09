@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/profiles"
 	"github.com/greatliontech/pew/internal/run"
@@ -462,7 +461,7 @@ func profileInputRelation(ctx context.Context, fp gofresh.Fingerprint, module, d
 	if err != nil {
 		return err
 	}
-	state, err := runtimeinput.Current(ctx, fp.RuntimeInputs, module, actual)
+	state, err := gofresh.CurrentRuntimeInputs(ctx, fp.RuntimeInputs, module, actual)
 	if err != nil {
 		return err
 	}

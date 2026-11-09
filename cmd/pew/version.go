@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/greatliontech/gofresh/toolversion"
+	"github.com/greatliontech/pew/internal/toolversion"
 	"github.com/spf13/cobra"
 )
 

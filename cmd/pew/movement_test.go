@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/pew/internal/recordingtest"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/greatliontech/pew/internal/store"
@@ -66,7 +65,7 @@ func TestNoncallAndMutableLocalMovementStalesStoredMeasurement(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rt, err := runtimeinput.Incomplete(root, "fixture", "no producing observation", env.Values())
+			rt, err := gofresh.IncompleteRuntimeObservation(root, "fixture", "no producing observation", env.Values())
 			if err != nil {
 				t.Fatal(err)
 			}

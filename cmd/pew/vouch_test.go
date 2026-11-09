@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
-	gofreshtool "github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/recordingtest"
 	runpkg "github.com/greatliontech/pew/internal/run"
 	"github.com/spf13/cobra"
@@ -54,7 +54,7 @@ func TestVouchedEngineDischargesPinnedCulprit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds gofresh views over the protobuf graph")
 	}
-	gocache, err := gofreshtool.GoBuildCache(t.Context(), os.Environ())
+	gocache, err := gotool.GoBuildCache(t.Context(), os.Environ())
 	if err != nil {
 		t.Fatalf("resolve GOCACHE: %v", err)
 	}

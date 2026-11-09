@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh"
-	gofreshtool "github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/pew/internal/gotool"
 )
 
@@ -52,7 +51,7 @@ func TestConcurrentInvocationsKeepEvidenceIsolated(t *testing.T) {
 			t.Fatal(err)
 		}
 		// Supply distinct immutable snapshots directly, without mutating os.Environ.
-		l.inv.env, err = gotool.NewEnvironment(gofreshtool.SetEnv(os.Environ(), "PEW_CONCURRENT_INVOCATION", l.marker))
+		l.inv.env, err = gotool.NewEnvironment(gotool.SetEnv(os.Environ(), "PEW_CONCURRENT_INVOCATION", l.marker))
 		if err != nil {
 			t.Fatal(err)
 		}

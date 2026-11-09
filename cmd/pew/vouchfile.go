@@ -1,8 +1,13 @@
 package main
 
 import (
+	"bufio"
+	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 
 	gofresh "github.com/greatliontech/gofresh"
@@ -38,7 +43,7 @@ func newVouchSource(storeDir string, entries []string) (*vouchSource, error) {
 }
 
 // storeVouches reads the standing vouch set of the store governing
-// moduleDir through the engine's own grammar (gofresh.ReadVouchFile —
+// moduleDir through the engine's own grammar (readVouchFile —
 // one IMPORT-PATH:VARIABLE per line, comments and blank lines ignored),
 // memoized per store root: an absent file is the empty set, a malformed
 // line refuses naming the file and line, exactly as a malformed --vouch
@@ -49,8 +54,40 @@ func (s *vouchSource) storeVouches(moduleDir string) ([]string, error) {
 		return nil, err
 	}
 	path := filepath.Join(dir, vouchFileName)
-	read, _ := s.memo.LoadOrStore(path, sync.OnceValues(func() ([]string, error) { return gofresh.ReadVouchFile(path) }))
+	read, _ := s.memo.LoadOrStore(path, sync.OnceValues(func() ([]string, error) { return readVouchFile(path) }))
 	return read.(func() ([]string, error))()
+}
+
+func readVouchFile(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("vouch file %s: %w", path, err)
+	}
+	defer f.Close()
+	var out []string
+	sc := bufio.NewScanner(f)
+	for line := 1; sc.Scan(); line++ {
+		s := strings.TrimSpace(sc.Text())
+		if i := strings.IndexByte(s, '#'); i >= 0 {
+			s = strings.TrimSpace(s[:i])
+		}
+		if s == "" {
+			continue
+		}
+		entry, err := gofresh.ParseVouchEntry(s)
+		if err != nil {
+			return nil, fmt.Errorf("vouch file %s:%d: %w", path, line, err)
+		}
+		out = append(out, entry)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("vouch file %s: %w", path, err)
+	}
+	slices.Sort(out)
+	return slices.Compact(out), nil
 }
 
 // engineVouches is the vouch set an engine over moduleDir judges under:

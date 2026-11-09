@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
-
-	gofreshtool "github.com/greatliontech/gofresh/gotool"
 )
 
 func testEnvironment(t testing.TB, entries []string) Environment {
@@ -43,7 +41,7 @@ func TestEnvironmentOwnsItsSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value, _ := gofreshtool.LookupEnv(pinned, "PWD"); value != wantDir {
+	if value, _ := LookupEnv(pinned, "PWD"); value != wantDir {
 		t.Fatalf("PWD = %q", value)
 	}
 	measured := env.WithParallelism(2)
@@ -64,7 +62,7 @@ func TestCommandEnvironmentAdmitsDirectoryBeforePinning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pwd, _ := gofreshtool.LookupEnv(entries, "PWD"); pwd != want {
+	if pwd, _ := LookupEnv(entries, "PWD"); pwd != want {
 		t.Fatalf("relative directory PWD = %q, want %q", pwd, want)
 	}
 	for _, dir := range []string{"/tmp/\x00", "relative\x00"} {

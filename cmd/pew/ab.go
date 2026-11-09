@@ -78,7 +78,16 @@ func (ac abConfig) sideGuards(ctx context.Context, moduleDir, pkgDir string, mai
 	}
 	// Build readers use the analysis environment; runtime guards describe the
 	// actual measured environment, including the selected pin's GOMAXPROCS.
-	return gofresh.CaptureGuards(ctx, reader, newEnvironments(env, ac.pin).measured().Values(), gofresh.Measurement, buildInputs...)
+	snap, err := reader.Snapshot(ctx)
+	if err != nil {
+		return gofresh.Guards{}, err
+	}
+	return gofresh.CaptureGuards(ctx, gofresh.BuildDescription{
+		Directory:   moduleDir,
+		Environment: env.Values(),
+		Inputs:      buildInputs,
+		GoEnv:       snap.Values(),
+	}, newEnvironments(env, ac.pin).measured().Values(), gofresh.Measurement, gotool.NewRunner(dependencies(ctx).prepare).PrepareCommand)
 }
 
 func abPackageMetadata(ctx context.Context, dir string, env gotool.Environment) (pkgMeta, error) {
@@ -468,7 +477,7 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 			return prep, err
 		}
 		output := binaries[i]
-		buildArgs[i] = description.TestCompileArgs(output)
+		buildArgs[i] = testCompileArgs(description, output)
 	}
 	if err := ac.buildBinary(ctx, p.Module.Dir, buildEnvs[0], buildArgs[0]); err != nil {
 		return prep, fmt.Errorf("ab: building side A (working tree): %w", err)

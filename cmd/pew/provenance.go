@@ -3,11 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 
 	"github.com/greatliontech/gofresh"
-	gofreshtool "github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/pew/internal/gotool"
 )
 
@@ -21,6 +22,8 @@ type toolchainProvenanceError struct{ err error }
 func (e *toolchainProvenanceError) Error() string { return e.err.Error() }
 func (e *toolchainProvenanceError) Unwrap() error { return e.err }
 
+var errNoSampler = errors.New("toolchain provenance: no sampler — a consumer holds one memoized sampler per judged run")
+
 // withToolchainSampler owns the preparation readers for one judged invocation.
 // Toolchain provenance and build configuration read the same snapshot. Write
 // validation constructs a fresh reader instead of serving preparation evidence.
@@ -29,20 +32,20 @@ func withToolchainSampler(ctx context.Context) context.Context {
 	if prev := currentInvocation(ctx); prev != nil {
 		next = *prev
 	}
-	next.readers = &gofreshtool.RunMemo[*gofreshtool.EnvReader]{}
+	next.readers = &gotool.RunMemo[*gotool.EnvReader]{}
 	return context.WithValue(ctx, invocationKey{}, &next)
 }
 
-func preparationReader(ctx context.Context, dir string, env gotool.Environment) (*gofreshtool.EnvReader, error) {
+func preparationReader(ctx context.Context, dir string, env gotool.Environment) (*gotool.EnvReader, error) {
 	dir = resolveCommandDir(ctx, dir)
-	makeReader := func() *gofreshtool.EnvReader {
+	makeReader := func() *gotool.EnvReader {
 		return gotool.Reader(dir, env, func(cmd *exec.Cmd) {
 			if hook := dependencies(ctx).prepare; hook != nil {
 				hook(cmd)
 			}
 		})
 	}
-	var memo *gofreshtool.RunMemo[*gofreshtool.EnvReader]
+	var memo *gotool.RunMemo[*gotool.EnvReader]
 	if inv := currentInvocation(ctx); inv != nil {
 		memo = inv.readers
 	}
@@ -53,7 +56,7 @@ func preparationReader(ctx context.Context, dir string, env gotool.Environment) 
 }
 
 // sampleGoVersion reads the toolchain sample through pew's one go-command
-// policy and gofresh's snapshot sampler — the sample resolves as the engine's own
+// policy and gotool's snapshot sampler — the sample resolves as the engine's own
 // loads do, the module's go.mod toolchain directive included, under
 // the effective environment.
 func sampleGoVersion(ctx context.Context, dir string, env gotool.Environment) (string, error) {
@@ -61,7 +64,7 @@ func sampleGoVersion(ctx context.Context, dir string, env gotool.Environment) (s
 	if err != nil {
 		return "", err
 	}
-	return (gofreshtool.SnapshotSampler{Reader: reader}).Sample(ctx, resolveCommandDir(ctx, dir), env.Values())
+	return (gotool.SnapshotSampler{Reader: reader}).Sample(ctx, resolveCommandDir(ctx, dir), env.Values())
 }
 
 // checkToolchainProvenance refuses the judged-run states where this
@@ -74,29 +77,26 @@ func sampleGoVersion(ctx context.Context, dir string, env gotool.Environment) (s
 // class (gotool.EnvironmentError): a fact about the caller's
 // environment, never the toolchain, so it is never the skew refusal.
 func checkToolchainProvenance(ctx context.Context, dir string, env gotool.Environment) (string, error) {
-	// The composite is gofresh's: the memoized sample, then the skew
-	// judgment, both refusals one typed class whose message already
-	// names what this side could read beside a failed sample (spec §7's
-	// refusal contract); the invocation owns the sampler memo, so a
-	// composite per check does not repeat its toolchain query.
 	if dir == "" || !filepath.IsAbs(dir) {
 		dir = resolveCommandDir(ctx, dir)
 	}
-	var sample gofresh.SampleFunc
 	goVersionSampler := dependencies(ctx).sample
-	if goVersionSampler != nil {
-		sample = func(ctx context.Context, dir string, _ []string) (string, error) {
-			return goVersionSampler(ctx, dir, env)
-		}
+	if goVersionSampler == nil {
+		return "", errNoSampler
 	}
-	provenance, err := gofresh.NewToolchainProvenance(sample)
+	ambient, err := goVersionSampler(ctx, dir, env)
 	if err != nil {
-		return "", err
+		if ctx != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+			return "", err
+		}
+		var envErr *gotool.EnvironmentError
+		if errors.As(err, &envErr) {
+			return "", err
+		}
+		return "", &toolchainProvenanceError{err: fmt.Errorf("toolchain provenance: binary built with %s, ambient toolchain unidentifiable — refusing to judge: %w", runtime.Version(), err)}
 	}
-	checked, err := provenance.Check(ctx, dir, env.Values())
-	var pe *gofresh.ToolchainProvenanceError
-	if errors.As(err, &pe) {
-		return "", &toolchainProvenanceError{err: pe.Err}
+	if err := gofresh.ToolchainSkew(ambient); err != nil {
+		return "", &toolchainProvenanceError{err: err}
 	}
-	return checked, err
+	return ambient, nil
 }

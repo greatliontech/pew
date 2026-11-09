@@ -10,8 +10,7 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gofresh"
-	gofreshtool "github.com/greatliontech/gofresh/gotool"
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/pew/internal/gotool"
 )
 
 // The compiler's complete environment and the retained program's actual inputs
@@ -46,9 +45,9 @@ func BenchmarkInputs(b *testing.B) {
 }
 `)
 	writeFile(t, filepath.Join(pkgDir, "input.txt"), "runtime file")
-	buildEnv := testEnvironment(t, gofreshtool.SetEnv(os.Environ(), "PEW_BINDING_VALUE", "compiler-only")).WithParallelism(3)
-	firstEnv := testEnvironment(t, gofreshtool.SetEnv(buildEnv.Values(), "PEW_BINDING_VALUE", "first")).WithParallelism(1)
-	secondEnv := testEnvironment(t, gofreshtool.SetEnv(buildEnv.Values(), "PEW_BINDING_VALUE", "second")).WithParallelism(2)
+	buildEnv := testEnvironment(t, gotool.SetEnv(os.Environ(), "PEW_BINDING_VALUE", "compiler-only")).WithParallelism(3)
+	firstEnv := testEnvironment(t, gotool.SetEnv(buildEnv.Values(), "PEW_BINDING_VALUE", "first")).WithParallelism(1)
+	secondEnv := testEnvironment(t, gotool.SetEnv(buildEnv.Values(), "PEW_BINDING_VALUE", "second")).WithParallelism(2)
 	ctx := t.Context()
 	session, err := buildEngine(ctx, root, pkgDir, buildEnv, &firstEnv, "")
 	if err != nil {
@@ -69,7 +68,7 @@ func BenchmarkInputs(b *testing.B) {
 		t.Fatal(err)
 	}
 	// Gofresh pins the ordinary loader as part of the complete build description.
-	wantBuild = gofreshtool.SetEnv(wantBuild, "GOPACKAGESDRIVER", "off")
+	wantBuild = gotool.SetEnv(wantBuild, "GOPACKAGESDRIVER", "off")
 	if build.Directory != root || !slices.Equal(build.Environment, wantBuild) {
 		t.Fatalf("compilation used runtime configuration: directory=%q, environment=%v; want %q, %v", build.Directory, build.Environment, root, wantBuild)
 	}
@@ -128,7 +127,7 @@ func BenchmarkInputs(b *testing.B) {
 			t.Fatalf("purity changed identity-only support: %+v", final)
 		}
 		produced[i] = final.Fingerprint
-		inputs, err := runtimeinput.Describe(final.Fingerprint.RuntimeInputs, root)
+		inputs, err := gofresh.DescribeRuntimeInputs(final.Fingerprint.RuntimeInputs, root)
 		if err != nil {
 			t.Fatal(err)
 		}
