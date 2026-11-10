@@ -160,7 +160,7 @@ func verifyABDiagnosticCapture(gate context.Context, ac abConfig, prep *abPrepar
 	// coordinates. Bind it to this producing side through the
 	// same native closing check; never rewrite native evidence.
 	p := side.prep.pkg
-	ordinary, err := ac.sideGuards(gate, p.Module.Dir, p.Dir, p.Name == "main", envs.analysis)
+	ordinary, err := ac.sideGuardsFresh(gate, p.Module.Dir, p.Dir, p.Name == "main", envs.analysis)
 	if err != nil {
 		return profileStatus{}, err
 	}

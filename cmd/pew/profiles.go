@@ -481,13 +481,7 @@ func validateProfileSnapshot(ctx context.Context, parent *gofresh.RuntimeBinding
 }
 
 func diagnosticChildren(out []byte, name string) ([]profiles.Child, error) {
-	complete := false
-	for _, line := range bytes.Split(out, []byte{'\n'}) {
-		if bytes.Equal(bytes.TrimSuffix(line, []byte{'\r'}), []byte("PASS")) {
-			complete = true
-		}
-	}
-	if !complete {
+	if !run.HarnessCompleted(out) {
 		return nil, fmt.Errorf("profile: diagnostic harness completion missing")
 	}
 	rows, corrupt, _, err := run.Parse(out)

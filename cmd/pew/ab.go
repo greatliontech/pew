@@ -48,6 +48,7 @@ type abConfig struct {
 	build           func(dir string, env []string, args []string) error
 	guards          func(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env []string) (gofresh.Guards, error)
 	harnessByModule map[string][]string
+	referenceByDir  map[string]pkgMeta
 }
 
 // sideGuards captures one side's comparison-guard values in that side's own
@@ -58,12 +59,33 @@ type abConfig struct {
 // construction. The PGO profile rides in as a content digest exactly as the
 // recording path's engine takes it.
 func (ac abConfig) sideGuards(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env gotool.Environment) (gofresh.Guards, error) {
+	return ac.captureSideGuards(ctx, moduleDir, pkgDir, mainPkg, env, false)
+}
+
+func (ac abConfig) sideGuardsFresh(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env gotool.Environment) (gofresh.Guards, error) {
+	return ac.captureSideGuards(ctx, moduleDir, pkgDir, mainPkg, env, true)
+}
+
+func (ac abConfig) captureSideGuards(ctx context.Context, moduleDir, pkgDir string, mainPkg bool, env gotool.Environment, fresh bool) (gofresh.Guards, error) {
 	if ac.guards != nil {
 		return ac.guards(ctx, moduleDir, pkgDir, mainPkg, env.Values())
 	}
-	// One pass, one reader: the effective GOFLAGS and the guards'
-	// capture read the same `go env -json` document.
-	reader := gotool.Reader(moduleDir, env, dependencies(ctx).prepare)
+	// Preparation shares the invocation's reader snapshot across packages in a
+	// module; closing-interval revalidation constructs a fresh reader so
+	// mid-build or mid-diagnostic environment mutations cannot hide behind the
+	// preparation memo.
+	var (
+		reader *gotool.EnvReader
+		err    error
+	)
+	if fresh {
+		reader = gotool.Reader(resolveCommandDir(ctx, moduleDir), env, dependencies(ctx).prepare)
+	} else {
+		reader, err = preparationReader(ctx, moduleDir, env)
+		if err != nil {
+			return gofresh.Guards{}, err
+		}
+	}
 	goflags, err := run.EffectiveGoflags(ctx, reader)
 	if err != nil {
 		return gofresh.Guards{}, err
@@ -183,6 +205,7 @@ func newABCmd() *cobra.Command {
 }
 
 func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []string) (result error) {
+	ctx = withToolchainSampler(ctx)
 	defer func() {
 		if ctx.Err() != nil {
 			var stopped *interruptedError
@@ -287,6 +310,7 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 	}
 	envs := newEnvironments(analysis, ac.pin)
 	env := envs.analysis
+	ac.referenceByDir = make(map[string]pkgMeta, len(pkgs))
 	if output != nil {
 		reportPhase(ctx, "checking reference output ownership")
 		var reference []pkgMeta
@@ -299,6 +323,7 @@ func runAB(ctx context.Context, w, errw io.Writer, ac abConfig, patterns []strin
 			if err != nil {
 				return err
 			}
+			ac.referenceByDir[dir] = b
 			reference = append(reference, b)
 		}
 		if err := output.includePackages(ctx, reference, env); err != nil {
@@ -388,9 +413,15 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 	}
 	// The pattern must name a benchmark on both sides: the declarations
 	// are parseable from source before any build or run.
-	b, err := abPackageMetadata(ctx, sideBPkgDir, env)
-	if err != nil {
-		return nil, err
+	b, ok := ac.referenceByDir[sideBPkgDir]
+	if !ok {
+		b, err = abPackageMetadata(ctx, sideBPkgDir, env)
+		if err != nil {
+			return nil, err
+		}
+		if ac.referenceByDir != nil {
+			ac.referenceByDir[sideBPkgDir] = b
+		}
 	}
 	selected, err := abPatternSelects(p, b, ac)
 	if err != nil {
@@ -437,6 +468,9 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 	}
 	guardsB, err := ac.sideGuards(ctx, sideBModule, sideBPkgDir, b.Name == "main", env)
 	if err != nil {
+		return prep, err
+	}
+	if err := abGuardsAgree(p.ImportPath, ac.ref, guardsA, guardsB); err != nil {
 		return prep, err
 	}
 	if ac.profile != "" {
@@ -506,19 +540,13 @@ func prepareABPackage(ctx context.Context, ac abConfig, p pkgMeta, repoRoot, wor
 	// measurement spend, not after it. Side B's package kind comes from
 	// the ref's own tree: a package that is main at the ref resolves its
 	// default.pgo there regardless of what the working tree renamed.
-	prep.guardsA, err = ac.sideGuards(ctx, p.Module.Dir, p.Dir, p.Name == "main", env)
+	prep.guardsA, err = ac.sideGuardsFresh(ctx, p.Module.Dir, p.Dir, p.Name == "main", env)
 	if err != nil {
 		return prep, fmt.Errorf("ab: capturing side A guards: %w", err)
 	}
-	prep.guardsB, err = ac.sideGuards(ctx, sideBModule, sideBPkgDir, b.Name == "main", env)
+	prep.guardsB, err = ac.sideGuardsFresh(ctx, sideBModule, sideBPkgDir, b.Name == "main", env)
 	if err != nil {
 		return prep, fmt.Errorf("ab: capturing side B guards: %w", err)
-	}
-	// A guard mismatch is refused HERE, before the first iteration (spec
-	// §12): the comparator would only note it after the whole
-	// measurement, which is the spend the refusal exists to save.
-	if err := abGuardsAgree(p.ImportPath, ac.ref, prep.guardsA, prep.guardsB); err != nil {
-		return prep, err
 	}
 	afterA, err := gitblob.Snapshot(p.Module.Dir)
 	if err != nil {

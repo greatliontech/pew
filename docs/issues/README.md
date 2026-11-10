@@ -6,7 +6,6 @@ close-out convention.
 
 | issue | summary | Lands |
 |---|---|---|
-| [ab-memoization-and-cli-helper-deduplication](ab-memoization-and-cli-helper-deduplication.md) | Switch `sideGuards` in `cmd/pew/ab.go` to `preparationReader`, eliminate duplicate `sideGuards` and `abPackageMetadata` calls per package in `pew ab`, and deduplicate `run.HarnessCompleted` and `resolveExistingPrefix` in `cmd/pew`. | Chunk 8 (`gofresh/docs/plans/plan.md`) |
 | [shared-cli-mcp-process-utilities](shared-cli-mcp-process-utilities.md) | `internal/guidance`, `internal/toolversion`, `internal/gotool`, `internal/shortgates`, `internal/shapecorpus`, and `internal/trace` are internalized across `pew`, `stipulator`, and `gomutant` after `gofresh` single-package purification; extract into a dedicated shared CLI/MCP/process support module when triggered. | User-authorized deferral until triggered during cross-tool CLI/MCP substrate consolidation |
 
 ## In-spec upgrade paths (tracked inline, not here)

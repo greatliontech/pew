@@ -377,19 +377,7 @@ func moduleBenchDir(configured, moduleDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	ancestor, tail := abs, ""
-	for {
-		resolved, err := filepath.EvalSymlinks(ancestor)
-		if err == nil {
-			return filepath.Join(resolved, tail), nil
-		}
-		parent := filepath.Dir(ancestor)
-		if parent == ancestor {
-			return abs, nil
-		}
-		tail = filepath.Join(filepath.Base(ancestor), tail)
-		ancestor = parent
-	}
+	return resolveExistingPrefix(abs), nil
 }
 
 // rejectStoreCoveredSources enforces the exclusion's precondition: no
