@@ -11,6 +11,7 @@ import (
 
 	gogit "github.com/go-git/go-git/v5"
 	gofresh "github.com/greatliontech/gofresh"
+	"github.com/greatliontech/pew/internal/gotool"
 	"github.com/greatliontech/pew/internal/recordingtest"
 	"github.com/greatliontech/pew/internal/store"
 )
@@ -27,6 +28,12 @@ func TestDerivedStateColdWarmDiscardedCacheAndDependencyEquivalence(t *testing.T
 	if testing.Short() {
 		t.Skip("loads fixture packages through the toolchain and shared Gofresh session")
 	}
+	gocache, err := gotool.GoBuildCache(t.Context(), os.Environ())
+	if err != nil {
+		t.Fatalf("resolve GOCACHE: %v", err)
+	}
+	t.Setenv("GOCACHE", gocache)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dirA := t.TempDir()
 	writeFixture := func(root, depReturn, libBody, unusedBody string) {
 		writeFile(t, filepath.Join(root, "go.mod"), "module example.com/derivedstate\n\ngo 1.26.4\n\nreplace example.com/dep => ./dep\n\nrequire example.com/dep v0.1.0\n")

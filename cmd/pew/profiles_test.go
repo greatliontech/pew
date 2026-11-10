@@ -265,10 +265,10 @@ func BenchmarkFirst(b *testing.B) {
 						cancel()
 					}
 				case "executable-changed":
-					if err := os.Chmod(bin, 0o700); err != nil {
+					if err := os.Remove(bin); err != nil {
 						t.Fatal(err)
 					}
-					if err := os.WriteFile(bin, []byte("different regular executable bytes"), 0600); err != nil {
+					if err := os.WriteFile(bin, []byte("different regular executable bytes"), 0o500); err != nil {
 						t.Fatal(err)
 					}
 				case "executable-missing":
