@@ -54,7 +54,7 @@ func TestParseIdentifiesUnusablePewRecordings(t *testing.T) {
 			}
 		})
 	}
-	for _, prefix := range []string{"goos: linux\n", "pew-UPPER: value\n", "pew-key:value\n", "pew-key:\n"} {
+	for _, prefix := range []string{"goos: linux\n", "pew-UPPER: value\n", "pew-key:value\n", "pew-key:\n", "pew-key: \t\n"} {
 		rows, err := Parse(strings.NewReader(prefix+"pew-format: 2\nBenchmarkProbe-8 not-a-count 5 ns/op\n"), "marker-after-prefix")
 		if !errors.Is(err, ErrInvalidRecording) || rows != nil {
 			t.Fatalf("later ownership marker lost after %q: %v", prefix, err)
