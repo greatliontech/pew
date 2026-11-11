@@ -970,15 +970,15 @@ func parseRecording(data []byte, name string) ([]*benchfmt.Result, error) {
 // recording evidence. Ordinary log text mentioning the namespace is not a key.
 func pewMarked(data []byte) bool {
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
-		colon := bytes.IndexByte(line, ':')
-		if colon <= 0 || !bytes.HasPrefix(line, []byte(run.RecordingKeyNamespace)) {
+		key, value, ok := bytes.Cut(line, []byte{':'})
+		if !ok || !bytes.HasPrefix(key, []byte(run.RecordingKeyNamespace)) {
 			continue
 		}
-		if bytes.IndexFunc(line[:colon], func(r rune) bool { return unicode.IsSpace(r) || unicode.IsUpper(r) }) >= 0 {
+		if bytes.ContainsFunc(key, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsUpper(r) }) {
 			continue
 		}
-		value := bytes.TrimSuffix(line[colon+1:], []byte{'\r'})
-		if len(value) != 0 && value[0] != ' ' && value[0] != '\t' {
+		value = bytes.TrimSuffix(value, []byte{'\r'})
+		if !bytes.HasPrefix(value, []byte{' '}) && !bytes.HasPrefix(value, []byte{'\t'}) {
 			continue
 		}
 		if len(bytes.Trim(value, " \t")) == 0 {
