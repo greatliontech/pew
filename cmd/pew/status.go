@@ -607,17 +607,24 @@ func checkPackage(ctx context.Context, st *store.Store, buildView func([]gofresh
 				unrecordedCount++
 			default:
 				staleCount++
+				if trace.AnyEnabled() {
+					trace.Emit(ctx, trace.DomainSelect, "benchmark_stale", pkgPath+"."+b,
+						trace.String("reason", bv.reason),
+					)
+				}
 			}
 		}
 	}
-	trace.Emit(ctx, trace.DomainSelect, "check_package", pkgPath,
-		trace.Int("benches", len(benches)),
-		trace.Int("valid", validCount),
-		trace.Int("stale", staleCount),
-		trace.Int("unrecorded", unrecordedCount),
-		trace.Int64("duration_ms", time.Since(chkStart).Milliseconds()),
-		trace.Err(err),
-	)
+	if trace.AnyEnabled() {
+		trace.Emit(ctx, trace.DomainSelect, "check_package", pkgPath,
+			trace.Int("benches", len(benches)),
+			trace.Int("valid", validCount),
+			trace.Int("stale", staleCount),
+			trace.Int("unrecorded", unrecordedCount),
+			trace.Int64("duration_ms", time.Since(chkStart).Milliseconds()),
+			trace.Err(err),
+		)
+	}
 	return res, err
 }
 
