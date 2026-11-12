@@ -6,6 +6,7 @@ close-out convention.
 
 | issue | summary | Lands |
 |---|---|---|
+| [stipulator-policy-and-test-cache-isolation](stipulator-policy-and-test-cache-isolation.md) | `cmd/pew` tests read/write ambient `~/.cache/gofresh` (`272` uncacheable witnesses), and `pew` lacks a `.stipulator/policy.textproto` splitting `cmd/pew` (`race:core`) from fast `internal/...` leaf packages (`race:leaf`) and declaring reviewed `bracket_paths` (`/usr/bin/git`, `internal`). | Chunk 1 in [`docs/plans/plan.md`](../plans/plan.md) |
 | [shared-cli-mcp-process-utilities](shared-cli-mcp-process-utilities.md) | `internal/guidance`, `internal/toolversion`, `internal/gotool`, `internal/shortgates`, `internal/shapecorpus`, and `internal/trace` are internalized across `pew`, `stipulator`, and `gomutant` after `gofresh` single-package purification; extract into a dedicated shared CLI/MCP/process support module when triggered. | User-authorized deferral until triggered during cross-tool CLI/MCP substrate consolidation |
 
 ## In-spec upgrade paths (tracked inline, not here)
