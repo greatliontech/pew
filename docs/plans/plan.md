@@ -1,6 +1,6 @@
 # Stipulator Witness Policy & Test Cache Isolation Plan
 
-## Chunk 1: `cmd/pew` Test Cache Isolation & Core/Leaf `.stipulator/policy.textproto`
-- [ ] Isolate `XDG_CACHE_HOME` to `t.TempDir()` (resolving and preserving `GOCACHE` via `go env GOCACHE` beforehand so `GOENV=off` child `go` commands do not cold-rebuild stdlib) across `cmd/pew` tests that invoke `pew` or `gofresh`
-- [ ] Add `.stipulator/policy.textproto` splitting `race:core` (`./cmd/pew` at wide `GOMAXPROCS`) from `race:leaf` (`.` and `./internal/...`) with reviewed `bracket_paths` (`/bin/sh`, `/usr/bin/sh`, `/usr/bin/git`, `internal`)
+## Chunk 1: `cmd/pew` `TestMain` Cache Isolation, Helper Deduplication & Core/Leaf `.stipulator/policy.textproto`
+- [ ] Add suite-level `TestMain(m *testing.M)` cache isolation for `cmd/pew` resolving `GOCACHE` once via `gotool.GoBuildCache` and setting `GOCACHE` + suite-temporary `XDG_CACHE_HOME` before `m.Run()` (preserving compatibility with 150+ `t.Parallel()` tests in `cmd/pew`), and extract one `isolateCacheHome(t)` helper replacing duplicated `gotool.GoBuildCache` setup in `cmd/pew/derived_state_test.go` and `cmd/pew/vouch_test.go`
+- [ ] Add `.stipulator/policy.textproto` splitting `race:core` (`./cmd/pew` + subprocess-driving suites at wide `GOMAXPROCS` with reviewed `assume_pure: true` and `bracket_paths` `/bin/sh`, `/usr/bin/sh`, `/usr/bin/git`, `internal` covering `TestMain` / `os/exec` external blindspots) from `race:leaf` (`.` and pure `./internal/...` packages keeping `assume_pure: false` so static observability and Tier-2 closure verification stay enforced end-to-end)
 - [ ] Verify cold and warm `stipulator check` witness caching across all `pew` packages after `gofresh` and `stipulator` freshness fixes land, adding explicit vouches or pure directives only where genuine non-derivable external blindspots remain

@@ -272,7 +272,7 @@ decision at cutover; old assertions cannot silently become newly verified facts.
   completed observations, value binding, coherence and producer facade.
 - Gofresh `runtimeinput.WithCompletedProcess`, `ProducerFrame.Observe`,
   `View.AttachObservation`, `View.Sibling`, and `Fingerprint.MarshalJSON`.
-- Pew [`internal/run/observe.go`](../../internal/run/observe.go),
+- Pew [`internal/run/observe_fixture_test.go`](../../internal/run/observe_fixture_test.go),
   [`internal/run/run.go`](../../internal/run/run.go),
   [`cmd/pew/run.go`](../../cmd/pew/run.go), and
   [`cmd/pew/vouchfile.go`](../../cmd/pew/vouchfile.go).
