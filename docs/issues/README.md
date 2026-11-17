@@ -13,6 +13,7 @@ close-out convention.
 | [single-recording-show-verb](single-recording-show-verb.md) | `pew` has no single-recording summary command (`pew show`) to display a stored baseline's sample medians/spread (`sec/op`, `B/op`, `allocs/op`, custom `ReportMetric`s) and top hotspots without a two-side comparison or reading raw `.txt` files. | awaits triage |
 | [profile-source-line-attribution](profile-source-line-attribution.md) | Companion profile indexes already store verified mutable `sources` snapshots (`REQ-pew-profile-report`), but `pew` only reports function-level weights with no hermetic per-line (`pprof -list`-style) source hotspot view. | awaits triage |
 | [profile-setup-vs-timed-loop-attribution](profile-setup-vs-timed-loop-attribution.md) | Whole-process `alloc` and `cpu` profiles mix pre-`b.ResetTimer()` / `init` fixture construction with timed-loop execution, making `0 allocs/op` benchmarks appear allocation-heavy without call-site phase tagging. | awaits triage |
+| [contained-child-orphan-on-sigkill](contained-child-orphan-on-sigkill.md) | `internal/gotool` spawns contained children (`pew-testbin-*`) in a separate process group (`Setpgid: true`) without Linux `Pdeathsig: SIGKILL` (and Go disarms `-test.timeout` before `runBenchmarks`), so `SIGKILL`ing `pew`'s process group orphans `pew-testbin-*` under PID 1 holding inherited `flock` descriptors (`~/.machine.lock`). | awaits triage |
 
 ## In-spec upgrade paths (tracked inline, not here)
 
